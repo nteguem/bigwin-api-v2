@@ -43,13 +43,9 @@ router.use('/affiliate/dashboard', affiliateDashboardRoutes);
 
 // ===== ROUTES USER =====
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
-const userCategoryRoutes = require('./user/categoryRoutes');
-const userTicketRoutes = require('./user/ticketRoutes');
-
+const couponRoutes = require('./user/couponRoutes');
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
-router.use('/user/categories', userCategoryRoutes);
-router.use('/user/tickets', userTicketRoutes);
-
+router.use('/user/coupons', couponRoutes);
 // ===== POINT D'ENTRÉE API =====
 
 /**

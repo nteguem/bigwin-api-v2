@@ -10,7 +10,7 @@ class TicketService {
   }
 
   // Récupérer tous les tickets avec pagination et leurs prédictions
-  async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisible = true }) {
+  async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisible = false }) {
     const filter = { isVisible };
     
     if (category) {
