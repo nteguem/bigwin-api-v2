@@ -86,6 +86,34 @@ exports.checkTicketAccess = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * NOUVEAU : Middleware pour vérifier l'accès VIP pour les coupons
+ * Adapté pour le paramètre isVip=true dans la query
+ */
+exports.checkCouponsVipAccess = catchAsync(async (req, res, next) => {
+  const { isVip } = req.query;
+  
+  // Si on ne demande pas les coupons VIP, pas de vérification nécessaire
+  if (isVip !== 'true') {
+    return next();
+  }
+
+  // Pour les coupons VIP, l'utilisateur doit être authentifié
+  if (!req.user) {
+    return next(new AppError('Authentification requise pour accéder aux coupons VIP', 401, ErrorCodes.AUTH_TOKEN_MISSING));
+  }
+
+  // Vérifier si l'utilisateur a au moins un abonnement VIP actif
+  const hasVipAccess = await subscriptionService.hasAnyVipAccess(req.user._id);
+  
+  if (!hasVipAccess) {
+    return next(new AppError('Abonnement VIP requis pour accéder aux coupons VIP', 403, ErrorCodes.SUBSCRIPTION_REQUIRED));
+  }
+
+  // L'utilisateur a accès aux coupons VIP
+  next();
+});
+
+/**
  * Middleware optionnel - ne bloque pas mais indique le statut d'accès
  * Utile pour les previews ou contenus partiels
  */

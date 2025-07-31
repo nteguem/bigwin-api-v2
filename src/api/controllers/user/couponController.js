@@ -1,4 +1,5 @@
 const TicketService = require('../../services/common/ticketService');
+const subscriptionService = require('../../services/user/subscriptionService');
 
 class CouponController {
   
@@ -10,7 +11,7 @@ class CouponController {
         limit = 10, 
         category = null, 
         date = null,
-        type = 'free' // 'free' ou 'vip'
+        isVip = null // true, false ou null (tous)
       } = req.query;
 
       const offset = (page - 1) * parseInt(limit);
@@ -24,10 +25,30 @@ class CouponController {
         isVisible: true
       });
 
+      // Filtrer selon l'accès de l'utilisateur
+      let filteredData = result.data;
+
+      if (isVip === 'true') {
+        // OPTIMISATION : Une seule requête pour récupérer toutes les catégories VIP accessibles
+        const userVipCategories = await subscriptionService.getUserVipCategories(req.user._id);
+        const accessibleVipCategoryIds = new Set(userVipCategories.map(cat => cat._id.toString()));
+
+        // Filtrer les tickets selon les catégories VIP accessibles
+        filteredData = result.data.filter(ticket => {
+          const categoryId = ticket.category._id.toString();
+          return ticket.category.isVip && accessibleVipCategoryIds.has(categoryId);
+        });
+
+      } else if (isVip === 'false') {
+        // Pour les coupons gratuits : seulement les catégories non-VIP
+        filteredData = result.data.filter(ticket => !ticket.category.isVip);
+      }
+      // Si isVip === null, on garde tous les tickets (comportement par défaut)
+
       // Grouper les tickets par catégorie
       const categoriesMap = new Map();
       
-      result.data.forEach(ticket => {
+      filteredData.forEach(ticket => {
         const categoryId = ticket.category._id.toString();
         
         if (!categoriesMap.has(categoryId)) {
@@ -105,29 +126,14 @@ class CouponController {
 
       // Convertir la Map en array
       const categories = Array.from(categoriesMap.values());
-      
-      // Calculer le summary
-      const summary = {
-        totalCategories: categories.length,
-        totalCoupons: result.pagination.total,
-        vipCategories: categories.filter(cat => cat.isVip).length,
-        freeCategories: categories.filter(cat => !cat.isVip).length
-      };
+
+      const typeMessage = isVip === 'true' ? 'VIP' : isVip === 'false' ? 'gratuits' : '';
 
       return res.status(200).json({
         success: true,
-        message: `Liste des coupons ${type} récupérée avec succès`,
+        message: `Liste des coupons ${typeMessage} récupérée avec succès`.trim(),
         data: {
-          categories,
-          summary,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages: Math.ceil(result.pagination.total / parseInt(limit)),
-            totalItems: result.pagination.total,
-            itemsPerPage: parseInt(limit),
-            hasNext: result.pagination.hasNext,
-            hasPrev: parseInt(page) > 1
-          }
+          categories
         }
       });
 
@@ -145,7 +151,6 @@ class CouponController {
   async getCouponById(req, res) {
     try {
       const { id } = req.params;
-      const { type = 'free' } = req.query;
 
       const ticket = await TicketService.getTicketById(id);
 
@@ -162,6 +167,18 @@ class CouponController {
           success: false,
           message: 'Coupon non disponible'
         });
+      }
+
+      // Vérifier l'accès si c'est une catégorie VIP
+      if (ticket.category.isVip) {
+        const hasAccess = await subscriptionService.hasAccessToCategory(req.user._id, ticket.category._id);
+        
+        if (!hasAccess) {
+          return res.status(403).json({
+            success: false,
+            message: 'Abonnement VIP requis pour accéder à ce coupon'
+          });
+        }
       }
 
       // Formater les données du coupon avec sa catégorie
@@ -230,7 +247,7 @@ class CouponController {
 
       return res.status(200).json({
         success: true,
-        message: `Coupon ${type} récupéré avec succès`,
+        message: `Coupon récupéré avec succès`,
         data: couponWithCategory
       });
 

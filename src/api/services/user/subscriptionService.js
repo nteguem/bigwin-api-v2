@@ -1,6 +1,7 @@
 const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
 const User = require('../../models/user/User');
+const Category = require('../../models/common/Category');
 const commissionService = require('../common/commissionService'); // Import du service commission
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
@@ -64,17 +65,98 @@ class SubscriptionService {
 
   /**
    * Vérifier si un utilisateur a accès à une catégorie
+   * MODIFIÉ : Vérifie les catégories ACTUELLES du package (retrait immédiat)
    */
   async hasAccessToCategory(userId, categoryId) {
     const activeSubscriptions = await this.getActiveSubscriptions(userId);
     
     for (const subscription of activeSubscriptions) {
-      if (subscription.package.categories.includes(categoryId)) {
+      // Récupérer le package ACTUEL avec ses catégories ACTUELLES
+      const currentPackage = await Package.findById(subscription.package._id);
+      
+      if (currentPackage && currentPackage.isActive && currentPackage.categories.includes(categoryId)) {
         return true;
       }
     }
     
     return false;
+  }
+
+  /**
+   * MODIFIÉ : Vérifier si un utilisateur a accès à au moins une catégorie VIP
+   * Utilise les catégories ACTUELLES des packages (retrait immédiat)
+   */
+  async hasAnyVipAccess(userId) {
+    // Récupérer les abonnements actifs de l'utilisateur
+    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+    
+    if (activeSubscriptions.length === 0) {
+      return false;
+    }
+
+    // Récupérer les catégories ACTUELLES de chaque package
+    const categoryIds = [];
+    for (const subscription of activeSubscriptions) {
+      // Récupérer le package ACTUEL (pas celui stocké dans l'abonnement)
+      const currentPackage = await Package.findById(subscription.package._id);
+      
+      if (currentPackage && currentPackage.isActive) {
+        categoryIds.push(...currentPackage.categories);
+      }
+    }
+
+    // Supprimer les doublons
+    const uniqueCategoryIds = [...new Set(categoryIds.map(id => id.toString()))];
+
+    if (uniqueCategoryIds.length === 0) {
+      return false;
+    }
+
+    // Vérifier si au moins une de ces catégories est VIP
+    const vipCategories = await Category.find({
+      _id: { $in: uniqueCategoryIds },
+      isVip: true,
+      isActive: true
+    });
+
+    return vipCategories.length > 0;
+  }
+
+  /**
+   * MODIFIÉ : Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès
+   * Utilise les catégories ACTUELLES des packages (retrait immédiat)
+   */
+  async getUserVipCategories(userId) {
+    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+    
+    if (activeSubscriptions.length === 0) {
+      return [];
+    }
+
+    // Récupérer les catégories ACTUELLES de chaque package
+    const categoryIds = [];
+    for (const subscription of activeSubscriptions) {
+      // Récupérer le package ACTUEL (pas celui stocké dans l'abonnement)
+      const currentPackage = await Package.findById(subscription.package._id);
+      
+      if (currentPackage && currentPackage.isActive) {
+        categoryIds.push(...currentPackage.categories);
+      }
+    }
+
+    // Supprimer les doublons
+    const uniqueCategoryIds = [...new Set(categoryIds.map(id => id.toString()))];
+
+    if (uniqueCategoryIds.length === 0) {
+      return [];
+    }
+
+    // Récupérer toutes les catégories VIP auxquelles l'utilisateur a accès
+    return await Category.find({
+      _id: { $in: uniqueCategoryIds },
+      isVip: true,
+      isActive: true
+    });
   }
 
   /**
