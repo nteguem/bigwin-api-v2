@@ -10,54 +10,59 @@ class TicketService {
   }
 
   // Récupérer tous les tickets avec pagination et leurs prédictions
-  async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisible = false }) {
-    const filter = { isVisible };
-    
-    if (category) {
-      filter.category = category;
-    }
+async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
+  const filter = {};
+        
+  // Seulement ajouter isVisible au filtre s'il est explicitement défini
+  if (isVisible !== null) {
+    filter.isVisible = isVisible;
+  }
+  
+  if (category) {
+    filter.category = category;
+  }
 
-    if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      
-      filter.date = {
-        $gte: startOfDay,
-        $lte: endOfDay
-      };
-    }
-
-    const tickets = await Ticket.find(filter)
-      .populate('category')
-      .skip(offset)
-      .limit(limit)
-      .sort({ date: -1 });
-
-    // Récupérer les prédictions pour chaque ticket
-    const ticketsWithPredictions = await Promise.all(
-      tickets.map(async (ticket) => {
-        const predictions = await predictionService.getPredictionsByTicket(ticket._id);
-        return {
-          ...ticket.toObject(),
-          predictions
-        };
-      })
-    );
-
-    const total = await Ticket.countDocuments(filter);
-
-    return {
-      data: ticketsWithPredictions,
-      pagination: {
-        offset,
-        limit,
-        total,
-        hasNext: (offset + limit) < total
-      }
+  if (date) {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+            
+    filter.date = {
+      $gte: startOfDay,
+      $lte: endOfDay
     };
   }
+
+  const tickets = await Ticket.find(filter)
+    .populate('category')
+    .skip(offset)
+    .limit(limit)
+    .sort({ date: -1 });
+
+  // Récupérer les prédictions pour chaque ticket
+  const ticketsWithPredictions = await Promise.all(
+    tickets.map(async (ticket) => {
+      const predictions = await predictionService.getPredictionsByTicket(ticket._id);
+      return {
+        ...ticket.toObject(),
+        predictions
+      };
+    })
+  );
+
+  const total = await Ticket.countDocuments(filter);
+
+  return {
+    data: ticketsWithPredictions,
+    pagination: {
+      offset,
+      limit,
+      total,
+      hasNext: (offset + limit) < total
+    }
+  };
+}
 
   // Récupérer un ticket par ID avec ses prédictions
   async getTicketById(id) {

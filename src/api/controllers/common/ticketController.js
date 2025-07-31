@@ -8,14 +8,14 @@ class TicketController {
   // GET /tickets - Récupérer tous les tickets
   async getTickets(req, res) {
     try {
-      const { offset = 0, limit = 10, category, date, isVisible = true } = req.query;
-      
+      const { offset = 0, limit = 10, category, date, isVisible } = req.query;
+            
       const result = await ticketService.getTickets({
         offset: parseInt(offset),
         limit: parseInt(limit),
         category,
         date: date ? new Date(date) : null,
-        isVisible: isVisible === 'true'
+        isVisible: isVisible !== undefined ? isVisible === 'true' : null // null = pas de filtre
       });
 
       formatSuccess(res, {
