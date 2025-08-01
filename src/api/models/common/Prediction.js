@@ -1,12 +1,12 @@
 const mongoose = require("mongoose");
 
 const PredictionSchema = new mongoose.Schema({
-  ticket: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: "Ticket", 
+  ticket: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Ticket",
     required: true
   },
-  
+
   matchData: {
     id: { type: String, required: true },
     date: { type: Date, required: true },
@@ -63,8 +63,8 @@ const PredictionSchema = new mongoose.Schema({
     params: mongoose.Schema.Types.Mixed
   },
 
-  odds: { 
-    type: Number, 
+  odds: {
+    type: Number,
     required: true
   },
 
@@ -74,11 +74,11 @@ const PredictionSchema = new mongoose.Schema({
     default: 'pending'
   },
 
-  sport: { 
-    type: String, 
-    required: true
+  sport: {
+    id: String,
+    name: String,
+    icon: String
   }
-
 }, {
   timestamps: true
 });
