@@ -14,6 +14,7 @@ const PredictionSchema = new mongoose.Schema({
       id: String,
       name: String,
       country: String,
+      countryFlag: String,
       logo: String
     },
     teams: {

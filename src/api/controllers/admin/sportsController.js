@@ -17,7 +17,8 @@ exports.getAllSports = async (req, res, next) => {
   try {
     const sports = Object.entries(sportsConfig).map(([id, config]) => ({
       id,
-      name: config.name
+      name: config.name,
+      icon: config.icon,
     }));
 
     formatSuccess(res, {
@@ -135,9 +136,22 @@ exports.getFixtures = async (req, res, next) => {
       throw new AppError(`No fixtures found for league: ${league}`, 404);
     }
 
+    // Générer le flag du pays
+    const countryId = country.toLowerCase().replace(/\s+/g, '-');
+    const countryFlag = `https://media.api-sports.io/flags/${countryId.substring(0, 2)}.svg`;
+
+    // Ajouter le countryFlag dans l'objet league de chaque fixture
+    const fixturesWithFlag = fixtures.map(fixture => ({
+      ...fixture,
+      league: {
+        ...fixture.league,
+        countryFlag
+      }
+    }));
+
     formatSuccess(res, {
-      data: fixtures,
-      count: fixtures.length
+      data: fixturesWithFlag,
+      count: fixturesWithFlag.length
     });
   } catch (error) {
     next(error);

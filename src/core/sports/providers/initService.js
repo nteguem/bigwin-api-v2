@@ -21,6 +21,7 @@ const httpClient = new HttpClient();
 const sportsConfig = {
   football: {
     name: 'Football',
+    icon: '⚽',
     sportId: 'football',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-football-v1.p.rapidapi.com/v3',
@@ -28,6 +29,7 @@ const sportsConfig = {
   },
   basketball: {
     name: 'Basketball',
+    icon: '🏀',
     sportId: 'basketball',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-basketball.p.rapidapi.com',
@@ -35,6 +37,7 @@ const sportsConfig = {
   },
   rugby: {
     name: 'Rugby',
+    icon: '🏉',
     sportId: 'rugby',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-rugby.p.rapidapi.com',
@@ -42,6 +45,7 @@ const sportsConfig = {
   },
   handball: {
     name: 'Handball',
+    icon: '🤾',
     sportId: 'handball',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-handball.p.rapidapi.com',
@@ -49,6 +53,7 @@ const sportsConfig = {
   },
   volleyball: {
     name: 'Volleyball',
+    icon: '🏐',
     sportId: 'volleyball',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-volleyball.p.rapidapi.com',
@@ -56,6 +61,7 @@ const sportsConfig = {
   },
   baseball: {
     name: 'Baseball',
+    icon: '⚾',
     sportId: 'baseball',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-baseball.p.rapidapi.com',
@@ -63,6 +69,7 @@ const sportsConfig = {
   },
   hockey: {
     name: 'Hockey',
+    icon: '🏒',
     sportId: 'hockey',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://api-hockey.p.rapidapi.com',
@@ -70,6 +77,7 @@ const sportsConfig = {
   },
   tennis: {
     name: 'Tennis',
+    icon: '🎾',
     sportId: 'tennis',
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://tennis-api-atp-wta-itf.p.rapidapi.com',
