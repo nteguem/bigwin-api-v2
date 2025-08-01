@@ -14,7 +14,7 @@ router.post('/refresh', userAuth.verifyRefreshToken, authController.refresh);
 /**
  * Routes protégées (authentification requise)
  */
-// router.use(userAuth.protect); // Toutes les routes suivantes nécessitent une authentification
+router.use(userAuth.protect); // Toutes les routes suivantes nécessitent une authentification
 
 router.post('/logout', authController.logout);
 router.post('/logout-all', authController.logoutAll);
