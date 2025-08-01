@@ -79,6 +79,7 @@ class CouponController {
             id: pred._id,
             odds: pred.odds,
             status: pred.status,
+            sport:pred.sport,
             event: {
               id: pred.event.id,
               label: pred.event.label.current,
@@ -92,7 +93,8 @@ class CouponController {
               league: {
                 name: pred.matchData.league.name,
                 country: pred.matchData.league.country,
-                logo: pred.matchData.league.logo
+                logo: pred.matchData.league.logo,
+                countryFlag: pred.matchData.league.countryFlag,
               },
               teams: {
                 home: {

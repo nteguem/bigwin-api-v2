@@ -73,7 +73,6 @@ const PredictionSchema = new mongoose.Schema({
     enum: ['pending', 'won', 'lost', 'void'],
     default: 'pending'
   },
-
   sport: {
     id: String,
     name: String,
