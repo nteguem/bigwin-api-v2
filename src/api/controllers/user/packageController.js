@@ -4,18 +4,49 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
 /**
- * Obtenir tous les packages disponibles (user)
+ * Obtenir tous les packages disponibles (user) - VERSION CORRIGÉE
  */
 exports.getAvailablePackages = catchAsync(async (req, res, next) => {
+  const { currency } = req.query;  
   const packages = await Package.find({ isActive: true })
     .populate('categories', 'name description isVip')
-    .sort({ 'pricing.XAF': 1 }); // Tri par prix croissant
+    .sort({ 'pricing.XAF': 1 });  
+  let result = packages;
+  
+  if (currency) {    
+    // Filtrer d'abord les packages qui ont la devise
+    const packagesWithCurrency = packages.filter(pkg => {
+      // Gérer le cas où pricing est un Map
+      let hasCurrency = false;
+      if (pkg.pricing instanceof Map) {
+        hasCurrency = pkg.pricing.has(currency);
+      } else if (pkg.pricing && typeof pkg.pricing === 'object') {
+        hasCurrency = pkg.pricing[currency] !== undefined;
+      }
+            return hasCurrency;
+    });
+      
+    // Puis transformer pour ne garder que la devise demandée
+    result = packagesWithCurrency.map(pkg => {
+      const packageData = pkg.toJSON();
+      
+      // Gérer le cas où pricing est un Map dans les données JSON
+      if (packageData.pricing instanceof Map) {
+        packageData.pricing = { [currency]: packageData.pricing.get(currency) };
+      } else if (packageData.pricing && typeof packageData.pricing === 'object') {
+        packageData.pricing = { [currency]: packageData.pricing[currency] };
+      }
+      
+      return packageData;
+    });
+  }
 
   res.status(200).json({
     success: true,
     data: {
-      packages,
-      count: packages.length
+      packages: result,
+      count: result.length,
+      ...(currency && { currency })
     }
   });
 });
@@ -24,6 +55,8 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
  * Obtenir un package spécifique
  */
 exports.getPackage = catchAsync(async (req, res, next) => {
+  const { currency } = req.query;
+  
   const package = await Package.findOne({ 
     _id: req.params.id, 
     isActive: true 
@@ -42,11 +75,27 @@ exports.getPackage = catchAsync(async (req, res, next) => {
     );
   }
 
+  // Traitement du package selon la devise
+  let processedPackage = package;
+  
+  if (currency) {
+    const packageData = package.toJSON();
+    
+    // Si le package n'a pas la devise demandée, retourner une erreur
+    if (!packageData.pricing || !packageData.pricing[currency]) {
+      return next(new AppError(`Package non disponible dans la devise ${currency}`, 404, ErrorCodes.NOT_FOUND));
+    }
+    
+    packageData.pricing = { [currency]: packageData.pricing[currency] };
+    processedPackage = packageData;
+  }
+
   res.status(200).json({
     success: true,
     data: {
-      package,
-      userHasPackage
+      package: processedPackage,
+      userHasPackage,
+      ...(currency && { currency })
     }
   });
 });
@@ -56,6 +105,7 @@ exports.getPackage = catchAsync(async (req, res, next) => {
  */
 exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   const { categoryId } = req.params;
+  const { currency } = req.query;
 
   const packages = await Package.find({ 
     isActive: true,
@@ -63,11 +113,25 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   }).populate('categories', 'name description isVip')
     .sort({ 'pricing.XAF': 1 });
 
+  // Traitement des packages selon la devise
+  let processedPackages = packages;
+  
+  if (currency) {
+    processedPackages = packages
+      .filter(pkg => pkg.pricing && pkg.pricing[currency]) // Filtrer seulement les packages qui ont la devise
+      .map(pkg => {
+        const packageData = pkg.toJSON();
+        packageData.pricing = { [currency]: packageData.pricing[currency] };
+        return packageData;
+      });
+  }
+
   res.status(200).json({
     success: true,
     data: {
-      packages,
-      count: packages.length
+      packages: processedPackages,
+      count: processedPackages.length,
+      ...(currency && { currency })
     }
   });
 });
@@ -76,17 +140,33 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
  * Obtenir les packages recommandés
  */
 exports.getRecommendedPackages = catchAsync(async (req, res, next) => {
+  const { currency } = req.query;
+  
   // Logique simple : packages les plus populaires ou récents
   const packages = await Package.find({ isActive: true })
     .populate('categories', 'name description isVip')
     .sort({ createdAt: -1 })
     .limit(3);
 
+  // Traitement des packages selon la devise
+  let processedPackages = packages;
+  
+  if (currency) {
+    processedPackages = packages
+      .filter(pkg => pkg.pricing && pkg.pricing[currency]) // Filtrer seulement les packages qui ont la devise
+      .map(pkg => {
+        const packageData = pkg.toJSON();
+        packageData.pricing = { [currency]: packageData.pricing[currency] };
+        return packageData;
+      });
+  }
+
   res.status(200).json({
     success: true,
     data: {
-      packages,
-      count: packages.length
+      packages: processedPackages,
+      count: processedPackages.length,
+      ...(currency && { currency })
     }
   });
 });
@@ -95,7 +175,7 @@ exports.getRecommendedPackages = catchAsync(async (req, res, next) => {
  * Comparer plusieurs packages
  */
 exports.comparePackages = catchAsync(async (req, res, next) => {
-  const { packageIds } = req.query; // ?packageIds=id1,id2,id3
+  const { packageIds, currency } = req.query; // ?packageIds=id1,id2,id3&currency=XAF
 
   if (!packageIds) {
     return next(new AppError('IDs des packages requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -113,25 +193,46 @@ exports.comparePackages = catchAsync(async (req, res, next) => {
   }).populate('categories', 'name description isVip');
 
   // Créer un tableau de comparaison structuré
-  const comparison = packages.map(pkg => ({
-    id: pkg._id,
-    name: pkg.name,
-    pricing: pkg.pricing,
-    duration: pkg.duration,
-    categories: pkg.categories,
-    features: pkg.features,
-    pricePerDay: {
-      XAF: Math.round(pkg.pricing.XAF / pkg.duration),
-      ...(pkg.pricing.EUR && { EUR: Math.round((pkg.pricing.EUR / pkg.duration) * 100) / 100 }),
-      ...(pkg.pricing.USD && { USD: Math.round((pkg.pricing.USD / pkg.duration) * 100) / 100 })
-    }
-  }));
+  const comparison = packages
+    .filter(pkg => !currency || (pkg.pricing && pkg.pricing[currency])) // Filtrer par devise si spécifiée
+    .map(pkg => {
+      const packageData = pkg.toJSON();
+      let pricing = packageData.pricing;
+      
+      // Filtrer selon la devise si spécifiée
+      if (currency && pricing && pricing[currency]) {
+        pricing = { [currency]: pricing[currency] };
+      }
+      
+      // Calculer le prix par jour selon la devise
+      const pricePerDay = {};
+      if (pricing) {
+        Object.keys(pricing).forEach(curr => {
+          if (curr === 'XAF' || curr === 'XOF') {
+            pricePerDay[curr] = Math.round(pricing[curr] / pkg.duration);
+          } else {
+            pricePerDay[curr] = Math.round((pricing[curr] / pkg.duration) * 100) / 100;
+          }
+        });
+      }
+
+      return {
+        id: pkg._id,
+        name: pkg.name,
+        pricing,
+        duration: pkg.duration,
+        categories: pkg.categories,
+        features: pkg.features,
+        pricePerDay
+      };
+    });
 
   res.status(200).json({
     success: true,
     data: {
       comparison,
-      count: comparison.length
+      count: comparison.length,
+      ...(currency && { currency })
     }
   });
 });
@@ -165,13 +266,26 @@ exports.searchPackages = catchAsync(async (req, res, next) => {
 
   const packages = await Package.find(filters)
     .populate('categories', 'name description isVip')
-    .sort({ 'pricing.XAF': 1 });
+    .sort({ [`pricing.${currency}`]: 1 });
+
+  // Pour la recherche, filtrer par devise
+  let processedPackages = packages;
+  
+  if (currency) {
+    processedPackages = packages
+      .filter(pkg => pkg.pricing && pkg.pricing[currency]) // Filtrer seulement les packages qui ont la devise
+      .map(pkg => {
+        const packageData = pkg.toJSON();
+        packageData.pricing = { [currency]: packageData.pricing[currency] };
+        return packageData;
+      });
+  }
 
   res.status(200).json({
     success: true,
     data: {
-      packages,
-      count: packages.length,
+      packages: processedPackages,
+      count: processedPackages.length,
       filters: {
         searchTerm: q,
         minPrice,
