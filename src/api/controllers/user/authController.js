@@ -1,5 +1,6 @@
 const User = require('../../models/user/User');
 const authService = require('../../services/common/authService');
+const subscriptionService = require('../../services/user/subscriptionService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
@@ -47,8 +48,15 @@ exports.register = catchAsync(async (req, res, next) => {
   user.refreshTokens.push(tokens.refreshToken);
   await user.save();
   
-  // Réponse
-  res.status(201).json(authService.formatAuthResponse(user, tokens, 'Inscription réussie'));
+  // Vérifier s'il a un abonnement actif (normalement false pour un nouveau user)
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
+  
+  // Réponse avec l'info d'abonnement
+  const response = authService.formatAuthResponse(user, tokens, 'Inscription réussie');
+  response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
+  response.data.activePackages = subscriptionInfo.activePackages;
+  
+  res.status(201).json(response);
 });
 
 /**
@@ -81,8 +89,15 @@ exports.login = catchAsync(async (req, res, next) => {
   user.refreshTokens.push(tokens.refreshToken);
   await user.save();
   
-  // Réponse
-  res.status(200).json(authService.formatAuthResponse(user, tokens, 'Connexion réussie'));
+  // Vérifier s'il a un abonnement actif
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
+  
+  // Réponse avec l'info d'abonnement
+  const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
+  response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
+  response.data.activePackages = subscriptionInfo.activePackages;
+  
+  res.status(200).json(response);
 });
 
 /**
@@ -131,12 +146,17 @@ exports.refresh = catchAsync(async (req, res, next) => {
   req.user.refreshTokens[tokenIndex] = tokens.refreshToken;
   await req.user.save();
   
+  // Vérifier s'il a un abonnement actif lors du refresh
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(req.user._id);
+  
   res.status(200).json({
     success: true,
     message: 'Token renouvelé avec succès',
     data: {
       accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken
+      refreshToken: tokens.refreshToken,
+      hasActiveSubscription: subscriptionInfo.hasActiveSubscription,
+      activePackages: subscriptionInfo.activePackages
     }
   });
 });
@@ -148,10 +168,15 @@ exports.getMe = catchAsync(async (req, res, next) => {
   // Populer les infos de l'affilié parrain si existant
   const user = await User.findById(req.user._id).populate('referredBy', 'firstName lastName affiliateCode');
   
+  // Vérifier s'il a un abonnement actif
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(req.user._id);
+  
   res.status(200).json({
     success: true,
     data: {
-      user
+      user,
+      hasActiveSubscription: subscriptionInfo.hasActiveSubscription,
+      activePackages: subscriptionInfo.activePackages
     }
   });
 });

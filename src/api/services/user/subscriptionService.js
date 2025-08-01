@@ -53,6 +53,36 @@ class SubscriptionService {
   }
 
   /**
+   * NOUVELLE MÉTHODE : Obtenir les informations complètes d'abonnement d'un utilisateur
+   */
+  async getUserSubscriptionInfo(userId) {
+    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+    
+    const activePackages = activeSubscriptions.map(subscription => ({
+      id: subscription.package._id,
+      name: subscription.package.name,
+      description: subscription.package.description,
+      type: subscription.package.type,
+      duration: subscription.package.duration,
+      startDate: subscription.startDate,
+      endDate: subscription.endDate,
+      status: subscription.status,
+      pricing: {
+        amount: subscription.pricing.amount,
+        currency: subscription.pricing.currency
+      },
+      categories: subscription.package.categories || [],
+      subscriptionId: subscription._id
+    }));
+
+    return {
+      hasActiveSubscription: activeSubscriptions.length > 0,
+      activePackages,
+      totalActiveSubscriptions: activeSubscriptions.length
+    };
+  }
+
+  /**
    * Obtenir les abonnements actifs d'un utilisateur
    */
   async getActiveSubscriptions(userId) {
