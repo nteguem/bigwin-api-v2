@@ -70,7 +70,6 @@ exports.login = catchAsync(async (req, res, next) => {
   
   // Trouver l'utilisateur avec le mot de passe
   const user = await User.findOne({ phone }).select('+password +refreshTokens');
-  
   if (!user || !(await user.comparePassword(password))) {
     return next(new AppError('Téléphone ou mot de passe incorrect', 401, ErrorCodes.AUTH_INVALID_CREDENTIALS));
   }
@@ -94,7 +93,9 @@ exports.login = catchAsync(async (req, res, next) => {
   const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
   response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
   response.data.activePackages = subscriptionInfo.activePackages;
-  
+    console.log("user", user);
+    console.log("response", response);
+
   res.status(200).json(response);
 });
 

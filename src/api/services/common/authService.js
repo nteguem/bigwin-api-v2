@@ -92,6 +92,7 @@ class AuthService {
           id: user._id,
           phone: user.phone,
           email: user.email,
+          pseudo: user?.pseudo,
           firstName: user.firstName,
           lastName: user.lastName,
           ...(user.affiliateCode && { affiliateCode: user.affiliateCode }),
