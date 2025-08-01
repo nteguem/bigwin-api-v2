@@ -8,7 +8,7 @@ const catchAsync = require('../../../utils/catchAsync');
  * Inscription utilisateur
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phone, password, firstName, lastName, email, affiliateCode } = req.body;
+  const { phone, password, pseudo, affiliateCode } = req.body;
   
   // Validation des champs obligatoires
   if (!phone || !password) {
@@ -35,9 +35,7 @@ exports.register = catchAsync(async (req, res, next) => {
   const user = await User.create({
     phone,
     password,
-    firstName,
-    lastName,
-    email,
+    pseudo,
     referredBy: affiliate?._id
   });
   

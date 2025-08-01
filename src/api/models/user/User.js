@@ -14,8 +14,7 @@ const userSchema = new mongoose.Schema({
     select: false
   },
   email: String,
-  firstName: String,
-  lastName: String,
+  pseudo: String,
   referredBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'Affiliate'
