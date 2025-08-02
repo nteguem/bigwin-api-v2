@@ -55,6 +55,8 @@ class CouponController {
           categoriesMap.set(categoryId, {
             id: ticket.category._id,
             name: ticket.category.name,
+            icon: ticket.category.icon,
+            successRate: ticket.category.successRate,
             description: ticket.category.description || null,
             isVip: ticket.category.isVip,
             isActive: ticket.category.isActive,
@@ -188,6 +190,8 @@ class CouponController {
         category: {
           id: ticket.category._id,
           name: ticket.category.name,
+          icon: ticket.category.icon,
+          successRate: ticket.category.successRate,
           description: ticket.category.description || null,
           isVip: ticket.category.isVip,
           isActive: ticket.category.isActive
