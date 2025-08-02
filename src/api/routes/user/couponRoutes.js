@@ -23,11 +23,10 @@ router.use(userAuth.protect);
 // Ce middleware vérifie si l'utilisateur peut accéder aux coupons VIP quand isVip=true
 router.use(vipAccess.checkCouponsVipAccess);
 
-// Récupérer tous les coupons (free ou vip selon le paramètre isVip)
-router.get('/', couponController.getCoupons);
+// Récupérer l'historique des tickets des dernières dates
+router.get('/history', couponController.getTicketsHistory);
 
-// Récupérer un coupon spécifique par ID
-// La vérification d'accès est faite dans le controller
-router.get('/:id', couponController.getCouponById);
+// Récupérer tous les coupons (free ou vip selon le paramètre isVip et date)
+router.get('/', couponController.getCoupons);
 
 module.exports = router;
