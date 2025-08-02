@@ -44,8 +44,8 @@ router.use('/affiliate/dashboard', affiliateDashboardRoutes);
 // ===== ROUTES USER =====
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
 const couponRoutes = require('./user/couponRoutes');
-router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 router.use('/user/coupons', couponRoutes);
+router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 // ===== POINT D'ENTRÉE API =====
 
 /**

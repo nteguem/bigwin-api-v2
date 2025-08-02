@@ -17,7 +17,6 @@ const router = express.Router();
  */
 
 // Middleware d'authentification pour accéder aux coupons
-// router.use(userAuth.protect);
 
 // Middleware de vérification VIP pour les coupons
 // Ce middleware vérifie si l'utilisateur peut accéder aux coupons VIP quand isVip=true
