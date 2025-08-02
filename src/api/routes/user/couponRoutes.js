@@ -17,16 +17,16 @@ const router = express.Router();
  */
 
 // Middleware d'authentification pour accéder aux coupons
-router.use(userAuth.protect);
+// router.use(userAuth.protect);
 
 // Middleware de vérification VIP pour les coupons
 // Ce middleware vérifie si l'utilisateur peut accéder aux coupons VIP quand isVip=true
 router.use(vipAccess.checkCouponsVipAccess);
 
-// Récupérer l'historique des tickets des dernières dates
-router.get('/history', couponController.getTicketsHistory);
-
 // Récupérer tous les coupons (free ou vip selon le paramètre isVip et date)
 router.get('/', couponController.getCoupons);
+
+// Récupérer l'historique des tickets des dernières dates
+router.get('/history', couponController.getTicketsHistory);
 
 module.exports = router;
