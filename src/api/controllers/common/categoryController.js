@@ -5,26 +5,26 @@ const { formatSuccess, formatError } = require('../../../utils/responseFormatter
 class CategoryController {
 
   // GET /categories - Récupérer toutes les catégories
-async getCategories(req, res) {
-  try {
-    const { offset = 0, limit = 10, isVip, isActive } = req.query; // ← CHANGEMENT: supprimer = true
+  async getCategories(req, res) {
+    try {
+      const { offset = 0, limit = 10, isVip, isActive } = req.query;
            
-    const result = await categoryService.getCategories({
-      offset: parseInt(offset),
-      limit: parseInt(limit),
-      isVip: isVip !== undefined ? isVip === 'true' : null,
-      isActive: isActive !== undefined ? isActive === 'true' : null // ← CHANGEMENT: null par défaut
-    });
+      const result = await categoryService.getCategories({
+        offset: parseInt(offset),
+        limit: parseInt(limit),
+        isVip: isVip !== undefined ? isVip === 'true' : null,
+        isActive: isActive !== undefined ? isActive === 'true' : null
+      });
 
-    formatSuccess(res, {
-      data: result.data,
-      pagination: result.pagination,
-      message: 'Categories retrieved successfully'
-    });
-  } catch (error) {
-    formatError(res, error.message, 500);
+      formatSuccess(res, {
+        data: result.data,
+        pagination: result.pagination,
+        message: 'Categories retrieved successfully'
+      });
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
   }
-}
 
   // GET /categories/:id - Récupérer une catégorie par ID
   async getCategoryById(req, res) {
@@ -48,15 +48,22 @@ async getCategories(req, res) {
   // POST /categories - Créer une nouvelle catégorie
   async createCategory(req, res) {
     try {
-      const { name, description, isVip,isActive } = req.body;
+      const { name, description, icon, successRate, isVip, isActive } = req.body;
 
       if (!name) {
         return formatError(res, 'Name is required', 400);
       }
 
+      // Validation du successRate
+      if (successRate !== undefined && (successRate < 0 || successRate > 100)) {
+        return formatError(res, 'Success rate must be between 0 and 100', 400);
+      }
+
       const categoryData = {
         name,
         description,
+        icon,
+        successRate,
         isActive,
         isVip: isVip
       };
@@ -82,6 +89,11 @@ async getCategories(req, res) {
     try {
       const { id } = req.params;
       const updates = req.body;
+
+      // Validation du successRate si présent dans les updates
+      if (updates.successRate !== undefined && (updates.successRate < 0 || updates.successRate > 100)) {
+        return formatError(res, 'Success rate must be between 0 and 100', 400);
+      }
 
       const category = await categoryService.updateCategory(id, updates);
 

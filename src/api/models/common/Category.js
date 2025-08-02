@@ -1,19 +1,35 @@
 const mongoose = require("mongoose");
 
 const CategorySchema = new mongoose.Schema({
-  name: { 
-    type: String, 
+  name: {
+    type: String,
     required: true,
-    unique: true 
+    unique: true
   },
   description: String,
-  isVip: { 
-    type: Boolean, 
-    default: false 
+  icon: {
+    type: String,
+    default: "🧾"
   },
-  isActive: { 
-    type: Boolean, 
-    default: true 
+  successRate: {
+    type: Number,
+    default: 50,
+    min: 0,
+    max: 100,
+    validate: {
+      validator: function(v) {
+        return v >= 0 && v <= 100;
+      },
+      message: 'Success rate must be between 0 and 100'
+    }
+  },
+  isVip: {
+    type: Boolean,
+    default: false
+  },
+  isActive: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true

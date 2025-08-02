@@ -79,7 +79,7 @@ class CouponController {
             id: pred._id,
             odds: pred.odds,
             status: pred.status,
-            sport:pred.sport,
+            sport: pred?.sport,
             event: {
               id: pred.event.id,
               label: pred.event.label.current,
