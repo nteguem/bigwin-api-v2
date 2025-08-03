@@ -251,3 +251,48 @@ exports.changePassword = catchAsync(async (req, res, next) => {
     message: 'Mot de passe modifié avec succès'
   });
 });
+
+/**
+ * Réinitialisation du mot de passe utilisateur
+ */
+exports.resetPassword = catchAsync(async (req, res, next) => {
+  const { phoneNumber, pseudo, newPassword } = req.body;
+
+  // Validation des champs obligatoires
+  if (!phoneNumber || !pseudo || !newPassword) {
+    return next(new AppError('Téléphone, pseudo et nouveau mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  // Validation longueur mot de passe
+  if (newPassword.length < 6) {
+    return next(new AppError('Le mot de passe doit contenir au moins 6 caractères', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  // Trouver l'utilisateur avec phoneNumber ET pseudo
+  const user = await User.findOne({ 
+    phoneNumber, 
+    pseudo 
+  });
+
+  if (!user) {
+    return next(new AppError('Aucun compte trouvé avec ce numéro de téléphone et ce pseudo', 404, ErrorCodes.AUTH_USER_NOT_FOUND));
+  }
+
+  // Vérifier si le compte est actif
+  if (!user.isActive) {
+    return next(new AppError('Compte utilisateur désactivé', 401, ErrorCodes.AUTH_ACCOUNT_DISABLED));
+  }
+
+  // Mettre à jour le mot de passe
+  user.password = newPassword;
+  
+  // Invalider tous les refresh tokens existants pour forcer une nouvelle connexion
+  user.refreshTokens = [];
+  
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Mot de passe réinitialisé avec succès. Veuillez vous reconnecter.'
+  });
+});
