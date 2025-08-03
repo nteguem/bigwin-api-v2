@@ -5,18 +5,18 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
 /**
- * Inscription utilisateur
+ * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phone, password, pseudo, affiliateCode } = req.body;
-  
+  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode } = req.body;
+
   // Validation des champs obligatoires
-  if (!phone || !password) {
+  if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
   // Vérifier si le numéro existe déjà
-  const existingUser = await User.findOne({ phone });
+  const existingUser = await User.findOne({ phoneNumber });
   if (existingUser) {
     return next(new AppError('Ce numéro de téléphone est déjà utilisé', 400, ErrorCodes.VALIDATION_ERROR));
   }
@@ -31,11 +31,17 @@ exports.register = catchAsync(async (req, res, next) => {
     }
   }
   
+  // Générer l'email automatiquement avec vérification d'unicité
+  const generatedEmail = await generateUniqueUserEmail(phoneNumber, pseudo, countryCode);
+  
   // Créer l'utilisateur
   const user = await User.create({
-    phone,
+    phoneNumber,
+    email: generatedEmail, // Ajouter l'email généré
     password,
     pseudo,
+    dialCode,
+    countryCode,
     referredBy: affiliate?._id
   });
   
@@ -57,19 +63,35 @@ exports.register = catchAsync(async (req, res, next) => {
   res.status(201).json(response);
 });
 
+// Fonction pour générer automatiquement un email utilisateur avec vérification d'unicité
+async function generateUniqueUserEmail(phoneNumber, pseudo, countryCode) {
+  const cleanPhone = phoneNumber.replace(/[^\d]/g, '');
+  const domain = "bigwinpronos.com";
+  let baseEmail = `user${cleanPhone}@${domain}`;
+  let finalEmail = baseEmail;
+  let counter = 1;
+  
+  // Vérifier l'unicité
+  while (await User.findOne({ email: finalEmail })) {
+    finalEmail = `user${cleanPhone}${counter}@${domain}`;
+    counter++;
+  }
+  
+  return finalEmail;
+}
 /**
  * Connexion utilisateur
  */
 exports.login = catchAsync(async (req, res, next) => {
-  const { phone, password } = req.body;
+  const { phoneNumber, password } = req.body;
   
   // Validation des champs
-  if (!phone || !password) {
+  if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
   // Trouver l'utilisateur avec le mot de passe
-  const user = await User.findOne({ phone }).select('+password +refreshTokens');
+  const user = await User.findOne({ phoneNumber }).select('+password +refreshTokens');
   if (!user || !(await user.comparePassword(password))) {
     return next(new AppError('Téléphone ou mot de passe incorrect', 401, ErrorCodes.AUTH_INVALID_CREDENTIALS));
   }

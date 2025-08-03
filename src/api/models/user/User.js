@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
-  phone: {
+  phoneNumber: {
     type: String,
     required: true,
     unique: true
@@ -15,6 +15,8 @@ const userSchema = new mongoose.Schema({
   },
   email: String,
   pseudo: String,
+  dialCode: String,
+  countryCode: String,
   referredBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'Affiliate'
