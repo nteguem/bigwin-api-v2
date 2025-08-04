@@ -45,12 +45,18 @@ router.use('/affiliate/dashboard', affiliateDashboardRoutes);
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
 const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
+const cinetpayRoutes = require('./user/cinetpayRoutes');
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
+
 // ===== POINT D'ENTRÉE API =====
 // Routes de paiement Smobilpay
 router.use('/payments/smobilpay', smobilpayRoutes);
+// Routes de paiement CinetPay
+router.use('/payments/cinetpay', cinetpayRoutes);
+
+module.exports = router;
 /**
  * GET /api/
  * Documentation des endpoints disponibles

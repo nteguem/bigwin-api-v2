@@ -259,19 +259,12 @@ async function initiatePayment(userId, packageId, serviceId, customerData) {
     if (packageDoc.pricing instanceof Map) {
       // C'est une Map Mongoose - utiliser .get()
       amount = packageDoc.pricing.get('XAF');
-      console.log('Accès Map avec .get():', amount);
     } else if (packageDoc.pricing && typeof packageDoc.pricing === 'object') {
       // C'est un objet classique
       amount = packageDoc.pricing.XAF || packageDoc.pricing['XAF'];
-      console.log('Accès objet classique:', amount);
     }
-    
-    console.log('Amount final:', amount);
-    
+      
     if (!amount || amount <= 0) {
-      console.error('Pricing type:', typeof packageDoc.pricing);
-      console.error('Pricing instanceof Map:', packageDoc.pricing instanceof Map);
-      console.error('Pricing content:', packageDoc.pricing);
       throw new AppError('Prix XAF non disponible pour ce package', 400, ErrorCodes.VALIDATION_ERROR);
     }
     
