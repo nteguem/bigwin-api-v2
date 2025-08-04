@@ -29,11 +29,6 @@ router.get('/subscriptions/active', subscriptionController.getMyActiveSubscripti
 router.get('/subscriptions/status', subscriptionController.getSubscriptionStatus);    // GET /api/user/subscriptions/status
 router.get('/subscriptions/history', subscriptionController.getSubscriptionHistory);  // GET /api/user/subscriptions/history
 
-router.route('/subscriptions/:id')
-  .get(subscriptionController.getSubscription)         // GET /api/user/subscriptions/:id
-  .delete(subscriptionController.cancelSubscription);  // DELETE /api/user/subscriptions/:id
-
-router.post('/subscriptions/:id/renew', subscriptionController.renewSubscription);    // POST /api/user/subscriptions/:id/renew
 
 // Vérification d'accès
 router.get('/access/category/:categoryId', subscriptionController.checkCategoryAccess); // GET /api/user/access/category/:categoryId

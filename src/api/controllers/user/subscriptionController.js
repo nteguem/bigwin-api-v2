@@ -1,5 +1,4 @@
 const subscriptionService = require('../../services/user/subscriptionService');
-const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
@@ -97,24 +96,6 @@ exports.getSubscription = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Annuler un abonnement
- */
-exports.cancelSubscription = catchAsync(async (req, res, next) => {
-  const subscription = await subscriptionService.cancelSubscription(
-    req.params.id,
-    req.user._id
-  );
-
-  res.status(200).json({
-    success: true,
-    message: 'Abonnement annulé avec succès',
-    data: {
-      subscription
-    }
-  });
-});
-
-/**
  * Vérifier l'accès à une catégorie
  */
 exports.checkCategoryAccess = catchAsync(async (req, res, next) => {
@@ -155,49 +136,6 @@ exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
       activeSubscriptions,
       accessibleCategories: uniqueCategories,
       subscriptionCount: activeSubscriptions.length
-    }
-  });
-});
-
-/**
- * Renouveler un abonnement expiré
- */
-exports.renewSubscription = catchAsync(async (req, res, next) => {
-  const { currency = 'XAF', paymentReference } = req.body;
-  const Subscription = require('../../models/user/Subscription');
-
-  // Récupérer l'abonnement expiré
-  const oldSubscription = await Subscription.findOne({
-    _id: req.params.id,
-    user: req.user._id,
-    status: { $in: ['expired', 'cancelled'] }
-  }).populate('package');
-
-  if (!oldSubscription) {
-    return next(new AppError('Abonnement non trouvé ou non renouvelable', 404, ErrorCodes.NOT_FOUND));
-  }
-
-  // Vérifier que le package est toujours actif
-  const packageNew = await Package.findById(oldSubscription.package._id);
-  if (!packageNew || !packageNew.isActive) {
-    return next(new AppError('Ce package n\'est plus disponible', 400, ErrorCodes.VALIDATION_ERROR));
-  }
-
-  // Créer un nouvel abonnement
-  const newSubscription = await subscriptionService.createSubscription(
-    req.user._id,
-    oldSubscription.package._id,
-    currency,
-    paymentReference
-  );
-
-  await newSubscription.populate('package');
-
-  res.status(201).json({
-    success: true,
-    message: 'Abonnement renouvelé avec succès',
-    data: {
-      subscription: newSubscription
     }
   });
 });

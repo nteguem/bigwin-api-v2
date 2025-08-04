@@ -44,10 +44,13 @@ router.use('/affiliate/dashboard', affiliateDashboardRoutes);
 // ===== ROUTES USER =====
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
 const couponRoutes = require('./user/couponRoutes');
+const smobilpayRoutes = require('./user/smobilpayRoutes');
+
 router.use('/user/coupons', couponRoutes);
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 // ===== POINT D'ENTRÉE API =====
-
+// Routes de paiement Smobilpay
+router.use('/payments/smobilpay', smobilpayRoutes);
 /**
  * GET /api/
  * Documentation des endpoints disponibles
