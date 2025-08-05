@@ -46,6 +46,7 @@ const userSubscriptionRoutes = require('./user/subscriptionRoutes');
 const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
+const afribaPayRoutes = require('./user/afribaPayRoutes');
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
@@ -55,7 +56,8 @@ router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 router.use('/payments/smobilpay', smobilpayRoutes);
 // Routes de paiement CinetPay
 router.use('/payments/cinetpay', cinetpayRoutes);
-
+// Routes de paiement AfribaPay
+router.use('/payments/afribapay', afribaPayRoutes);
 module.exports = router;
 /**
  * GET /api/

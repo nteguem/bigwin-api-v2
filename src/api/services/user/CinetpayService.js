@@ -33,8 +33,8 @@ class CinetpayError extends Error {
 function generateUrls() {
   const baseUrl = process.env.APP_BASE_URL;
   return {
-    notify_url: `${baseUrl}/api/user/payments/cinetpay/webhook`,
-    return_url: `${baseUrl}/api/user/payments/cinetpay/success`
+    notify_url: `${baseUrl}/api/payments/cinetpay/webhook`,
+    return_url: `${baseUrl}/api/payments/cinetpay/success`
   };
 }
 
