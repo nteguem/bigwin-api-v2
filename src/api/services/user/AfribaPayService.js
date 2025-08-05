@@ -23,7 +23,7 @@ let cachedToken = null;
 let tokenExpiry = null;
 
 // Path vers les données des pays
-const COUNTRIES_DATA_PATH = path.join(__dirname, '../../../../data/afribapayData.json');
+const COUNTRIES_DATA_PATH = path.join(__dirname, '../../../../data/payments/afribapayData.json');
 
 // Classe d'erreur personnalisée
 class AfribaPayError extends Error {
