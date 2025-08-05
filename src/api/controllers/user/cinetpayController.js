@@ -115,6 +115,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
   const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
+  console.log('CinetPay webhook roland:', req);
   console.log('CinetPay webhook received:', req.body);
 
   if (!transactionId) {
