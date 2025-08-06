@@ -1,6 +1,40 @@
 // routes/user/afribaPayRoutes.js
 const express = require('express');
-// Avant la route webhook, ajoutez ce middleware de debug
+const afribaPayController = require('../../controllers/user/afribaPayController');
+const userAuth = require('../../middlewares/user/userAuth');
+
+const router = express.Router();
+
+/**
+ * Routes publiques
+ */
+// Récupérer les pays et opérateurs
+router.get('/countries', afribaPayController.getCountries);
+
+// Vérifier si OTP requis 
+router.get('/check-otp', afribaPayController.checkOtpRequirement);
+
+/**
+ * Routes protégées (authentification requise)
+ */
+router.use(userAuth.protect);
+
+// Initier un paiement AfribaPay
+router.post('/initiate', afribaPayController.initiatePayment);
+
+// Vérifier le statut d'un paiement
+router.get('/status/:orderId', afribaPayController.checkStatus);
+
+/**
+ * Webhook (non protégé) - On le remet après les routes protégées
+ */
+// On retire la protection pour les webhooks uniquement
+router.use('/webhook', (req, res, next) => {
+  // Bypass l'authentification pour les webhooks
+  next();
+});
+
+// Middleware de debug pour les webhooks
 router.use('/webhook', (req, res, next) => {
   console.log('=== AFRIBAPAY ROUTER - WEBHOOK MIDDLEWARE ===');
   console.log('Method:', req.method);
