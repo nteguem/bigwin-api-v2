@@ -10,28 +10,9 @@ const logger = require('./utils/logger');
 const errorHandler = require('./api/middlewares/errorMiddleware');
 const routes = require('./api/routes');
 
+
 // Initialisation de l'application Express
 const app = express();
-
-// MIDDLEWARE DE DEBUG GLOBAL - EN PREMIER
-app.use((req, res, next) => {
-  if (req.url.includes('webhook')) {
-    console.log('=== DEBUG APP.JS - WEBHOOK DÉTECTÉ ===');
-    console.log('Method:', req.method);
-    console.log('URL:', req.url);
-    console.log('Original URL:', req.originalUrl);
-    console.log('Headers Content-Type:', req.get('content-type'));
-    console.log('User-Agent:', req.get('user-agent'));
-  }
-  next();
-});
-
-// Configuration spéciale pour les webhooks AVANT les middlewares généraux
-app.use('/api/payments/afribapay/webhook', (req, res, next) => {
-  console.log('=== MIDDLEWARE SPÉCIAL WEBHOOK ===');
-  console.log('Webhook middleware called');
-  next();
-});
 
 // Middleware essentiels
 app.use(express.json({ limit: '10mb' }));
@@ -44,33 +25,17 @@ app.use(cookieParser());
 // Middleware de logging des requêtes
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.url}`);
-  if (req.url.includes('webhook')) {
-    console.log('=== LOGGER MIDDLEWARE - WEBHOOK ===');
-    console.log('Logger middleware called for webhook');
-  }
   next();
 });
 
-// DEBUG: Middleware juste avant les routes
-app.use((req, res, next) => {
-  if (req.url.includes('webhook')) {
-    console.log('=== AVANT ROUTES - WEBHOOK ===');
-    console.log('About to enter routes');
-    console.log('Body after parsing:', req.body);
-  }
-  next();
-});
 
 // Routes de l'API
 app.use('/api', routes);
-
 app.use(errorHandler);
-
 // Middleware pour les routes non trouvées
 app.use((req, res, next) => {
   const error = new Error(`Route ${req.originalUrl} not found`);
   error.statusCode = 404;
-  console.log('=== ROUTE NOT FOUND ===', req.originalUrl);
   next(error);
 });
 

@@ -5,15 +5,7 @@
 const express = require('express');
 
 const router = express.Router();
-// DEBUG: Log pour toutes les requêtes qui arrivent dans les routes
-router.use((req, res, next) => {
-  if (req.url.includes('webhook')) {
-    console.log('=== ROUTES INDEX.JS - WEBHOOK ===');
-    console.log('URL in routes:', req.url);
-    console.log('Original URL in routes:', req.originalUrl);
-  }
-  next();
-});
+
 // ===== ROUTES D'AUTHENTIFICATION =====
 const adminAuthRoutes = require('./admin/authRoutes');
 const affiliateAuthRoutes = require('./affiliate/authRoutes');
