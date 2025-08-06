@@ -26,30 +26,8 @@ router.post('/initiate', afribaPayController.initiatePayment);
 router.get('/status/:orderId', afribaPayController.checkStatus);
 
 /**
- * Webhook (non protégé) - On le remet après les routes protégées
+ * Webhook (non protégé)
  */
-// On retire la protection pour les webhooks uniquement
-router.use('/webhook', (req, res, next) => {
-  // Bypass l'authentification pour les webhooks
-  next();
-});
-
-// Middleware de debug pour les webhooks
-router.use('/webhook', (req, res, next) => {
-  console.log('=== AFRIBAPAY ROUTER - WEBHOOK MIDDLEWARE ===');
-  console.log('Method:', req.method);
-  console.log('URL:', req.url);
-  console.log('Base URL:', req.baseUrl);
-  console.log('Original URL:', req.originalUrl);
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  next();
-});
-
-router.post('/webhook', (req, res, next) => {
-  console.log('=== WEBHOOK ROUTE HANDLER CALLED ===');
-  console.log('About to call controller...');
-  afribaPayController.webhook(req, res, next);
-});
+router.post('/webhook', afribaPayController.webhook);
 
 module.exports = router;

@@ -195,8 +195,6 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  * Webhook AfribaPay
  */
 exports.webhook = catchAsync(async (req, res, next) => {
-   console.log('=== CONTROLLER WEBHOOK - DÉBUT ===');
-  console.log('Request received in controller');
   const receivedSignature = req.headers['x-signature'];
   const { order_id: orderId, status } = req.body;
   const rawPayload = JSON.stringify(req.body);
