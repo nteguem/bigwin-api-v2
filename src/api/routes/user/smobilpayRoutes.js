@@ -11,6 +11,11 @@ const router = express.Router();
 router.get('/services', smobilpayController.getServices);
 
 /**
+ * Webhook (non protégé pour permettre les callbacks Smobilpay)
+ */
+router.post('/webhook', smobilpayController.webhook);
+
+/**
  * Routes protégées (authentification requise)
  */
 router.use(userAuth.protect);
@@ -21,9 +26,5 @@ router.post('/initiate', smobilpayController.initiatePayment);
 // Vérifier le statut d'un paiement
 router.get('/status/:paymentId', smobilpayController.checkStatus);
 
-/**
- * Webhook (non protégé pour permettre les callbacks Smobilpay)
- */
-router.post('/webhook', smobilpayController.webhook);
 
 module.exports = router;

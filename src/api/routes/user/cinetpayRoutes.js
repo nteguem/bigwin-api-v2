@@ -6,6 +6,12 @@ const userAuth = require('../../middlewares/user/userAuth');
 const router = express.Router();
 
 /**
+ * Routes publiques pour les callbacks
+ */
+// Webhook pour les notifications CinetPay (non protégé)
+router.post('/webhook', cinetpayController.webhook);
+
+/**
  * Routes protégées (authentification requise)
  */
 router.use(userAuth.protect);
@@ -15,12 +21,6 @@ router.post('/initiate', cinetpayController.initiatePayment);
 
 // Vérifier le statut d'un paiement
 router.get('/status/:transactionId', cinetpayController.checkStatus);
-
-/**
- * Routes publiques pour les callbacks
- */
-// Webhook pour les notifications CinetPay (non protégé)
-router.post('/webhook', cinetpayController.webhook);
 
 // Page de retour après paiement (non protégé)
 router.get('/success', cinetpayController.paymentSuccess);

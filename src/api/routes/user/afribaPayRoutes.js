@@ -15,6 +15,11 @@ router.get('/countries', afribaPayController.getCountries);
 router.get('/check-otp', afribaPayController.checkOtpRequirement);
 
 /**
+ * Webhook (non protégé)
+ */
+router.post('/webhook', afribaPayController.webhook);
+
+/**
  * Routes protégées (authentification requise)
  */
 router.use(userAuth.protect);
@@ -25,9 +30,5 @@ router.post('/initiate', afribaPayController.initiatePayment);
 // Vérifier le statut d'un paiement
 router.get('/status/:orderId', afribaPayController.checkStatus);
 
-/**
- * Webhook (non protégé)
- */
-router.post('/webhook', afribaPayController.webhook);
 
 module.exports = router;
