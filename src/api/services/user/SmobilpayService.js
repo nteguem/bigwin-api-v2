@@ -80,11 +80,74 @@ function filterServicesByCountry(services, countryCode) {
   const mapping = COUNTRY_MAPPING[countryCode.toUpperCase()];
   if (!mapping) return [];
   
-  return services.filter(service => 
-    mapping.prefixes.some(prefix => 
+  return services.filter(service =>
+    mapping.prefixes.some(prefix =>
       service.merchant && service.merchant.startsWith(prefix)
     )
   );
+}
+
+/**
+ * Nettoyer le nom du merchant selon le pays
+ */
+function cleanMerchantName(merchantName, countryCode) {
+  if (!merchantName || !countryCode) return merchantName;
+  
+  let cleanedName = merchantName;
+  
+  switch (countryCode.toUpperCase()) {
+    case 'CM':
+      // Retirer CM au début et CC à la fin
+      if (cleanedName.startsWith('CM')) {
+        cleanedName = cleanedName.substring(2);
+      }
+      if (cleanedName.endsWith('CC')) {
+        cleanedName = cleanedName.slice(0, -2);
+      }
+      break;
+      
+    case 'GA':
+      // Retirer GAB au début
+      if (cleanedName.startsWith('GAB')) {
+        cleanedName = cleanedName.substring(3);
+      }
+      break;
+      
+    case 'TD':
+      // Retirer TCD au début
+      if (cleanedName.startsWith('TCD')) {
+        cleanedName = cleanedName.substring(3);
+      }
+      break;
+      
+    case 'CF':
+      // Retirer RCA au début
+      if (cleanedName.startsWith('RCA')) {
+        cleanedName = cleanedName.substring(3);
+      }
+      break;
+      
+    case 'CG':
+      // Retirer CG au début
+      if (cleanedName.startsWith('CG')) {
+        cleanedName = cleanedName.substring(2);
+      }
+      break;
+  }
+  
+  return cleanedName;
+}
+
+/**
+ * Formater les services pour la réponse (nettoyer les noms des merchants)
+ */
+function formatServicesResponse(services, countryCode) {
+  return services.map(service => ({
+    ...service,
+    merchant: cleanMerchantName(service.merchant, countryCode),
+    // Garder le merchant original si besoin pour des traitements internes
+    originalMerchant: service.merchant
+  }));
 }
 
 /**
@@ -115,6 +178,8 @@ async function getServices(countryCode = null) {
     // Filtrer par pays si spécifié
     if (countryCode) {
       services = filterServicesByCountry(services, countryCode);
+      // Formater les noms des merchants pour la réponse
+      services = formatServicesResponse(services, countryCode);
     }
     
     return services;
@@ -371,6 +436,8 @@ module.exports = {
   initiatePayment,
   checkTransactionStatus,
   verifyTransaction,
+  formatServicesResponse,
+  cleanMerchantName,
   SmobilpayError,
   COUNTRY_MAPPING
 };
