@@ -198,7 +198,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedSignature = req.headers['x-signature'];
   const { order_id: orderId, status } = req.body;
   const rawPayload = JSON.stringify(req.body);
-
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }

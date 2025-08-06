@@ -9,7 +9,7 @@ class SubscriptionService {
   /**
    * Créer un abonnement pour un utilisateur
    */
-  async createSubscription(userId, packageId, currency = 'XAF', paymentReference = null) {
+  async createSubscription(userId, packageId, currency, paymentReference = null) {
     // Vérifier que le package existe et est actif
     const packageNew = await Package.findById(packageId);
     if (!packageNew || !packageNew.isActive) {

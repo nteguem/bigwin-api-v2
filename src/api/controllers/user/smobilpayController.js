@@ -136,18 +136,18 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  * Webhook pour les notifications Smobilpay
  */
 exports.webhook = catchAsync(async (req, res, next) => {
-  const { ptn, status, trid: paymentId } = req.body;
+  const { errorCode, status, trid: paymentId } = req.body;
   
   console.log('Smobilpay webhook received:', req.body);
-  
-  if (!ptn && !paymentId) {
+
+  if (!paymentId) {
     return next(new AppError('PTN ou paymentId requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
   try {
     // Chercher la transaction
     const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
-    const query = ptn ? { ptn } : { paymentId };
+    const query = { paymentId };
     const transaction = await SmobilpayTransaction.findOne(query)
       .populate(['package', 'user']);
     
@@ -158,6 +158,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
     // Mettre à jour le statut si différent
     if (transaction.status !== status) {
       transaction.status = status;
+      transaction.errorCode = errorCode || null;
       await transaction.save();
       
       // Traiter la transaction mise à jour

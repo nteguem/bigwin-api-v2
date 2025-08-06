@@ -4,14 +4,14 @@ const subscriptionService = require('../../services/user/subscriptionService');
 async function handleSuccessfulTransaction(transaction) {
   try {
     if (transaction.isSuccessful() && !transaction.processed) {
-      console.log(`Processing successful transaction: ${transaction.paymentId}`);
+      console.log(`Processing successful transaction: ${transaction._id}`);
       
       // Créer la souscription avec XAF par défaut
       const subscription = await subscriptionService.createSubscription(
         transaction.user,
         transaction.package,
-        'XAF', // Toujours XAF pour Smobilpay
-        transaction.paymentId
+        transaction.currency ,
+        transaction._id
       );
       
       console.log(`Subscription created: ${subscription._id}`);
@@ -20,14 +20,14 @@ async function handleSuccessfulTransaction(transaction) {
       transaction.processed = true;
       await transaction.save();
       
-      console.log(`Transaction ${transaction.paymentId} marked as processed`);
+      console.log(`Transaction ${transaction._id} marked as processed`);
       
       return subscription;
     }
     
     return null;
   } catch (error) {
-    console.error(`Error processing transaction ${transaction.paymentId}:`, error.message);
+    console.error(`Error processing transaction ${transaction._id}:`, error.message);
     throw error;
   }
 }
@@ -37,8 +37,7 @@ async function handleSuccessfulTransaction(transaction) {
  */
 async function handleFailedTransaction(transaction) {
   try {
-    if (transaction.status === 'FAILED' || transaction.status === 'ERRORED') {
-      console.log(`Processing failed transaction: ${transaction.paymentId}`);
+      console.log(`Processing failed transaction: ${transaction._id}`);
       
       // TODO: Envoyer notification d'échec
       // await notificationService.sendPaymentFailed(transaction);
@@ -46,9 +45,8 @@ async function handleFailedTransaction(transaction) {
       // Marquer comme traité même en cas d'échec
       transaction.processed = true;
       await transaction.save();
-    }
   } catch (error) {
-    console.error(`Error processing failed transaction ${transaction.paymentId}:`, error.message);
+    console.error(`Error processing failed transaction ${transaction._id}:`, error.message);
   }
 }
 
@@ -60,7 +58,8 @@ async function processTransactionUpdate(transaction) {
     // Traiter selon le statut
     if (transaction.isSuccessful()) {
       return await handleSuccessfulTransaction(transaction);
-    } else if (transaction.status === 'FAILED' || transaction.status === 'ERRORED') {
+    } 
+    else {
       await handleFailedTransaction(transaction);
     }
     

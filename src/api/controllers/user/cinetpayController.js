@@ -113,9 +113,8 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  */
 exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
-  const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
+  const { cpm_trans_id: transactionId, cmp_error_message } = req.body;
 
-  console.log('CinetPay webhook roland:', req);
   console.log('CinetPay webhook received:', req.body);
 
   if (!transactionId) {
@@ -141,7 +140,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
     }
 
     // Mettre à jour la transaction avec les données webhook
-    transaction.cpmTransDate = req.body.cpm_trans_date ? new Date(req.body.cmp_trans_date) : new Date();
+    transaction.cpmTransDate = req.body.cpm_trans_date ;
     transaction.cpmErrorMessage = cmp_error_message;
     transaction.paymentMethod = req.body.payment_method;
     transaction.cpmPhonePrefix = req.body.cmp_phone_prefixe;

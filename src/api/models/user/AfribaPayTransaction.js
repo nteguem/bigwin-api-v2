@@ -47,7 +47,7 @@ const afribaPayTransactionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'],
+    // enum: ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'],
     default: 'PENDING'
   },
   merchantKey: {
