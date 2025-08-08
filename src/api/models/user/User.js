@@ -13,11 +13,6 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
-    fcmToken: {
-    type: String,
-    unique: true,
-    sparse: true  
-  },
   email: String,
   pseudo: String,
   dialCode: String,
