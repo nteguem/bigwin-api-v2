@@ -50,7 +50,10 @@ const afribaPayRoutes = require('./user/afribaPayRoutes');
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
+// ===== ROUTES COMMON =====
+const deviceRoutes = require('./common/deviceRoutes');
 
+router.use('/devices', deviceRoutes);
 // ===== POINT D'ENTRÉE API =====
 // Routes de paiement Smobilpay
 router.use('/payments/smobilpay', smobilpayRoutes);
