@@ -3,7 +3,7 @@ const subscriptionService = require('../../services/user/subscriptionService');
 
 class CouponController {
   
-  // Récupérer la liste des coupons (tickets visibles)
+// Récupérer la liste des coupons (tickets visibles)
   async getCoupons(req, res) {
     try {
       const { 
@@ -11,7 +11,8 @@ class CouponController {
         limit = 10, 
         category = null, 
         date = null,
-        isVip = null // true, false ou null (tous)
+        isVip = null, // true, false ou null (tous)
+        lang = 'fr' // Langue par défaut : français
       } = req.query;
 
       const offset = (page - 1) * parseInt(limit);
@@ -84,7 +85,7 @@ class CouponController {
             sport: pred?.sport,
             event: {
               id: pred.event.id,
-              label: pred.event.label.current,
+              label: pred.event.label[lang] || pred.event.label.fr || pred.event.label.current,
               description: pred.event.description.current,
               category: pred.event.category
             },
@@ -275,7 +276,8 @@ async getTicketsHistory(req, res) {
     const { 
       daysBack = 10,
       isVip = null,
-      category = null
+      category = null,
+      lang = 'fr' // Langue par défaut : français
     } = req.query;
 
     // Générer les dates précédentes (à partir d'hier)
@@ -358,7 +360,7 @@ async getTicketsHistory(req, res) {
             sport: pred?.sport,
             event: {
               id: pred.event.id,
-              label: pred.event.label.current,
+              label: pred.event.label[lang] || pred.event.label.fr || pred.event.label.current,
               description: pred.event.description.current,
               category: pred.event.category
             },
@@ -432,7 +434,6 @@ async getTicketsHistory(req, res) {
     });
   }
 }
-
 }
 
 module.exports = new CouponController();

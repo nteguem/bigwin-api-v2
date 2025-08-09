@@ -43,7 +43,6 @@ class SubscriptionService {
       },
       paymentReference
     });
-
     // Créer commission si l'utilisateur a un parrain
     if (user.referredBy) {
       await commissionService.createCommission(subscription._id);
