@@ -1,6 +1,7 @@
 const User = require('../../models/user/User');
 const authService = require('../../services/common/authService');
 const subscriptionService = require('../../services/user/subscriptionService');
+const deviceService = require('../../services/common/deviceService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
@@ -8,7 +9,7 @@ const catchAsync = require('../../../utils/catchAsync');
  * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode } = req.body;
+  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId } = req.body;
 
   // Validation des champs obligatoires
   if (!phoneNumber || !password) {
@@ -37,11 +38,12 @@ exports.register = catchAsync(async (req, res, next) => {
   // Créer l'utilisateur
   const user = await User.create({
     phoneNumber,
-    email: generatedEmail, // Ajouter l'email généré
+    email: generatedEmail,
     password,
     pseudo,
     dialCode,
     countryCode,
+    city,
     referredBy: affiliate?._id
   });
   
@@ -52,13 +54,24 @@ exports.register = catchAsync(async (req, res, next) => {
   user.refreshTokens.push(tokens.refreshToken);
   await user.save();
   
+  // Lier le device au user
+  let device = null;
+  if (deviceId) {
+    try {
+      device = await deviceService.linkDeviceToUser(deviceId, user._id);
+    } catch (error) {
+      console.error('Erreur linkage device:', error);
+    }
+  }
+  
   // Vérifier s'il a un abonnement actif (normalement false pour un nouveau user)
   const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
   
-  // Réponse avec l'info d'abonnement
+  // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Inscription réussie');
   response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
   response.data.activePackages = subscriptionInfo.activePackages;
+  response.data.device = device;
   
   res.status(201).json(response);
 });
@@ -79,11 +92,12 @@ async function generateUniqueUserEmail(phoneNumber, pseudo, countryCode) {
   
   return finalEmail;
 }
+
 /**
  * Connexion utilisateur
  */
 exports.login = catchAsync(async (req, res, next) => {
-  const { phoneNumber, password } = req.body;
+  const { phoneNumber, password, deviceId } = req.body;
   
   // Validation des champs
   if (!phoneNumber || !password) {
@@ -108,15 +122,27 @@ exports.login = catchAsync(async (req, res, next) => {
   user.refreshTokens.push(tokens.refreshToken);
   await user.save();
   
+  // Lier le device au user
+  let device = null;
+  if (deviceId) {
+    try {
+      device = await deviceService.linkDeviceToUser(deviceId, user._id);
+    } catch (error) {
+      console.error('Erreur linkage device:', error);
+    }
+  }
+  
   // Vérifier s'il a un abonnement actif
   const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
   
-  // Réponse avec l'info d'abonnement
+  // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
   response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
   response.data.activePackages = subscriptionInfo.activePackages;
-    console.log("user", user);
-    console.log("response", response);
+  response.data.device = device;
+  
+  console.log("user", user);
+  console.log("response", response);
 
   res.status(200).json(response);
 });

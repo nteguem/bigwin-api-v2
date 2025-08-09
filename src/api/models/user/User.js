@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
+  city: String,
   email: String,
   pseudo: String,
   dialCode: String,
