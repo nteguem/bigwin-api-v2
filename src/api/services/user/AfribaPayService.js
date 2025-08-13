@@ -150,9 +150,6 @@ function verifyHmacToken(receivedSignature, payload) {
   }
 }
 
-/**
- * Initier un paiement AfribaPay
- */
 async function initiatePayment(userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
   try {
     // 1. Récupérer le package
@@ -184,37 +181,13 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     }
 
     // 4. Générer IDs et URLs
-    const transactionId = `TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
     const orderId = `order-${Date.now()}`;
     const { notify_url, return_url, cancel_url } = generateUrls();
 
-    // 5. Créer la transaction en base
-    const afribaPayTransaction = new AfribaPayTransaction({
-      transactionId,
-      orderId,
-      user: userId,
-      package: packageId,
-      operator,
-      country,
-      phoneNumber,
-      otpCode,
-      amount,
-      currency,
-      merchantKey: MERCHANT_KEY,
-      referenceId: `${packageDoc.name} - ${packageDoc.duration} jours`,
-      notifyUrl: notify_url,
-      returnUrl: return_url,
-      cancelUrl: cancel_url,
-      lang: 'fr',
-      status: 'PENDING'
-    });
-
-    await afribaPayTransaction.save();
-
-    // 6. Obtenir le token
+    // 5. Obtenir le token
     const accessToken = await getAccessToken();
 
-    // 7. Préparer les données pour l'API
+    // 6. Préparer les données pour l'API AfribaPay
     const paymentData = {
       operator,
       country,
@@ -234,7 +207,7 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
       paymentData.otp_code = otpCode;
     }
 
-    // 8. Appeler l'API AfribaPay
+    // 7. Appeler l'API AfribaPay
     const response = await axios.post(`${API_URL}/v1/pay/payin`, paymentData, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -251,24 +224,42 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
       );
     }
 
-    // 9. Mettre à jour la transaction avec les données AfribaPay
+    // 8. Créer la transaction en base SEULEMENT si la réponse d'AfribaPay est positive
     const responseData = response.data.data;
-
-    afribaPayTransaction.providerId = responseData.provider_id;
-    afribaPayTransaction.providerLink = responseData.provider_link;
-    afribaPayTransaction.amount = responseData.amount || amount;
-    afribaPayTransaction.taxes = responseData.taxes;
-    afribaPayTransaction.fees = responseData.fees;
-    afribaPayTransaction.feesTaxesTtc = responseData.fees_taxes_ttc;
-    afribaPayTransaction.amountTotal = responseData.amount_total;
-    afribaPayTransaction.dateCreated = responseData.date_created ? new Date(responseData.date_created) : new Date();
-    afribaPayTransaction.apiRequestId = response.data.request_id;
-    afribaPayTransaction.apiRequestTime = response.data.request_time;
-    afribaPayTransaction.apiRequestIp = response.data.request_ip;
+    
+    const afribaPayTransaction = new AfribaPayTransaction({
+      transactionId: responseData.transaction_id,
+      orderId,
+      user: userId,
+      package: packageId,
+      operator,
+      country,
+      phoneNumber,
+      otpCode,
+      amount: responseData.amount || amount,
+      currency,
+      merchantKey: MERCHANT_KEY,
+      referenceId: `${packageDoc.name} - ${packageDoc.duration} jours`,
+      notifyUrl: notify_url,
+      returnUrl: return_url,
+      cancelUrl: cancel_url,
+      lang: 'fr',
+      status: 'PENDING',
+      providerId: responseData.provider_id,
+      providerLink: responseData.provider_link,
+      taxes: responseData.taxes,
+      fees: responseData.fees,
+      feesTaxesTtc: responseData.fees_taxes_ttc,
+      amountTotal: responseData.amount_total,
+      dateCreated: responseData.date_created ? new Date(responseData.date_created) : new Date(),
+      apiRequestId: response.data.request_id,
+      apiRequestTime: response.data.request_time,
+      apiRequestIp: response.data.request_ip
+    });
 
     await afribaPayTransaction.save();
 
-    // 10. Populer et retourner
+    // 9. Populer et retourner
     await afribaPayTransaction.populate(['package', 'user']);
 
     return {
