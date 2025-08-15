@@ -150,23 +150,33 @@ function verifyHmacToken(receivedSignature, payload) {
   }
 }
 
+const logger = require('../../../utils/logger'); // Assure-toi d'avoir un utilitaire de log
+
 async function initiatePayment(userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
   try {
+    logger.info(`[AfribaPay] Début initiatePayment pour userId=${userId}, packageId=${packageId}, phone=${phoneNumber}, operator=${operator}, country=${country}, currency=${currency}`);
+
     // 1. Récupérer le package
     const packageDoc = await Package.findById(packageId);
+    logger.debug(`[AfribaPay] Package récupéré: ${packageDoc ? packageDoc.name : 'Aucun package'}`);
     if (!packageDoc) {
+      logger.error(`[AfribaPay] Package non trouvé: ${packageId}`);
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
     // 2. Récupérer le prix selon la devise fournie
     const amount = packageDoc.pricing.get(currency);
+    logger.debug(`[AfribaPay] Prix récupéré: ${amount} ${currency}`);
     if (!amount || amount <= 0) {
+      logger.error(`[AfribaPay] Prix ${currency} non disponible pour ce package`);
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
 
     // 3. Vérifier si OTP est requis
     const otpRequiredCheck = isOtpRequired(operator, country);
+    logger.debug(`[AfribaPay] OTP requis: ${otpRequiredCheck}, OTP fourni: ${otpCode}`);
     if (otpRequiredCheck && !otpCode) {
+      logger.error(`[AfribaPay] OTP requis mais non fourni pour operator=${operator}, country=${country}`);
       throw new AfribaPayError(
         `Code OTP requis pour ${operator} dans ce pays`,
         400,
@@ -183,9 +193,12 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     // 4. Générer IDs et URLs
     const orderId = `order-${Date.now()}`;
     const { notify_url, return_url, cancel_url } = generateUrls();
+    logger.debug(`[AfribaPay] orderId=${orderId}, notify_url=${notify_url}`);
 
     // 5. Obtenir le token
+    logger.info(`[AfribaPay] Obtention du token d'accès...`);
     const accessToken = await getAccessToken();
+    logger.debug(`[AfribaPay] Token obtenu: ${accessToken ? 'OK' : 'KO'}`);
 
     // 6. Préparer les données pour l'API AfribaPay
     const paymentData = {
@@ -206,8 +219,10 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     if (otpRequiredCheck && otpCode) {
       paymentData.otp_code = otpCode;
     }
+    logger.debug(`[AfribaPay] paymentData: ${JSON.stringify(paymentData)}`);
 
     // 7. Appeler l'API AfribaPay
+    logger.info(`[AfribaPay] Appel API AfribaPay /v1/pay/payin`);
     const response = await axios.post(`${API_URL}/v1/pay/payin`, paymentData, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -215,8 +230,10 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
       },
       timeout: 30000
     });
+    logger.debug(`[AfribaPay] Réponse AfribaPay: ${JSON.stringify(response.data)}`);
 
     if (!response.data.data) {
+      logger.error(`[AfribaPay] Payment initialization failed: ${JSON.stringify(response.data)}`);
       throw new AfribaPayError(
         response.data.error?.message || 'Payment initialization failed',
         response.status || 400,
@@ -226,7 +243,8 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
 
     // 8. Créer la transaction en base SEULEMENT si la réponse d'AfribaPay est positive
     const responseData = response.data.data;
-    
+    logger.info(`[AfribaPay] Transaction AfribaPay créée: transaction_id=${responseData.transaction_id}`);
+
     const afribaPayTransaction = new AfribaPayTransaction({
       transactionId: responseData.transaction_id,
       orderId,
@@ -258,19 +276,23 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     });
 
     await afribaPayTransaction.save();
+    logger.info(`[AfribaPay] Transaction sauvegardée en base: ${afribaPayTransaction._id}`);
 
     // 9. Populer et retourner
     await afribaPayTransaction.populate(['package', 'user']);
+    logger.info(`[AfribaPay] Transaction finalisée et retournée`);
 
     return {
       transaction: afribaPayTransaction
     };
 
   } catch (error) {
+    logger.error(`[AfribaPay] Erreur dans initiatePayment: ${error.message}`, { stack: error.stack, response: error.response?.data });
     if (error.response) {
       if (error.response.status === 401) {
         cachedToken = null;
         tokenExpiry = null;
+        logger.warn(`[AfribaPay] Token expiré ou invalide, cache réinitialisé`);
       }
       
       throw new AfribaPayError(
@@ -287,7 +309,6 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     throw error;
   }
 }
-
 /**
  * Vérifier le statut d'une transaction
  */
