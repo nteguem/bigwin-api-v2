@@ -53,10 +53,11 @@ router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');
+const notificationRoutes = require('./common/notificationRoutes');
 
 router.use('/devices', deviceRoutes);
 router.use('/topics', topicRoutes);
-
+router.use('/notifications', notificationRoutes); 
 
 // ===== POINT D'ENTRÉE API =====
 // Routes de paiement Smobilpay
