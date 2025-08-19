@@ -11,7 +11,7 @@ const TicketSchema = new mongoose.Schema({
   },
   category: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: "Category", 
+    ref: "Category",
     required: true
   },
   isVisible: {
@@ -29,6 +29,34 @@ const TicketSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Index composé pour les requêtes principales
+TicketSchema.index({ 
+  date: -1, 
+  category: 1, 
+  isVisible: 1 
+});
+
+// Index simple sur la date pour les requêtes par plage de dates
+TicketSchema.index({ 
+  date: -1 
+});
+
+// Index sur la catégorie pour les filtres par catégorie
+TicketSchema.index({ 
+  category: 1 
+});
+
+// Index sur le status pour les requêtes filtrées par status
+TicketSchema.index({ 
+  status: 1 
+});
+
+// Index composé pour les requêtes fréquentes de tickets visibles par date
+TicketSchema.index({ 
+  isVisible: 1,
+  date: -1 
 });
 
 module.exports = mongoose.model("Ticket", TicketSchema);

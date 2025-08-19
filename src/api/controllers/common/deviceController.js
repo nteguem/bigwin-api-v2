@@ -5,12 +5,12 @@ const catchAsync = require('../../../utils/catchAsync');
 class DeviceController {
   
   registerDevice = catchAsync(async (req, res) => {
-    const { deviceId, fcmToken, platform, deviceInfo } = req.body;
+    const { deviceId, playerId, platform, deviceInfo } = req.body;
     const userId = req.user ? req.user.id : null;
     
     const device = await deviceService.registerDevice({
       deviceId,
-      fcmToken,
+      playerId,
       platform,
       deviceInfo,
       user: userId

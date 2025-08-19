@@ -7,7 +7,7 @@ const deviceSchema = new mongoose.Schema({
     unique: true
   },
   
-  fcmToken: {
+  playerId: {
     type: String,
     required: true,
     unique: true,
@@ -53,7 +53,7 @@ const deviceSchema = new mongoose.Schema({
 
 deviceSchema.index({ userType: 1, isActive: 1 });
 deviceSchema.index({ user: 1, isActive: 1 });
-deviceSchema.index({ fcmToken: 1, isActive: 1 });
+deviceSchema.index({ playerId: 1, isActive: 1 });
 
 deviceSchema.methods.linkToUser = function(userId) {
   this.user = userId;
@@ -71,7 +71,7 @@ deviceSchema.statics.getByUserType = function(userType) {
   return this.find({ 
     userType, 
     isActive: true,
-    fcmToken: { $exists: true, $ne: null }
+    playerId: { $exists: true, $ne: null }
   });
 };
 

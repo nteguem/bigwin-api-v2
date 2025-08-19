@@ -4,12 +4,12 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 class DeviceService {
   
   async registerDevice(deviceData) {
-    const { deviceId, fcmToken, platform, deviceInfo, user = null } = deviceData;
+    const { deviceId, playerId, platform, deviceInfo, user = null } = deviceData;
     
     let device = await Device.findOne({ deviceId });
     
     if (device) {
-      device.fcmToken = fcmToken;
+      device.playerId = playerId;
       device.platform = platform;
       device.deviceInfo = deviceInfo || device.deviceInfo;
       device.isActive = true;
@@ -25,7 +25,7 @@ class DeviceService {
     
     device = new Device({
       deviceId,
-      fcmToken,
+      playerId,
       platform,
       deviceInfo,
       user,

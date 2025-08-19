@@ -274,7 +274,7 @@ class CouponController {
 async getTicketsHistory(req, res) {
   try {
     const { 
-      daysBack = 5,
+      daysBack = 10,
       isVip = null,
       category = null,
       lang = 'fr' // Langue par défaut : français

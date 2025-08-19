@@ -1,4 +1,5 @@
 const Ticket = require('../../models/common/Ticket');
+const Prediction = require("../../models/common/Prediction")
 const predictionService = require('./predictionService');
 
 class TicketService {
@@ -122,6 +123,98 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     const ticket = await Ticket.findById(id);
     return !!ticket;
   }
+
+  
+  /**
+   * NOUVELLE MÉTHODE OPTIMISÉE
+   * Récupère toutes les prédictions pour plusieurs tickets en une seule requête
+   * @param {Array} ticketIds - Array d'IDs de tickets
+   * @returns {Array} Toutes les prédictions pour ces tickets
+   */
+  async getPredictionsByTicketIds(ticketIds) {
+    try {
+      // Une seule requête pour récupérer toutes les prédictions
+      const predictions = await Prediction.find({
+        ticket: { $in: ticketIds }
+      })
+      .populate('event')
+      .populate('matchData')
+      .lean(); // Pour de meilleures performances
+
+      return predictions;
+    } catch (error) {
+      console.error('Erreur lors de la récupération des prédictions:', error);
+      return [];
+    }
+  }
+
+  // Version alternative avec aggregation pipeline pour encore plus de performance
+  async getPredictionsByTicketIdsOptimized(ticketIds) {
+    try {
+      const predictions = await Prediction.aggregate([
+        {
+          $match: {
+            ticket: { $in: ticketIds.map(id => mongoose.Types.ObjectId(id)) }
+          }
+        },
+        {
+          $lookup: {
+            from: 'events',
+            localField: 'event',
+            foreignField: '_id',
+            as: 'event'
+          }
+        },
+        {
+          $unwind: {
+            path: '$event',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'matches',
+            localField: 'matchData',
+            foreignField: '_id',
+            as: 'matchData'
+          }
+        },
+        {
+          $unwind: {
+            path: '$matchData',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          // Projeter seulement les champs nécessaires
+          $project: {
+            _id: 1,
+            ticket: 1,
+            odds: 1,
+            status: 1,
+            sport: 1,
+            'event._id': 1,
+            'event.label': 1,
+            'event.description': 1,
+            'event.category': 1,
+            'matchData._id': 1,
+            'matchData.date': 1,
+            'matchData.status': 1,
+            'matchData.league': 1,
+            'matchData.teams': 1,
+            'matchData.venue': 1,
+            'matchData.score': 1
+          }
+        }
+      ]);
+
+      return predictions;
+    } catch (error) {
+      console.error('Erreur lors de la récupération des prédictions:', error);
+      return [];
+    }
+  }
+
 }
 
 module.exports = new TicketService();
