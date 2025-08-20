@@ -46,8 +46,53 @@
       }
     },
     {
-      "id": "both_teams_score",
+      "id": "double_chance_1x",
       "position": 4,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance 1X",
+        "en": "Double chance 1X"
+      },
+      "expression": "score.home >= score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'équipe domicile gagne ou match nul",
+        "en": "Home team wins or draw"
+      }
+    },
+    {
+      "id": "double_chance_x2",
+      "position": 5,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance X2",
+        "en": "Double chance X2"
+      },
+      "expression": "score.away >= score.home",
+      "category": "result",
+      "description": {
+        "fr": "L'équipe extérieur gagne ou match nul",
+        "en": "Away team wins or draw"
+      }
+    },
+    {
+      "id": "double_chance_12",
+      "position": 6,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance 12",
+        "en": "Double chance 12"
+      },
+      "expression": "score.home !== score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'une des deux équipes gagne (pas de nul)",
+        "en": "Either team wins (no draw)"
+      }
+    },
+    {
+      "id": "both_teams_score",
+      "position": 7,
       "priority": "high",
       "label": {
         "fr": "Les deux équipes marquent",
@@ -62,7 +107,7 @@
     },
     {
       "id": "both_teams_score_no",
-      "position": 5,
+      "position": 8,
       "priority": "medium",
       "label": {
         "fr": "Au moins une équipe ne marque pas",
@@ -77,7 +122,7 @@
     },
     {
       "id": "home_win_ht",
-      "position": 6,
+      "position": 9,
       "priority": "medium",
       "label": {
         "fr": "Domicile gagne à la mi-temps",
@@ -92,7 +137,7 @@
     },
     {
       "id": "away_win_ht",
-      "position": 7,
+      "position": 10,
       "priority": "medium",
       "label": {
         "fr": "Extérieur gagne à la mi-temps",
@@ -107,7 +152,7 @@
     },
     {
       "id": "draw_ht",
-      "position": 8,
+      "position": 11,
       "priority": "medium",
       "label": {
         "fr": "Égalité à la mi-temps",
@@ -121,8 +166,53 @@
       }
     },
     {
+      "id": "home_wins_any_half",
+      "position": 12,
+      "priority": "medium",
+      "label": {
+        "fr": "Domicile gagne au moins une mi-temps",
+        "en": "Home wins at least one half"
+      },
+      "expression": "score.details.halftime.home > score.details.halftime.away || secondHalfGoalsHome > secondHalfGoalsAway",
+      "category": "halftime",
+      "description": {
+        "fr": "L'équipe domicile gagne la première ou la deuxième mi-temps",
+        "en": "Home team wins first or second half"
+      }
+    },
+    {
+      "id": "away_wins_any_half",
+      "position": 13,
+      "priority": "medium",
+      "label": {
+        "fr": "Extérieur gagne au moins une mi-temps",
+        "en": "Away wins at least one half"
+      },
+      "expression": "score.details.halftime.away > score.details.halftime.home || secondHalfGoalsAway > secondHalfGoalsHome",
+      "category": "halftime",
+      "description": {
+        "fr": "L'équipe extérieur gagne la première ou la deuxième mi-temps",
+        "en": "Away team wins first or second half"
+      }
+    },
+    {
+      "id": "any_team_wins_half",
+      "position": 14,
+      "priority": "medium",
+      "label": {
+        "fr": "Au moins une équipe gagne une mi-temps",
+        "en": "At least one team wins a half"
+      },
+      "expression": "(score.details.halftime.home !== score.details.halftime.away) || (secondHalfGoalsHome !== secondHalfGoalsAway)",
+      "category": "halftime",
+      "description": {
+        "fr": "Au moins une équipe gagne la première ou la deuxième mi-temps",
+        "en": "At least one team wins first or second half"
+      }
+    },
+    {
       "id": "no_goals_ht",
-      "position": 9,
+      "position": 15,
       "priority": "low",
       "label": {
         "fr": "0-0 à la mi-temps",
@@ -137,7 +227,7 @@
     },
     {
       "id": "goals_ht",
-      "position": 10,
+      "position": 16,
       "priority": "medium",
       "label": {
         "fr": "Au moins 1 but en 1ère mi-temps",
@@ -152,7 +242,7 @@
     },
     {
       "id": "both_teams_score_ht",
-      "position": 11,
+      "position": 17,
       "priority": "low",
       "label": {
         "fr": "Les deux équipes marquent en 1ère mi-temps",
@@ -167,7 +257,7 @@
     },
     {
       "id": "no_goals_2h",
-      "position": 12,
+      "position": 18,
       "priority": "low",
       "label": {
         "fr": "Aucun but en 2ème mi-temps",
@@ -182,7 +272,7 @@
     },
     {
       "id": "goals_2h",
-      "position": 13,
+      "position": 19,
       "priority": "medium",
       "label": {
         "fr": "Au moins 1 but en 2ème mi-temps",
@@ -197,7 +287,7 @@
     },
     {
       "id": "more_goals_2h",
-      "position": 14,
+      "position": 20,
       "priority": "low",
       "label": {
         "fr": "Plus de buts en 2ème mi-temps",
@@ -212,7 +302,7 @@
     },
     {
       "id": "equal_goals_both_halves",
-      "position": 15,
+      "position": 21,
       "priority": "low",
       "label": {
         "fr": "Même nombre de buts par mi-temps",
@@ -227,7 +317,7 @@
     },
     {
       "id": "goals_both_halves",
-      "position": 16,
+      "position": 22,
       "priority": "medium",
       "label": {
         "fr": "Au moins 1 but par mi-temps",
@@ -242,7 +332,7 @@
     },
     {
       "id": "home_home",
-      "position": 17,
+      "position": 23,
       "priority": "medium",
       "label": {
         "fr": "Domicile gagne à la mi-temps et à la fin",
@@ -257,7 +347,7 @@
     },
     {
       "id": "away_away",
-      "position": 18,
+      "position": 24,
       "priority": "medium",
       "label": {
         "fr": "Extérieur gagne à la mi-temps et à la fin",
@@ -272,7 +362,7 @@
     },
     {
       "id": "draw_draw",
-      "position": 19,
+      "position": 25,
       "priority": "low",
       "label": {
         "fr": "Égalité à la mi-temps et à la fin",
@@ -287,7 +377,7 @@
     },
     {
       "id": "home_clean_sheet",
-      "position": 22,
+      "position": 26,
       "priority": "medium",
       "label": {
         "fr": "Équipe domicile garde sa cage inviolée",
@@ -302,7 +392,7 @@
     },
     {
       "id": "away_clean_sheet",
-      "position": 23,
+      "position": 27,
       "priority": "medium",
       "label": {
         "fr": "Équipe extérieur garde sa cage inviolée",
@@ -313,36 +403,6 @@
       "description": {
         "fr": "L'équipe extérieur ne concède aucun but",
         "en": "Away team doesn't concede any goal"
-      }
-    },
-    {
-      "id": "exact_1_1",
-      "position": 29,
-      "priority": "medium",
-      "label": {
-        "fr": "Score exact 1-1",
-        "en": "Exact score 1-1"
-      },
-      "expression": "score.home === 1 && score.away === 1",
-      "category": "exact_score",
-      "description": {
-        "fr": "Le match se termine exactement 1-1",
-        "en": "The match ends exactly 1-1"
-      }
-    },
-    {
-      "id": "exact_2_1",
-      "position": 32,
-      "priority": "medium",
-      "label": {
-        "fr": "Score exact 2-1",
-        "en": "Exact score 2-1"
-      },
-      "expression": "score.home === 2 && score.away === 1",
-      "category": "exact_score",
-      "description": {
-        "fr": "Le match se termine exactement 2-1",
-        "en": "The match ends exactly 2-1"
       }
     }
   ],
@@ -457,7 +517,7 @@
     },
     {
       "id": "home_goals",
-      "position": 4,
+      "position": 3,
       "priority": "medium",
       "labelTemplate": {
         "fr": "Équipe domicile marque {{direction}} de {{value}} buts",
@@ -508,6 +568,89 @@
           "default": "over"
         }
       ]
+    },
+    {
+      "id": "away_goals",
+      "position": 4,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Équipe extérieur marque {{direction}} de {{value}} buts",
+        "en": "Away team scores {{direction}} {{value}} goals"
+      },
+      "expressionTemplate": "score.away {{operator}} {{value}}",
+      "category": "team_goals",
+      "description": {
+        "fr": "Prédiction sur le nombre de buts de l'équipe extérieur",
+        "en": "Prediction on the number of goals by away team"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de buts",
+            "en": "Number of goals"
+          },
+          "min": 0,
+          "max": 5,
+          "step": 0.5,
+          "default": 1.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "any_team_goals_min",
+      "position": 5,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Au moins une équipe marque {{value}} buts ou plus",
+        "en": "At least one team scores {{value}} goals or more"
+      },
+      "expressionTemplate": "score.home >= {{value}} || score.away >= {{value}}",
+      "category": "team_goals",
+      "description": {
+        "fr": "Au moins une des deux équipes marque le nombre de buts spécifié ou plus",
+        "en": "At least one of the two teams scores the specified number of goals or more"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre minimum de buts",
+            "en": "Minimum number of goals"
+          },
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "default": 2
+        }
+      ]
     }
   ],
   "categories": {
@@ -538,10 +681,6 @@
     "clean_sheet": {
       "fr": "Clean sheet",
       "en": "Clean sheet"
-    },
-    "exact_score": {
-      "fr": "Score exact",
-      "en": "Exact score"
     },
     "team_goals": {
       "fr": "Buts par équipe",

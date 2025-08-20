@@ -83,15 +83,15 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         let notification;
         
         if (isLive) {
-          // Notification pour les LIVE
+          // Notification pour les LIVE - Messages optimisés
           notification = {
             headings: {
-              en: "🔴 BigWin LIVE!",
-              fr: "🔴 BigWin EN DIRECT!"
+              en: "🔴 LIVE NOW - BigWin!",
+              fr: "🔴 EN DIRECT - BigWin!"
             },
             contents: {
-              en: `🚨 LIVE match starting in ${categoryName}`,
-              fr: `🚨 Match EN DIRECT commence dans ${categoryName}`
+              en: `⚡ Live coupon available! Don't miss out - ${categoryName}`,
+              fr: `⚡ Coupon live disponible ! Ne ratez pas - ${categoryName}`
             },
             data: {
               type: "live",
@@ -106,15 +106,15 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             }
           };
         } else {
-          // Notification normale
+          // Notification normale - Messages optimisés
           notification = {
             headings: {
-              en: "BigWin - New Ticket!",
-              fr: "BigWin - Nouveau Ticket!"
+              en: "💰 New BigWin Coupon!",
+              fr: "💰 Nouveau Coupon BigWin!"
             },
             contents: {
-              en: `New ticket available in ${categoryName}`,
-              fr: `Nouveau ticket disponible dans ${categoryName}`
+              en: `🎯 Fresh coupon just dropped in ${categoryName} - Check it now!`,
+              fr: `🎯 Nouveau coupon disponible dans ${categoryName} - Découvrez-le !`
             },
             data: {
               type: "ticket",

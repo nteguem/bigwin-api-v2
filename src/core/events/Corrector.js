@@ -285,6 +285,10 @@ class Corrector {
       totalGoalsHT: totalGoalsHT,
       secondHalfGoals: totalGoals - totalGoalsHT,
       
+      // Nouveaux : Buts par équipe et par mi-temps
+      secondHalfGoalsHome: (score.home || 0) - (halftime.home || 0),
+      secondHalfGoalsAway: (score.away || 0) - (halftime.away || 0),
+      
       // Variables spéciales football
       noGoals: totalGoals === 0,
       bothTeamsScoreHT: (halftime.home || 0) > 0 && (halftime.away || 0) > 0,
