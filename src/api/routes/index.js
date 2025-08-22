@@ -25,6 +25,7 @@ const adminEventRoutes = require('./admin/eventRoutes');
 const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminCommissionRoutes = require('./admin/commissionRoutes');
 const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
+const adminFormationRoutes = require('./admin/formationRoutes'); 
 
 router.use('/admin/packages', adminPackageRoutes);
 router.use('/admin/categories', adminCategoryRoutes);
@@ -35,6 +36,7 @@ router.use('/admin/events', adminEventRoutes);
 router.use('/admin/affiliates', adminAffiliateRoutes);
 router.use('/admin/commissions', adminCommissionRoutes);
 router.use('/admin/affiliate-types', adminAffiliateTypeRoutes);
+router.use('/admin/formations', adminFormationRoutes); 
 
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
@@ -50,6 +52,7 @@ const afribaPayRoutes = require('./user/afribaPayRoutes');
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
+
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');
@@ -57,7 +60,7 @@ const notificationRoutes = require('./common/notificationRoutes');
 
 router.use('/devices', deviceRoutes);
 router.use('/topics', topicRoutes);
-router.use('/notifications', notificationRoutes); 
+router.use('/notifications', notificationRoutes);
 
 // ===== POINT D'ENTRÉE API =====
 // Routes de paiement Smobilpay
@@ -66,7 +69,7 @@ router.use('/payments/smobilpay', smobilpayRoutes);
 router.use('/payments/cinetpay', cinetpayRoutes);
 // Routes de paiement AfribaPay
 router.use('/payments/afribapay', afribaPayRoutes);
-module.exports = router;
+
 /**
  * GET /api/
  * Documentation des endpoints disponibles

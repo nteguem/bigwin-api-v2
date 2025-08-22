@@ -1,7 +1,6 @@
 const User = require('../../models/user/User');
 const Commission = require('../../models/common/Commission');
 const Subscription = require('../../models/common/Subscription');
-const Package = require('../../models/common/Package');
 
 class DashboardService {
   /**

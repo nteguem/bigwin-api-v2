@@ -1,4 +1,5 @@
 const Package = require('../../models/common/Package');
+const Formation = require('../../models/common/Formation');
 const Category = require('../../models/common/Category');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
@@ -6,16 +7,42 @@ const catchAsync = require('../../../utils/catchAsync');
 /**
  * Obtenir tous les packages (admin)
  */
+/**
+ * Obtenir tous les packages (admin)
+ */
+/**
+ * Obtenir tous les packages (admin)
+ */
 exports.getAllPackages = catchAsync(async (req, res, next) => {
+  const { lang = 'fr', currency = 'XAF' } = req.query;
+  
   const packages = await Package.find()
     .populate('categories', 'name isVip')
-    .sort({ createdAt: -1 });
+    .populate('formationId');
+
+  // Trier manuellement par prix dans la devise demandée
+  const sortedPackages = packages.sort((a, b) => {
+    const priceA = a.getPricing(currency) || 0;
+    const priceB = b.getPricing(currency) || 0;
+    return priceA - priceB; // Tri croissant
+  });
+
+  // Formater selon la langue ET filtrer par devise
+  const formattedPackages = sortedPackages.map(pkg => {
+    const formatted = pkg.formatForLanguage(lang);
+    
+    // Filtrer pricing et economy pour ne garder que la devise demandée
+    formatted.pricing = formatted.pricing[currency] || 0;
+    formatted.economy = formatted.economy ? (formatted.economy[currency] || 0) : null;
+    
+    return formatted;
+  });
 
   res.status(200).json({
     success: true,
     data: {
-      packages,
-      count: packages.length
+      packages: formattedPackages,
+      count: formattedPackages.length
     }
   });
 });
@@ -24,17 +51,22 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
  * Obtenir un package par ID
  */
 exports.getPackage = catchAsync(async (req, res, next) => {
+  const { lang = 'fr' } = req.query;
+  
   const package = await Package.findById(req.params.id)
-    .populate('categories', 'name description isVip');
+    .populate('categories', 'name description isVip')
+    .populate('formationId');
 
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
+  const formattedPackage = package.formatForLanguage(lang);
+
   res.status(200).json({
     success: true,
     data: {
-      package
+      package: formattedPackage
     }
   });
 });
@@ -43,11 +75,11 @@ exports.getPackage = catchAsync(async (req, res, next) => {
  * Créer un nouveau package
  */
 exports.createPackage = catchAsync(async (req, res, next) => {
-  const { name, description, pricing, duration, categories, features } = req.body;
+  const { name, description, pricing, duration, categories, badge, economy, formationId } = req.body;
 
   // Validation des champs obligatoires
-  if (!name || !pricing?.XAF || !duration) {
-    return next(new AppError('Nom, prix en XAF et durée sont requis', 400, ErrorCodes.VALIDATION_ERROR));
+  if (!name?.fr || !name?.en || !pricing?.XAF || !duration) {
+    return next(new AppError('Nom (FR/EN), prix en XAF et durée sont requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   // Vérifier que les catégories existent
@@ -58,17 +90,28 @@ exports.createPackage = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Vérifier que la formation existe si fournie
+  if (formationId) {
+    const existingFormation = await Formation.findById(formationId);
+    if (!existingFormation) {
+      return next(new AppError('Formation invalide', 400, ErrorCodes.VALIDATION_ERROR));
+    }
+  }
+
   const package = await Package.create({
     name,
     description,
     pricing,
     duration,
     categories: categories || [],
-    features: features || []
+    badge,
+    economy,
+    formationId
   });
 
-  // Populer les catégories pour la réponse
+  // Populer les relations pour la réponse
   await package.populate('categories', 'name isVip');
+  await package.populate('formationId');
 
   res.status(201).json({
     success: true,
@@ -83,7 +126,7 @@ exports.createPackage = catchAsync(async (req, res, next) => {
  * Modifier un package
  */
 exports.updatePackage = catchAsync(async (req, res, next) => {
-  const { name, description, pricing, duration, categories, features, isActive } = req.body;
+  const { name, description, pricing, duration, categories, badge, economy, formationId, isActive } = req.body;
 
   // Vérifier que le package existe
   let package = await Package.findById(req.params.id);
@@ -99,6 +142,14 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Vérifier la formation si fournie
+  if (formationId) {
+    const existingFormation = await Formation.findById(formationId);
+    if (!existingFormation) {
+      return next(new AppError('Formation invalide', 400, ErrorCodes.VALIDATION_ERROR));
+    }
+  }
+
   // Mettre à jour les champs
   const updateData = {};
   if (name !== undefined) updateData.name = name;
@@ -106,14 +157,16 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
   if (pricing !== undefined) updateData.pricing = pricing;
   if (duration !== undefined) updateData.duration = duration;
   if (categories !== undefined) updateData.categories = categories;
-  if (features !== undefined) updateData.features = features;
+  if (badge !== undefined) updateData.badge = badge;
+  if (economy !== undefined) updateData.economy = economy;
+  if (formationId !== undefined) updateData.formationId = formationId;
   if (isActive !== undefined) updateData.isActive = isActive;
 
   package = await Package.findByIdAndUpdate(
     req.params.id,
     updateData,
     { new: true, runValidators: true }
-  ).populate('categories', 'name isVip');
+  ).populate('categories', 'name isVip').populate('formationId');
 
   res.status(200).json({
     success: true,
@@ -132,17 +185,6 @@ exports.deletePackage = catchAsync(async (req, res, next) => {
 
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
-  }
-
-  // Vérifier s'il y a des abonnements actifs
-  const Subscription = require('../../models/user/Subscription');
-  const activeSubscriptions = await Subscription.countDocuments({
-    package: req.params.id,
-    status: 'active'
-  });
-
-  if (activeSubscriptions > 0) {
-    return next(new AppError('Impossible de supprimer un package avec des abonnements actifs', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   await Package.findByIdAndDelete(req.params.id);

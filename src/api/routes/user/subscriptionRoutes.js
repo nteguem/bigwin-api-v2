@@ -9,9 +9,6 @@ const router = express.Router();
  * Routes publiques (consultation packages)
  */
 router.get('/packages', packageController.getAvailablePackages);           // GET /api/user/packages
-router.get('/packages/recommended', packageController.getRecommendedPackages); // GET /api/user/packages/recommended
-router.get('/packages/search', packageController.searchPackages);         // GET /api/user/packages/search
-router.get('/packages/compare', packageController.comparePackages);       // GET /api/user/packages/compare
 router.get('/packages/category/:categoryId', packageController.getPackagesByCategory); // GET /api/user/packages/category/:categoryId
 router.get('/packages/:id', packageController.getPackage);                // GET /api/user/packages/:id
 

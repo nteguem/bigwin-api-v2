@@ -1,7 +1,5 @@
 const Subscription = require('../../models/common/Subscription');
 const Commission = require('../../models/common/Commission');
-const Package = require('../../models/common/Package');
-const User = require('../../models/user/User');
 const Affiliate = require('../../models/affiliate/Affiliate');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 

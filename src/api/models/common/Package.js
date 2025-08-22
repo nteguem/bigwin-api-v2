@@ -2,13 +2,26 @@ const mongoose = require('mongoose');
 
 const packageSchema = new mongoose.Schema({
   name: {
-    type: String,
-    required: true,
-    trim: true
+    fr: {
+      type: String,
+      required: [true, 'Le nom en français est requis'],
+      trim: true
+    },
+    en: {
+      type: String,
+      required: [true, 'Le nom en anglais est requis'],
+      trim: true
+    }
   },
   description: {
-    type: String,
-    trim: true
+    fr: {
+      type: String,
+      trim: true
+    },
+    en: {
+      type: String,
+      trim: true
+    }
   },
   pricing: {
     type: Map,
@@ -39,7 +52,33 @@ const packageSchema = new mongoose.Schema({
     type: mongoose.Schema.ObjectId,
     ref: 'Category'
   }],
-  features: [String],
+  badge: {
+    fr: {
+      type: String,
+      trim: true
+    },
+    en: {
+      type: String,
+      trim: true
+    }
+  },
+  economy: {
+    type: Map,
+    of: {
+      type: Number,
+      min: 0,
+      validate: {
+        validator: function(value) {
+          return value >= 0;
+        },
+        message: 'L\'économie doit être positive'
+      }
+    }
+  },
+  formationId: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Formation'
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -52,12 +91,10 @@ const packageSchema = new mongoose.Schema({
 
 // Index pour performance
 packageSchema.index({ isActive: 1 });
+packageSchema.index({ pricing: 1 });
+packageSchema.index({ formationId: 1 });
 
-// Pour un Map, on peut seulement indexer sur l'existence de pricing
-// ou créer des index spécifiques selon vos besoins de requête
-packageSchema.index({ pricing: 1 }); // Index général sur pricing
-
-// Méthode pour ajouter/modifier un prix dans une devise
+// Méthodes existantes
 packageSchema.methods.setPricing = function(currency, price) {
   if (!this.pricing) {
     this.pricing = new Map();
@@ -66,39 +103,96 @@ packageSchema.methods.setPricing = function(currency, price) {
   return this;
 };
 
-// Méthode pour obtenir le prix dans une devise spécifique
 packageSchema.methods.getPricing = function(currency) {
   return this.pricing ? this.pricing.get(currency.toUpperCase()) : undefined;
 };
 
-// Méthode pour obtenir toutes les devises disponibles
 packageSchema.methods.getAvailableCurrencies = function() {
   return this.pricing ? Array.from(this.pricing.keys()) : [];
 };
 
-// Supprimer champs sensibles du JSON et convertir Map en objet
+// Méthode pour gérer l'economy
+packageSchema.methods.setEconomy = function(currency, amount) {
+  if (!this.economy) {
+    this.economy = new Map();
+  }
+  this.economy.set(currency.toUpperCase(), amount);
+  return this;
+};
+
+packageSchema.methods.getEconomy = function(currency) {
+  return this.economy ? this.economy.get(currency.toUpperCase()) : undefined;
+};
+
+// Méthode pour formater selon la langue
+packageSchema.methods.formatForLanguage = function(lang = 'fr') {
+  const packageObj = this.toObject();
+  
+  // Formater la formation si elle est populée
+  let formation = null;
+  if (packageObj.formationId && typeof packageObj.formationId === 'object') {
+    formation = {
+      _id: packageObj.formationId._id,
+      title: packageObj.formationId.title[lang] || packageObj.formationId.title.fr,
+      description: packageObj.formationId.description[lang] || packageObj.formationId.description.fr,
+      pdfUrl: packageObj.formationId.pdfUrl[lang] || packageObj.formationId.pdfUrl.fr,
+      isActive: packageObj.formationId.isActive,
+      createdAt: packageObj.formationId.createdAt,
+      updatedAt: packageObj.formationId.updatedAt
+    };
+  }
+  
+  return {
+    _id: packageObj._id,
+    name: packageObj.name[lang] || packageObj.name.fr,
+    description: packageObj.description ? (packageObj.description[lang] || packageObj.description.fr) : null,
+    pricing: packageObj.pricing instanceof Map ? Object.fromEntries(packageObj.pricing) : packageObj.pricing,
+    duration: packageObj.duration,
+    categories: packageObj.categories,
+    badge: packageObj.badge ? (packageObj.badge[lang] || packageObj.badge.fr) : null,
+    economy: packageObj.economy instanceof Map ? Object.fromEntries(packageObj.economy) : packageObj.economy,
+    formation: formation,
+    formationId: typeof packageObj.formationId === 'object' ? packageObj.formationId._id : packageObj.formationId,
+    isActive: packageObj.isActive,
+    createdAt: packageObj.createdAt
+  };
+};
+
+// toJSON amélioré
 packageSchema.methods.toJSON = function() {
   const packageObj = this.toObject();
   delete packageObj.__v;
   
-  // Convertir la Map pricing en objet normal pour le JSON
+  // Convertir les Maps en objets normaux pour le JSON
   if (packageObj.pricing instanceof Map) {
     packageObj.pricing = Object.fromEntries(packageObj.pricing);
+  }
+  
+  if (packageObj.economy instanceof Map) {
+    packageObj.economy = Object.fromEntries(packageObj.economy);
   }
   
   return packageObj;
 };
 
-// Pre-save hook pour valider les codes de devises (optionnel)
+// Pre-save hook pour valider les codes de devises
 packageSchema.pre('save', function(next) {
   if (this.pricing) {
-    // Validation optionnelle des codes ISO 4217 (3 lettres)
     for (let currency of this.pricing.keys()) {
       if (!/^[A-Z]{3}$/.test(currency)) {
         return next(new Error(`Code devise invalide: ${currency}. Doit être 3 lettres majuscules.`));
       }
     }
   }
+  
+  if (this.economy) {
+    for (let currency of this.economy.keys()) {
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        return next(new Error(`Code devise invalide pour economy: ${currency}. Doit être 3 lettres majuscules.`));
+      }
+    }
+  }
+  
   next();
 });
 

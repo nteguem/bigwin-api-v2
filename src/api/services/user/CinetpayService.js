@@ -106,7 +106,7 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
       currency: 'XOF',
       phoneNumber,
       customerName,
-      description: `${packageDoc.name} - ${packageDoc.duration} jours`,
+      description: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       notifyUrl: notify_url,
       returnUrl: return_url,
       status: 'PENDING'
@@ -120,7 +120,7 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
       site_id: parseInt(SITE_ID),
       transaction_id: transactionId,
       amount,
-      description: `${packageDoc.name} - ${packageDoc.duration} jours`,
+      description: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       customer_id: userId.toString(),
       customer_name: customerName,
       currency: 'XOF',
