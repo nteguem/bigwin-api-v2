@@ -156,7 +156,7 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
 
     // 1. Récupérer le package
     const packageDoc = await Package.findById(packageId);
-    console.log(`[AfribaPay-1] Package trouvé:`, packageDoc ? packageDoc.name : 'NON TROUVÉ');
+    console.log(`[AfribaPay-1] Package trouvé:`, packageDoc ? packageDoc.name.fr : 'NON TROUVÉ');
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
@@ -204,7 +204,7 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
       currency,
       order_id: orderId,
       merchant_key: MERCHANT_KEY,
-      reference_id: `${packageDoc.name} - ${packageDoc.duration} jours`,
+      reference_id: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       lang: 'fr',
       notify_url,
       return_url,
@@ -252,7 +252,7 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
       amount: responseData.amount || amount,
       currency,
       merchantKey: MERCHANT_KEY,
-      referenceId: `${packageDoc.name} - ${packageDoc.duration} jours`,
+      referenceId: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       notifyUrl: notify_url,
       returnUrl: return_url,
       cancelUrl: cancel_url,
