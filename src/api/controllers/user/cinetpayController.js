@@ -153,13 +153,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
     transaction.webhookSignature = req.body.signature;
 
     // Déterminer le statut
-    if (cmp_error_message === 'SUCCES') {
+    if (cmp_error_message == 'SUCCES') {
       transaction.status = 'ACCEPTED';
-    } else if (cmp_error_message === 'PAYMENT_FAILED') {
+    } else if (cmp_error_message == 'PAYMENT_FAILED') {
       transaction.status = 'REFUSED';
-    } else if (cmp_error_message === 'TRANSACTION_CANCEL') {
+    } else if (cmp_error_message == 'TRANSACTION_CANCEL') {
       transaction.status = 'CANCELED';
     } else {
+      console.log("sucesssddddd",cmp_error_message)
       transaction.status = 'REFUSED';
     }
 
