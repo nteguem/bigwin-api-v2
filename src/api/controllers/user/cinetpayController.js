@@ -113,7 +113,7 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  */
 exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
-  const { cpm_trans_id: transactionId, cmp_error_message } = req.body;
+  const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
   console.log('CinetPay webhook received:', req.body);
 
@@ -141,7 +141,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
     // Mettre à jour la transaction avec les données webhook
     transaction.cpmTransDate = req.body.cpm_trans_date ;
-    transaction.cpmErrorMessage = cmp_error_message;
+    transaction.cpmErrorMessage = cpm_error_message;
     transaction.paymentMethod = req.body.payment_method;
     transaction.cpmPhonePrefix = req.body.cmp_phone_prefixe;
     transaction.cpmLanguage = req.body.cmp_language;
@@ -153,14 +153,13 @@ exports.webhook = catchAsync(async (req, res, next) => {
     transaction.webhookSignature = req.body.signature;
 
     // Déterminer le statut
-    if (cmp_error_message == 'SUCCES') {
+    if (cpm_error_message === 'SUCCES') {
       transaction.status = 'ACCEPTED';
-    } else if (cmp_error_message == 'PAYMENT_FAILED') {
+    } else if (cpm_error_message === 'PAYMENT_FAILED') {
       transaction.status = 'REFUSED';
-    } else if (cmp_error_message == 'TRANSACTION_CANCEL') {
+    } else if (cpm_error_message === 'TRANSACTION_CANCEL') {
       transaction.status = 'CANCELED';
     } else {
-      console.log("sucesssddddd",cmp_error_message)
       transaction.status = 'REFUSED';
     }
 
