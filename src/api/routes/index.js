@@ -49,8 +49,10 @@ const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
 const afribaPayRoutes = require('./user/afribaPayRoutes');
+const userFormationRoutes = require('./user/formationRoutes'); 
 
 router.use('/user/coupons', couponRoutes);
+router.use('/user/formations', userFormationRoutes); 
 router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
 
 // ===== ROUTES COMMON =====

@@ -21,7 +21,7 @@ const formationSchema = new mongoose.Schema({
       required: [true, 'La description en anglais est requise']
     }
   },
-  pdfUrl: {
+  htmlContent: {
     fr: {
       type: String,
     },
@@ -29,6 +29,15 @@ const formationSchema = new mongoose.Schema({
       type: String,
     }
   },
+  // NOUVEAUX CHAMPS
+  isAccessible: {
+    type: Boolean,
+    default: true // true = accès libre, false = payant
+  },
+  requiredPackages: [{
+    type: mongoose.Schema.ObjectId,
+    ref: 'Package'
+  }],
   isActive: {
     type: Boolean,
     default: true
@@ -39,6 +48,8 @@ const formationSchema = new mongoose.Schema({
 
 // Index pour optimiser les requêtes
 formationSchema.index({ isActive: 1 });
+formationSchema.index({ isAccessible: 1 });
+formationSchema.index({ requiredPackages: 1 });
 
 const Formation = mongoose.model('Formation', formationSchema);
 

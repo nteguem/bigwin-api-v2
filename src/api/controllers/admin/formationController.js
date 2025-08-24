@@ -47,26 +47,28 @@ class FormationController {
   }
 
   // POST /formations - Créer une nouvelle formation
-async createFormation(req, res) {
-  try {
-    const { title, description, pdfUrl } = req.body;
-    const formationData = {
-      title,
-      description,
-      pdfUrl: pdfUrl || { fr: '', en: '' }
-    };
+  async createFormation(req, res) {
+    try {
+      const { title, description, htmlContent, isAccessible, requiredPackages } = req.body;
+      const formationData = {
+        title,
+        description,
+        htmlContent: htmlContent || { fr: '', en: '' },
+        isAccessible: isAccessible !== undefined ? isAccessible : true,
+        requiredPackages: requiredPackages || []
+      };
 
-    const formation = await formationService.createFormation(formationData);
-        res.status(201);
-    formatSuccess(res, {
-      data: formation,
-      message: 'Formation created successfully'
-    });
-    
-  } catch (error) {
-    formatError(res, error.message, 500);
+      const formation = await formationService.createFormation(formationData);
+      res.status(201);
+      formatSuccess(res, {
+        data: formation,
+        message: 'Formation created successfully'
+      });
+      
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
   }
-}
 
   // PUT /formations/:id - Mettre à jour une formation
   async updateFormation(req, res) {

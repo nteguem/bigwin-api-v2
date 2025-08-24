@@ -135,7 +135,6 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
       _id: packageObj.formationId._id,
       title: packageObj.formationId.title[lang] || packageObj.formationId.title.fr,
       description: packageObj.formationId.description[lang] || packageObj.formationId.description.fr,
-      pdfUrl: packageObj.formationId.pdfUrl[lang] || packageObj.formationId.pdfUrl.fr,
       isActive: packageObj.formationId.isActive,
       createdAt: packageObj.formationId.createdAt,
       updatedAt: packageObj.formationId.updatedAt

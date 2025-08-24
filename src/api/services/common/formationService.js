@@ -12,8 +12,9 @@ class FormationService {
       filter.isActive = isActive;
     }
 
-    // Récupérer les formations avec pagination
+    // Récupérer les formations avec pagination et populate des packages
     const formations = await Formation.find(filter)
+      .populate('requiredPackages', 'name description pricing duration badge economy')
       .skip(offset)
       .limit(limit)
       .sort({ createdAt: -1 });
@@ -37,7 +38,8 @@ class FormationService {
 
   // Récupérer une formation par ID
   async getFormationById(id, lang = 'fr') {
-    const formation = await Formation.findById(id);
+    const formation = await Formation.findById(id)
+      .populate('requiredPackages', 'name description pricing duration badge economy');
     
     if (!formation) {
       return null;
@@ -49,7 +51,9 @@ class FormationService {
   // Créer une nouvelle formation
   async createFormation(formationData) {
     const formation = await Formation.create(formationData);
-    return formation;
+    // Populate après création pour retourner les données complètes
+    return await Formation.findById(formation._id)
+      .populate('requiredPackages', 'name description pricing duration badge economy');
   }
 
   // Mettre à jour une formation
@@ -57,7 +61,7 @@ class FormationService {
     const formation = await Formation.findByIdAndUpdate(id, updates, {
       new: true,
       runValidators: true
-    });
+    }).populate('requiredPackages', 'name description pricing duration badge economy');
 
     return formation;
   }
@@ -68,7 +72,7 @@ class FormationService {
       id, 
       { isActive: false }, 
       { new: true }
-    );
+    ).populate('requiredPackages', 'name description pricing duration badge economy');
 
     return formation;
   }
@@ -79,7 +83,7 @@ class FormationService {
       id, 
       { isActive: true }, 
       { new: true }
-    );
+    ).populate('requiredPackages', 'name description pricing duration badge economy');
 
     return formation;
   }
@@ -90,7 +94,17 @@ class FormationService {
       _id: formation._id,
       title: formation.title[lang] || formation.title.fr,
       description: formation.description[lang] || formation.description.fr,
-      pdfUrl: formation.pdfUrl[lang] || formation.pdfUrl.fr,
+      htmlContent: formation.htmlContent[lang] || formation.htmlContent.fr,
+      isAccessible: formation.isAccessible,
+      requiredPackages: formation.requiredPackages ? formation.requiredPackages.map(pkg => ({
+        _id: pkg._id,
+        name: pkg.name[lang] || pkg.name.fr,
+        description: pkg.description ? (pkg.description[lang] || pkg.description.fr) : null,
+        pricing: Object.fromEntries(pkg.pricing),
+        duration: pkg.duration,
+        badge: pkg.badge ? (pkg.badge[lang] || pkg.badge.fr) : null,
+        economy: pkg.economy ? Object.fromEntries(pkg.economy) : null
+      })) : [],
       isActive: formation.isActive,
       createdAt: formation.createdAt,
       updatedAt: formation.updatedAt
@@ -99,7 +113,8 @@ class FormationService {
 
   // Récupérer toutes les formations actives (pour les packages)
   async getActiveFormations(lang = 'fr') {
-    const formations = await Formation.find({ isActive: true });
+    const formations = await Formation.find({ isActive: true })
+      .populate('requiredPackages', 'name description pricing duration badge economy');
     return formations.map(formation => this.formatFormation(formation, lang));
   }
 }
