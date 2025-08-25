@@ -29,15 +29,19 @@ const formationSchema = new mongoose.Schema({
       type: String,
     }
   },
-  // NOUVEAUX CHAMPS
   isAccessible: {
     type: Boolean,
-    default: true // true = accès libre, false = payant
+    default: true
   },
   requiredPackages: [{
     type: mongoose.Schema.ObjectId,
     ref: 'Package'
   }],
+  order: {
+    type: Number,
+    default: 0,
+    index: true
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -50,6 +54,7 @@ const formationSchema = new mongoose.Schema({
 formationSchema.index({ isActive: 1 });
 formationSchema.index({ isAccessible: 1 });
 formationSchema.index({ requiredPackages: 1 });
+formationSchema.index({ order: 1, createdAt: -1 }); // Index composé pour le tri
 
 const Formation = mongoose.model('Formation', formationSchema);
 

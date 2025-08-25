@@ -14,7 +14,8 @@ class UserFormationService {
       .populate('requiredPackages', 'name description pricing duration badge economy')
       .skip(offset)
       .limit(limit)
-      .sort({ createdAt: -1 });
+      .sort({ order: 1, createdAt: -1 }); 
+
 
     const total = await Formation.countDocuments({ isActive: true });
 
