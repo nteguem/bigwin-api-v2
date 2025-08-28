@@ -404,6 +404,21 @@
         "fr": "L'équipe extérieur ne concède aucun but",
         "en": "Away team doesn't concede any goal"
       }
+    },
+    {
+      "id": "both_teams_score_3plus",
+      "position": 28,
+      "priority": "medium",
+      "label": {
+        "fr": "Les deux équipes marquent et 3+ buts",
+        "en": "Both teams score and 3+ goals"
+      },
+      "expression": "bothTeamsScore === true && totalGoals >= 3",
+      "category": "goals",
+      "description": {
+        "fr": "Les deux équipes marquent et au moins 3 buts au total",
+        "en": "Both teams score and at least 3 total goals"
+      }
     }
   ],
   "parametricEvents": [
