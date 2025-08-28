@@ -410,14 +410,14 @@
       "position": 28,
       "priority": "medium",
       "label": {
-        "fr": "Les deux équipes marquent et 3+ buts",
-        "en": "Both teams score and 3+ goals"
+        "fr": "Les 2 marquent + 2.5",
+        "en": "Both score + 2.5"
       },
-      "expression": "bothTeamsScore === true && totalGoals >= 3",
+      "expression": "bothTeamsScore === true && totalGoals > 2.5",
       "category": "goals",
       "description": {
-        "fr": "Les deux équipes marquent et au moins 3 buts au total",
-        "en": "Both teams score and at least 3 total goals"
+        "fr": "Les deux équipes marquent et plus de 2.5 buts au total",
+        "en": "Both teams score and over 2.5 total goals"
       }
     }
   ],
