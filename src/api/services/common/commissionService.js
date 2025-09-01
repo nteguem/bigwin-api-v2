@@ -60,50 +60,13 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
     month,
     year,
     status: 'pending'
-  })
-  .populate('user', 'phone firstName lastName')
-  .populate('subscription', 'pricing createdAt')
-  .sort({ createdAt: -1 });
+  }).sort({ createdAt: -1 });
 
-  // Séparer les commissions valides des corrompues
-  const validCommissions = [];
-  const corruptedCommissions = [];
-
-  pendingCommissions.forEach(commission => {
-    if (!commission.user || !commission.subscription) {
-      corruptedCommissions.push({
-        id: commission._id,
-        hasUser: !!commission.user,
-        hasSubscription: !!commission.subscription,
-        userId: commission.user ? commission.user._id : null,
-        subscriptionId: commission.subscription ? commission.subscription._id : null,
-        createdAt: commission.createdAt,
-        commissionAmount: commission.commissionAmount,
-        currency: commission.currency
-      });
-    } else {
-      validCommissions.push(commission);
-    }
-  });
-
-  // Logger les problèmes de données corrompues
-  if (corruptedCommissions.length > 0) {
-    console.warn(`⚠️ DONNÉES CORROMPUES trouvées pour l'affilié ${affiliateId}:`);
-    console.warn(`- Commissions totales trouvées: ${pendingCommissions.length}`);
-    console.warn(`- Commissions valides: ${validCommissions.length}`);
-    console.warn(`- Commissions corrompues: ${corruptedCommissions.length}`);
-    console.warn('Détails des commissions corrompues:');
-    corruptedCommissions.forEach(corrupt => {
-      console.warn(`  • ID: ${corrupt.id}, User: ${corrupt.hasUser ? '✓' : '✗'}, Subscription: ${corrupt.hasSubscription ? '✓' : '✗'}, Montant: ${corrupt.commissionAmount} ${corrupt.currency}`);
-    });
-    console.warn('🔧 Action recommandée: Vérifiez ces commissions et corrigez les données manquantes');
-  }
-
-  // Traiter uniquement les commissions valides
+  // Grouper par devise directement
   const commissionsByCurrency = {};
   let totalCommissions = 0;
 
-  validCommissions.forEach(commission => {
+  pendingCommissions.forEach(commission => {
     const currency = commission.currency;
     
     if (!commissionsByCurrency[currency]) {
@@ -119,9 +82,8 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
     commissionsByCurrency[currency].count += 1;
     commissionsByCurrency[currency].commissions.push({
       id: commission._id,
-      subscriptionId: commission.subscription._id,
-      userPhone: commission.user.phone,
-      userName: `${commission.user.firstName || ''} ${commission.user.lastName || ''}`.trim(),
+      subscriptionId: commission.subscription, // ID brut, sans populate
+      userId: commission.user, // ID brut, sans populate
       amount: commission.amount,
       currency: commission.currency,
       commissionRate: commission.commissionRate,
@@ -137,28 +99,19 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
     affiliateId,
     totalPending: totalCommissions,
     currencyBreakdown: Object.values(commissionsByCurrency),
-    allCommissions: validCommissions.map(commission => ({
+    allCommissions: pendingCommissions.map(commission => ({
       id: commission._id,
-      subscriptionId: commission.subscription._id,
-      userPhone: commission.user.phone,
-      userName: `${commission.user.firstName || ''} ${commission.user.lastName || ''}`.trim(),
+      subscriptionId: commission.subscription, // ID brut
+      userId: commission.user, // ID brut
       amount: commission.amount,
       currency: commission.currency,
       commissionRate: commission.commissionRate,
       commissionAmount: commission.commissionAmount,
       createdAt: commission.createdAt
-    })),
-    
-    // Informations sur l'intégrité des données
-    dataIntegrityInfo: {
-      totalCommissionsFound: pendingCommissions.length,
-      validCommissions: validCommissions.length,
-      corruptedCommissions: corruptedCommissions.length,
-      corruptedDetails: corruptedCommissions,
-      hasDataIssues: corruptedCommissions.length > 0
-    }
+    }))
   };
 
+  console.log(`✅ Traitement réussi: ${totalCommissions} commissions pending`);
   return report;
 }
 
