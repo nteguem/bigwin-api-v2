@@ -3,10 +3,10 @@
  */
 
 const cron = require('node-cron');
-const mongoose = require('mongoose');
 const logger = require('../../../utils/logger');
 const Corrector = require('../../../core/events/Corrector');
 const { findMatch } = require('../../../core/sports/providers/initService');
+const Prediction = require('../../models/common/Prediction');
 
 class PredictionCronService {
   constructor() {
@@ -34,9 +34,9 @@ class PredictionCronService {
     try {
       logger.info('Starting Prediction CRON Service...');
       
-      // Vérifier la connexion MongoDB
-      if (mongoose.connection.readyState !== 1) {
-        throw new Error('MongoDB not connected');
+      // Vérifier que le modèle Prediction est disponible
+      if (!Prediction) {
+        throw new Error('Prediction model not available');
       }
 
       // Créer les tâches CRON pour chaque heure
@@ -60,7 +60,7 @@ class PredictionCronService {
       });
 
       this.isRunning = true;
-      logger.info(`✅ Prediction CRON Service started with ${this.correctionHours.length} scheduled times`);
+      logger.info(`Prediction CRON Service started with ${this.correctionHours.length} scheduled times`);
       logger.info(`Correction hours (UTC): ${this.correctionHours.join('h, ')}h`);
       
     } catch (error) {
@@ -74,22 +74,25 @@ class PredictionCronService {
    */
   async runCorrectionCycle(triggerHour) {
     const startTime = Date.now();
-    logger.info(`🕐 Starting correction cycle at ${triggerHour}:00 UTC`);
+    logger.info(`Starting correction cycle at ${triggerHour}:00 UTC`);
 
     try {
-      const Prediction = mongoose.model('Prediction');
-      
-      // Trouver toutes les prédictions pending où le match est passé
-      const cutoffTime = new Date();
-      
+      // Calculer les bornes de la journée en cours (UTC)
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
       const predictionsToProcess = await Prediction.find({
         status: 'pending',
-        'matchData.date': { $lt: cutoffTime }, // Match déjà passé
+        // Match de la journée en cours ET déjà passé
+        'matchData.date': { 
+          $gte: startOfDay,   // Après le début de la journée (00:00 UTC)
+          $lt: now            // Mais avant maintenant (match passé)
+        },
         $or: [
           { 'correctionMetadata.attempts': { $exists: false } },
           { 'correctionMetadata.attempts': { $lt: this.retryAttempts } }
         ]
-      }).limit(200); // Limiter pour éviter la surcharge
+      }).limit(200);
 
       if (predictionsToProcess.length === 0) {
         logger.info(`No predictions to process at ${triggerHour}:00`);
@@ -126,7 +129,7 @@ class PredictionCronService {
       this.stats.lastRun = new Date();
 
       const duration = Date.now() - startTime;
-      logger.info(`✅ Correction cycle completed in ${duration}ms: ${corrected} corrected, ${errors} errors`);
+      logger.info(`Correction cycle completed in ${duration}ms: ${corrected} corrected, ${errors} errors`);
       
     } catch (error) {
       logger.error(`Error in correction cycle: ${error.message}`);
@@ -204,8 +207,6 @@ class PredictionCronService {
    */
   async updatePredictionStatus(predictionId, newStatus, correctionResult) {
     try {
-      const Prediction = mongoose.model('Prediction');
-      
       const updateData = {
         status: newStatus,
         'correctionMetadata.correctedAt': new Date(),
@@ -238,8 +239,6 @@ class PredictionCronService {
    */
   async incrementAttempts(predictionId) {
     try {
-      const Prediction = mongoose.model('Prediction');
-      
       await Prediction.findByIdAndUpdate(predictionId, {
         $inc: { 'correctionMetadata.attempts': 1 },
         $set: { 'correctionMetadata.lastAttempt': new Date() }
@@ -272,7 +271,6 @@ class PredictionCronService {
       
       // Enregistrer l'erreur
       try {
-        const Prediction = mongoose.model('Prediction');
         await Prediction.findByIdAndUpdate(prediction._id, {
           $push: { 'correctionMetadata.errors': error.message },
           $set: { 'correctionMetadata.lastAttempt': new Date() }
@@ -299,7 +297,7 @@ class PredictionCronService {
     
     this.cronJobs = [];
     
-    logger.info('✅ Prediction CRON Service stopped');
+    logger.info('Prediction CRON Service stopped');
   }
 
   /**
