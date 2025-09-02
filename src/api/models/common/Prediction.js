@@ -6,7 +6,7 @@ const PredictionSchema = new mongoose.Schema({
     ref: "Ticket",
     required: true
   },
-
+correctionAttempts: { type: Number, default: 0 },
   matchData: {
     id: { type: String, required: true },
     date: { type: Date, required: true },
