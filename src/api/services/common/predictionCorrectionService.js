@@ -193,7 +193,7 @@ class PredictionCronService {
       const dateStr = new Date(originalDate).toISOString().split('T')[0];
       
       // Utiliser findMatch du initService
-      const matchData = await findMatch(sport, matchId, dateStr, true); // forceUpdate = true
+      const matchData = await findMatch(sport, matchId, dateStr, false); // forceUpdate = true
       
       return matchData;
     } catch (error) {
