@@ -19,8 +19,8 @@ class DataRefreshService {
     try {
       logger.info('Starting Data Refresh CRON Service...');
 
-      // Toutes les 2h à la minute 5
-      this.cronJob = cron.schedule('5 */2 * * *', async () => {
+      // Toutes les 45 minutes
+      this.cronJob = cron.schedule('*/45 * * * *', async () => {
         await this.refreshFootballData();
       }, {
         scheduled: false,
@@ -29,7 +29,7 @@ class DataRefreshService {
 
       this.cronJob.start();
       this.isRunning = true;
-      logger.info('Data Refresh CRON Service started (every 2h at minute 5 UTC)');
+      logger.info('Data Refresh CRON Service started (every 45 minutes UTC)');
     } catch (error) {
       logger.error(`Failed to start Data Refresh CRON Service: ${error.message}`);
       throw error;
