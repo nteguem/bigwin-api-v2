@@ -120,39 +120,30 @@ exports.getFixtures = async (req, res, next) => {
     const { sport, date, country, league } = req.params;
     const force = req.query.force === 'true';
 
-    console.log('=== FIXTURES DEBUG ===');
-    console.log('Sport:', sport);
-    console.log('League:', league);
-
     if (!sportsConfig[sport]) {
       throw new AppError(`Sport not found: ${sport}`, 404);
     }
 
     const data = await fetchAndStoreData(sport, date, force);
-    console.log('Data loaded, matches count:', data.matches.length);
 
+    // Normaliser le nom du pays depuis l'URL
     const countryFromUrl = country.replace(/-/g, ' ');
+    
+    // Trouver le pays correspondant (case-insensitive)
     const countryName = data.indexes.countries.find(
       c => c.toLowerCase() === countryFromUrl.toLowerCase()
     );
-
-    console.log('Country found:', countryName);
 
     if (!countryName) {
       throw new AppError(`Country not found: ${country}`, 404);
     }
 
+    // Filtrer les courses (fixtures) par pays et hippodrome (league)
     const fixtures = data.matches.filter(
       match => 
         match.league.country.toLowerCase() === countryName.toLowerCase() && 
         match.league.id === league
     );
-
-    console.log('Fixtures found:', fixtures.length);
-    if (fixtures.length > 0) {
-      console.log('First fixture ID:', fixtures[0].id);
-      console.log('First fixture league:', fixtures[0].league.name);
-    }
 
     if (fixtures.length === 0) {
       throw new AppError(`No fixtures found for league: ${league}`, 404);
@@ -160,24 +151,40 @@ exports.getFixtures = async (req, res, next) => {
 
     // Format spécialisé pour les courses hippiques
     if (sport === 'horse') {
-      try {
-        const horseData = exports.formatHorseRaces(fixtures, league);
-        formatSuccess(res, { data: horseData });
-
-        return;
-      } catch (error) {
-        console.log('Error in formatHorseRaces:', error.message);
-        throw error;
-      }
+      const horseData = this.formatHorseRaces(fixtures, league);
+      formatSuccess(res, horseData);
+      return;
     }
 
     // Format standard pour les autres sports
-    console.log('=== STANDARD FORMAT ===');
-    // ... reste du code standard
+    let fixturesWithFlag = fixtures;
     
+    if (sport !== 'horse') {
+      const countryId = country.toLowerCase().replace(/\s+/g, '-');
+      const countryFlag = `https://media.api-sports.io/flags/${countryId.substring(0, 2)}.svg`;
+      
+      fixturesWithFlag = fixtures.map(fixture => ({
+        ...fixture,
+        league: {
+          ...fixture.league,
+          countryFlag
+        }
+      }));
+    } else {
+      fixturesWithFlag = fixtures.map(fixture => ({
+        ...fixture,
+        league: {
+          ...fixture.league,
+          countryFlag: 'https://media.api-sports.io/flags/fr.svg'
+        }
+      }));
+    }
+
+    formatSuccess(res, {
+      data: fixturesWithFlag,
+      count: fixturesWithFlag.length
+    });
   } catch (error) {
-    console.log('=== ERROR IN getFixtures ===');
-    console.log('Error:', error.message);
     next(error);
   }
 };
