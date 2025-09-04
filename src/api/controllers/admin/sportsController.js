@@ -1,5 +1,5 @@
 /**
- * @fileoverview Contrôleur pour les routes sportives avec format spécialisé pour courses hippiques
+ * @fileoverview Contrôleur pour les routes sportives - VERSION CORRIGÉE
  */
 const {
   sportsConfig,
@@ -88,16 +88,87 @@ exports.getLeagues = async (req, res, next) => {
       throw new AppError(`Country not found: ${country}`, 404);
     }
 
-    // Pour les courses hippiques, utiliser les hippodromes comme ligues avec emoji
+    // Pour les courses hippiques, enrichir les données hippodromes
+    if (sport === 'horse') {
+      const hippodromes = data.matches
+        .filter(match => match.league.country.toLowerCase() === countryName.toLowerCase())
+        .reduce((acc, match) => {
+          let hippodrome = acc.find(h => h.id === match.league.id);
+          
+          if (!hippodrome) {
+            // Extraire le numéro de réunion depuis l'ID du match (ex: R2-C1 -> R2)
+            const reunionNumber = match.id.split('-')[0]; // R2
+            
+            hippodrome = {
+              id: match.league.id,
+              name: match.league.name,
+              logo: exports.getHippodromeEmoji(match.league.id),
+              reunionNumber: reunionNumber,
+              racesCount: 0,
+              disciplines: new Set(),
+              specialRaces: [],
+              weather: match.sportSpecific?.weather,
+              nextRaceTime: null
+            };
+            acc.push(hippodrome);
+          }
+          
+          // Compter les courses
+          hippodrome.racesCount++;
+          
+          // Collecter les disciplines
+          if (match.sportSpecific?.discipline) {
+            hippodrome.disciplines.add(match.sportSpecific.discipline);
+          }
+          
+          // Détecter les courses spéciales (Quinté Plus, etc.)
+          if (match.sportSpecific?.bettingTypes) {
+            const hasQuinte = match.sportSpecific.bettingTypes.some(bet => 
+              bet.type.toLowerCase().includes('multi') || 
+              bet.type.toLowerCase().includes('quinté')
+            );
+            if (hasQuinte && !hippodrome.specialRaces.includes('Q+')) {
+              hippodrome.specialRaces.push('Q+');
+            }
+          }
+          
+          // Trouver la prochaine course
+          const raceTime = new Date(match.date);
+          const now = new Date();
+          if (raceTime > now && (!hippodrome.nextRaceTime || raceTime < new Date(hippodrome.nextRaceTime))) {
+            hippodrome.nextRaceTime = match.date;
+          }
+          
+          return acc;
+        }, []);
+      
+      // Transformer les disciplines en tableau et trier par numéro de réunion
+      const leagues = hippodromes.map(h => ({
+        ...h,
+        disciplines: Array.from(h.disciplines),
+        displayName: `${h.reunionNumber} ${h.name.toUpperCase()}`
+      })).sort((a, b) => {
+        // Trier par numéro de réunion (R1, R2, R3...)
+        const numA = parseInt(a.reunionNumber.replace('R', ''));
+        const numB = parseInt(b.reunionNumber.replace('R', ''));
+        return numA - numB;
+      });
+
+      return formatSuccess(res, {
+        data: leagues,
+        count: leagues.length
+      });
+    }
+
+    // Code standard pour les autres sports
     const leagues = data.matches
       .filter(match => match.league.country.toLowerCase() === countryName.toLowerCase())
       .reduce((acc, match) => {
-        // Éviter les doublons
         if (!acc.find(l => l.id === match.league.id)) {
           acc.push({
             id: match.league.id,
             name: match.league.name,
-            logo: sport === 'horse' ? this.getHippodromeEmoji(match.league.id) : match.league.logo
+            logo: match.league.logo
           });
         }
         return acc;
@@ -151,9 +222,10 @@ exports.getFixtures = async (req, res, next) => {
 
     // Format spécialisé pour les courses hippiques
     if (sport === 'horse') {
-      const horseData = this.formatHorseRaces(fixtures, league);
-      formatSuccess(res, horseData);
-      return;
+      const horseData = exports.formatHorseRaces(fixtures, league);
+      return formatSuccess(res, {
+        data: horseData
+      });
     }
 
     // Format standard pour les autres sports
@@ -209,12 +281,15 @@ exports.getMatchDetails = async (req, res, next) => {
 
     // Format spécialisé pour les détails des courses hippiques
     if (sport === 'horse') {
-      const raceDetails = this.formatHorseRaceDetails(matchData);
-      formatSuccess(res, { data: raceDetails });
-      return;
+      const raceDetails = exports.formatHorseRaceDetails(matchData);
+      return formatSuccess(res, { 
+        data: raceDetails 
+      });
     }
 
-    formatSuccess(res, { data: matchData });
+    formatSuccess(res, { 
+      data: matchData 
+    });
   } catch (error) {
     next(error);
   }
@@ -232,39 +307,39 @@ exports.formatHorseRaces = (fixtures, leagueId) => {
       name: hippodrome.league.name,
       fullName: hippodrome.venue.name,
       city: hippodrome.venue.city,
-      emoji: this.getHippodromeEmoji(leagueId)
+      emoji: exports.getHippodromeEmoji(leagueId)
     },
     date: fixtures[0].date.split('T')[0],
-    weather: fixtures[0].sportSpecific.weather,
-    meetingType: fixtures[0].sportSpecific.meetingType,
+    weather: fixtures[0].sportSpecific?.weather,
+    meetingType: fixtures[0].sportSpecific?.meetingType,
     races: fixtures.map(fixture => ({
       id: fixture.id,
-      raceNumber: fixture.sportSpecific.courseNumber,
-      name: fixture.sportSpecific.courseName,
-      shortName: fixture.sportSpecific.courseNameShort,
+      raceNumber: fixture.sportSpecific?.courseNumber,
+      name: fixture.sportSpecific?.courseName,
+      shortName: fixture.sportSpecific?.courseNameShort,
       startTime: fixture.date,
-      discipline: fixture.sportSpecific.discipline,
-      distance: fixture.sportSpecific.distance,
-      track: fixture.sportSpecific.track,
-      status: this.formatRaceStatus(fixture.status),
-      runners: fixture.sportSpecific.runners,
-      conditions: fixture.sportSpecific.conditions,
+      discipline: fixture.sportSpecific?.discipline,
+      distance: fixture.sportSpecific?.distance,
+      track: fixture.sportSpecific?.track,
+      status: exports.formatRaceStatus(fixture.status),
+      runners: fixture.sportSpecific?.runners,
+      conditions: fixture.sportSpecific?.conditions,
       prize: {
-        total: fixture.sportSpecific.prize.total,
-        first: fixture.sportSpecific.prize.first,
-        second: fixture.sportSpecific.prize.second,
-        third: fixture.sportSpecific.prize.third
+        total: fixture.sportSpecific?.prize?.total,
+        first: fixture.sportSpecific?.prize?.first,
+        second: fixture.sportSpecific?.prize?.second,
+        third: fixture.sportSpecific?.prize?.third
       },
-      betting: fixture.sportSpecific.bettingTypes.map(bet => ({
+      betting: fixture.sportSpecific?.bettingTypes?.map(bet => ({
         type: bet.type,
         stake: bet.baseStake,
         available: bet.available
-      })),
-      result: fixture.score.details.arrivee ? {
+      })) || [],
+      result: fixture.score?.details?.arrivee ? {
         finishing: fixture.score.details.arrivee,
         inquiry: fixture.score.details.enquete
       } : null,
-      duration: fixture.sportSpecific.raceDuration
+      duration: fixture.sportSpecific?.raceDuration
     })).sort((a, b) => a.raceNumber - b.raceNumber),
     totalRaces: fixtures.length
   };
@@ -277,15 +352,15 @@ exports.formatHorseRaceDetails = (matchData) => {
   return {
     race: {
       id: matchData.id,
-      number: matchData.sportSpecific.courseNumber,
-      name: matchData.sportSpecific.courseName,
-      shortName: matchData.sportSpecific.courseNameShort,
+      number: matchData.sportSpecific?.courseNumber,
+      name: matchData.sportSpecific?.courseName,
+      shortName: matchData.sportSpecific?.courseNameShort,
       startTime: matchData.date,
-      discipline: matchData.sportSpecific.discipline,
-      distance: matchData.sportSpecific.distance,
-      track: matchData.sportSpecific.track,
-      status: this.formatRaceStatus(matchData.status),
-      runners: matchData.sportSpecific.runners
+      discipline: matchData.sportSpecific?.discipline,
+      distance: matchData.sportSpecific?.distance,
+      track: matchData.sportSpecific?.track,
+      status: exports.formatRaceStatus(matchData.status),
+      runners: matchData.sportSpecific?.runners
     },
     hippodrome: {
       id: matchData.league.id,
@@ -294,15 +369,15 @@ exports.formatHorseRaceDetails = (matchData) => {
       city: matchData.venue.city,
       emoji: exports.getHippodromeEmoji(matchData.league.id)
     },
-    conditions: matchData.sportSpecific.conditions,
-    prize: matchData.sportSpecific.prize,
-    betting: matchData.sportSpecific.bettingTypes,
-    weather: matchData.sportSpecific.weather,
-    meetingType: matchData.sportSpecific.meetingType,
-    result: matchData.score.details.arrivee ? {
+    conditions: matchData.sportSpecific?.conditions,
+    prize: matchData.sportSpecific?.prize,
+    betting: matchData.sportSpecific?.bettingTypes,
+    weather: matchData.sportSpecific?.weather,
+    meetingType: matchData.sportSpecific?.meetingType,
+    result: matchData.score?.details?.arrivee ? {
       finishing: matchData.score.details.arrivee,
       inquiry: matchData.score.details.enquete,
-      duration: matchData.sportSpecific.raceDuration
+      duration: matchData.sportSpecific?.raceDuration
     } : null
   };
 };
