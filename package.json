@@ -15,6 +15,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@google-cloud/pubsub": "^5.2.0",
     "agenda": "^5.0.0",
     "axios": "^1.9.0",
     "bcrypt": "^6.0.0",
@@ -26,6 +27,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
+    "googleapis": "^159.0.0",
     "helmet": "^8.1.0",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",

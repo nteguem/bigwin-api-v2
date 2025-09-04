@@ -49,11 +49,13 @@ const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
 const afribaPayRoutes = require('./user/afribaPayRoutes');
-const userFormationRoutes = require('./user/formationRoutes'); 
+const userFormationRoutes = require('./user/formationRoutes');
+// const googlePlayRoutes = require('./user/googlePlayRoutes'); 
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user/formations', userFormationRoutes); 
-router.use('/user', userSubscriptionRoutes); // Inclut packages + subscriptions
+router.use('/user', userSubscriptionRoutes);
+// router.use('/user/google-play', googlePlayRoutes);
 
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');

@@ -1,3 +1,4 @@
+
 /**
  * @fileoverview Service d'initialisation des données sportives à la demande
  */
@@ -10,6 +11,7 @@ const VolleyballProvider = require('./VolleyballProvider');
 const BaseballProvider = require('./BaseballProvider');
 const HockeyProvider = require('./HockeyProvider');
 const TennisProvider = require('./TennisProvider');
+const HorseProvider = require('./HorseProvider'); // NOUVEAU
 const FileStorageManager = require('../storage/FileStorageManager');
 const logger = require('../../../utils/logger');
 const path = require('path');
@@ -82,6 +84,14 @@ const sportsConfig = {
     apiKey: process.env.RAPID_API_KEY,
     baseUrl: 'https://tennis-api-atp-wta-itf.p.rapidapi.com',
     host: 'tennis-api-atp-wta-itf.p.rapidapi.com'
+  },
+  horse: {
+    name: 'Courses Hippiques',
+    icon: '🏇',
+    sportId: 'horse',
+    apiKey: null, 
+    baseUrl: 'https://online.turfinfo.api.pmu.fr/rest/client/61',
+    host: 'online.turfinfo.api.pmu.fr'
   }
 };
 
@@ -94,10 +104,11 @@ const providers = {
   volleyball: new VolleyballProvider(sportsConfig.volleyball, { httpClient, logger }),
   baseball: new BaseballProvider(sportsConfig.baseball, { httpClient, logger }),
   hockey: new HockeyProvider(sportsConfig.hockey, { httpClient, logger }),
-  tennis: new TennisProvider(sportsConfig.tennis, { httpClient, logger })
+  tennis: new TennisProvider(sportsConfig.tennis, { httpClient, logger }),
+  horse: new HorseProvider(sportsConfig.horse, { httpClient, logger }) // NOUVEAU
 };
 
-// Stockage local
+// Stockage local (reste identique)
 const storageManager = new FileStorageManager({
   basePath: path.join(process.cwd(), 'data', 'sports')
 }, { logger });
@@ -107,6 +118,7 @@ const storageManager = new FileStorageManager({
  */
 const fetchAndStoreData = async (sport, date, forceRefresh = false) => {
   try {
+    
     const exists = await storageManager.dataExists(sport, date);
     
     if (exists && !forceRefresh) {
@@ -118,10 +130,8 @@ const fetchAndStoreData = async (sport, date, forceRefresh = false) => {
     if (!provider) throw new Error(`No provider configured for sport: ${sport}`);
     
     const rawData = await provider.fetchFixtures(date);
-    
     // Gérer les providers avec normalizeData async ou sync
     const normalizedData = await Promise.resolve(provider.normalizeData(rawData));
-    
     await storageManager.saveData(sport, date, normalizedData);
     
     return normalizedData;
@@ -139,7 +149,7 @@ const getAvailableDates = async (sport) => {
 };
 
 /**
- * Recherche un match précis dans les données
+ * Recherche un match/course précis dans les données
  */
 const findMatch = async (sport, matchId, date = null, forceUpdate = false) => {
   try {
