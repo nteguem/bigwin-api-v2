@@ -6,73 +6,29 @@ const PredictionSchema = new mongoose.Schema({
     ref: "Ticket",
     required: true
   },
-correctionAttempts: { type: Number, default: 0 },
-  matchData: {
-    id: { type: String, required: true },
-    date: { type: Date, required: true },
-    league: {
-      id: String,
-      name: String,
-      country: String,
-      countryFlag: String,
-      logo: String
-    },
-    teams: {
-      home: {
-        id: String,
-        name: String,
-        logo: String
-      },
-      away: {
-        id: String,
-        name: String,
-        logo: String
-      }
-    },
-    venue: {
-      id: { type: Number, default: null },
-      name: String,
-      city: String
-    },
-    status: String,
-    score: {
-      home: Number,
-      away: Number,
-      details: mongoose.Schema.Types.Mixed
-    },
-    sportSpecific: mongoose.Schema.Types.Mixed
+  
+  correctionAttempts: { 
+    type: Number, 
+    default: 0 
   },
-
-  event: {
-    id: { type: String, required: true },
-    position: Number,
-    priority: String,
-    label: {
-      fr: String,
-      en: String,
-      current: String
-    },
-    expression: String,
-    category: String,
-    description: {
-      fr: String,
-      en: String,
-      current: String
-    },
-    parametric: Boolean,
-    params: mongoose.Schema.Types.Mixed
-  },
-
+  
+  // pour gérer la flexibilité des différents sports
+  matchData: mongoose.Schema.Types.Mixed,
+  
+  // pour gérer les événements hippiques et autres
+  event: mongoose.Schema.Types.Mixed,
+  
   odds: {
     type: Number,
     required: true
   },
-
+  
   status: {
     type: String,
     enum: ['pending', 'won', 'lost', 'void'],
     default: 'pending'
   },
+  
   sport: {
     id: String,
     name: String,
