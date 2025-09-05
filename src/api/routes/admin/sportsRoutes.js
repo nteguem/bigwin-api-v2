@@ -21,4 +21,14 @@ router.get('/:sport/dates/:date/countries/:country/leagues/:league/fixtures', sp
 // Détail d’un match spécifique (option ?date=)
 router.get('/:sport/matches/:matchId', sportsController.getMatchDetails);
 
+//special route course hippique 
+// Participants d'une course
+router.get('/:sport/races/:raceId/participants', sportsController.getRaceParticipants);
+
+// Événements disponibles pour une course
+router.get('/:sport/races/:raceId/events', sportsController.getHorseEvents);
+
+// Construire un événement avec sélection
+router.post('/:sport/races/:raceId/events/build', sportsController.buildHorseEvent);
+
 module.exports = router;

@@ -66,6 +66,88 @@ class HorseProvider extends SportProvider {
   }
   
   /**
+   * Récupère les participants d'une course spécifique
+   * @param {string} date - Date au format YYYY-MM-DD
+   * @param {string} raceId - ID de la course au format R2-C1
+   * @returns {Promise<Object>} - Données des participants
+   */
+  async fetchParticipants(date, raceId) {
+    try {
+      // Convertir YYYY-MM-DD en DDMMYYYY pour l'API PMU
+      const formattedDate = this.formatDateForPMU(date);
+      
+      // Extraire R2 et C1 depuis R2-C1
+      const [reunion, course] = raceId.split('-');
+      
+      this.logger.info(`Fetching participants for race ${raceId} on ${date}`);
+      
+      // URL: /programme/05092025/R2/C2/participants
+      const url = `${this.baseUrl}/programme/${formattedDate}/${reunion}/${course}/participants`;
+      
+      const response = await this.httpClient.get(url, {
+        params: { 
+          specialisation: 'INTERNET' 
+        },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+          'Referer': 'https://www.pmu.fr/',
+          'Origin': 'https://www.pmu.fr'
+        },
+        timeout: 30000
+      });
+      
+      return response;
+    } catch (error) {
+      throw this.handleApiError(error, `fetchParticipants(${date}, ${raceId})`);
+    }
+  }
+
+    /**
+   * Normalise les données des participants
+   * @param {Object} rawData - Données brutes des participants
+   * @returns {Object} - Participants normalisés
+   */
+  normalizeParticipants(rawData) {
+    const participants = rawData.participants || [];
+    
+    return {
+      raceId: null, // Sera ajouté par le controller
+      participants: participants.map(participant => ({
+        numero: participant.numPmu,
+        nom: participant.nom,
+        age: participant.age,
+        sexe: participant.sexe,
+        race: participant.race,
+        statut: participant.statut,
+        placeCorde: participant.placeCorde,
+        proprietaire: participant.proprietaire,
+        entraineur: participant.entraineur,
+        jockey: participant.driver,
+        musique: participant.musique,
+        performances: {
+          courses: participant.nombreCourses,
+          victoires: participant.nombreVictoires,
+          places: participant.nombrePlaces,
+          gainsCarriere: participant.gainsParticipant?.gainsCarriere || 0
+        },
+        genealogie: {
+          pere: participant.nomPere,
+          mere: participant.nomMere,
+          pereMere: participant.nomPereMere
+        },
+        casaque: participant.urlCasaque,
+        handicap: participant.handicapPoids,
+        allure: participant.allure
+      })).filter(p => p.statut === 'PARTANT') // Seulement les partants
+        .sort((a, b) => a.numero - b.numero), // Trier par numéro
+      
+      totalPartants: participants.filter(p => p.statut === 'PARTANT').length,
+      sprites: rawData.spriteCasaques || []
+    };
+  }
+  /**
    * Transforme les données brutes en format standardisé
    * @param {Object} rawData - Données brutes de l'API PMU
    * @returns {Object} - Données normalisées
