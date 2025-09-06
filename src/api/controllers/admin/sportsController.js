@@ -414,9 +414,9 @@ exports.formatRaceStatus = (status) => {
   };
   
   return statusMap[status] || status;
-};
-
-/**
+};/**
+ * GET /api/sports/:sport/races/:raceId/participants?date=YYYY-MM-DD
+ *//**
  * GET /api/sports/:sport/races/:raceId/participants?date=YYYY-MM-DD
  */
 exports.getRaceParticipants = async (req, res, next) => {
@@ -516,12 +516,13 @@ exports.getHorseEvents = async (req, res, next) => {
 };
 
 /**
- * POST /api/sports/:sport/races/:raceId/events/build
+ * POST /api/sports/:sport/races/:raceId/events/build?date=YYYY-MM-DD
  */
 exports.buildHorseEvent = async (req, res, next) => {
   try {
     const { sport, raceId } = req.params;
-    const { eventType, selectedHorses, date } = req.body;
+    const { date } = req.query;
+    const { eventType, selectedHorses, userInput } = req.body;
 
     if (!sportsConfig[sport]) {
       throw new AppError(`Sport not found: ${sport}`, 404);
@@ -531,8 +532,12 @@ exports.buildHorseEvent = async (req, res, next) => {
       throw new AppError(`Horse event building only available for horse racing`, 400);
     }
 
-    if (!eventType || !selectedHorses || !Array.isArray(selectedHorses) || !date) {
-      throw new AppError(`Missing required fields: eventType, selectedHorses (array), date`, 400);
+    if (!date) {
+      throw new AppError(`Date parameter is required`, 400);
+    }
+
+    if (!eventType) {
+      throw new AppError(`Missing required field: eventType`, 400);
     }
 
     // Récupérer les participants pour validation
@@ -548,16 +553,15 @@ exports.buildHorseEvent = async (req, res, next) => {
     const rawData = await horseProvider.fetchParticipants(date, raceId);
     const participantsData = horseProvider.normalizeParticipants(rawData);
 
-    // Valider les chevaux sélectionnés
-    const validNumbers = participantsData.participants.map(p => p.numero);
-    const invalidHorses = selectedHorses.filter(num => !validNumbers.includes(num));
-    
-    if (invalidHorses.length > 0) {
-      throw new AppError(`Invalid horse numbers: ${invalidHorses.join(', ')}. Valid numbers: ${validNumbers.join(', ')}`, 400);
-    }
-
-    // Construire l'événement
-    const builtEvent = exports.buildHorseEventFromSelection(eventType, selectedHorses, participantsData.participants, raceId);
+    // Construire l'événement selon le type
+    const builtEvent = exports.buildHorseEventFromUserInput(
+      eventType, 
+      selectedHorses, 
+      userInput, 
+      participantsData.participants, 
+      participantsData.totalPartants,
+      raceId
+    );
 
     formatSuccess(res, {
       data: {
@@ -570,309 +574,385 @@ exports.buildHorseEvent = async (req, res, next) => {
 };
 
 /**
- * Génère les événements disponibles selon le nombre de partants - VERSION FINALE PMU
+ * Génère les 4 types d'événements disponibles pour le client
  */
 exports.generateHorseEvents = (totalPartants, participants) => {
   const events = [];
 
-  // Déterminer le nombre de places payées pour le Simple Placé
-  const placesPayees = totalPartants >= 8 ? 3 : 2;
-  const placesText = totalPartants >= 8 ? "3 premiers" : "2 premiers";
-
-  // Simple Placé - pour chaque cheval avec règle dynamique
-  participants.forEach(participant => {
-    events.push({
-      id: `simple_place_${participant.numero}`,
-      type: 'simple_place',
-      label: {
-        fr: `Simple Placé - ${participant.nom} (${participant.numero})`,
-        en: `Show Bet - ${participant.nom} (${participant.numero})`
-      },
-      category: 'placement',
-      description: {
-        fr: `Le cheval n°${participant.numero} (${participant.nom}) finit dans les ${placesText}`,
-        en: `Horse #${participant.numero} (${participant.nom}) finishes in top ${placesPayees}`
-      },
-      selectionType: 'single',
-      requiredSelections: 1,
-      maxSelections: 1,
-      preSelected: [participant.numero],
-      pmuRules: {
-        placesPayees: placesPayees,
-        miseBase: 1.50
-      }
-    });
+  // 1. Simple Placé - TOUJOURS disponible
+  events.push({
+    id: 'simple_place',
+    type: 'simple_place',
+    label: {
+      fr: 'Simple Placé',
+      en: 'Show Bet'
+    },
+    category: 'placement',
+    description: {
+      fr: 'Sélectionnez un cheval qui finira placé',
+      en: 'Select a horse that will finish in the places'
+    },
+    selectionMode: 'horse_selection', // L'utilisateur sélectionne un cheval dans la liste
+    available: true,
+    pmuRules: {
+      placesPayees: totalPartants >= 8 ? 3 : 2,
+      miseBase: 1.50
+    }
   });
 
-  // Couplé - si >= 8 partants
-  if (totalPartants >= 8) {
-    events.push({
-      id: 'couple',
-      type: 'couple',
-      label: {
-        fr: 'Couplé',
-        en: 'Exacta'
-      },
-      category: 'combination',
-      description: {
-        fr: 'Sélectionnez 2 chevaux (gagnant: 2 premiers, placé: 3 premiers)',
-        en: 'Select 2 horses (win: first 2, place: first 3)'
-      },
-      selectionType: 'multiple',
-      requiredSelections: 2,
-      maxSelections: 2,
-      preSelected: [],
-      pmuRules: {
-        miseBase: 1.50,
-        variantes: [
-          {
-            type: 'gagnant',
-            description: 'Les 2 chevaux aux 2 premières places (quel que soit l\'ordre)',
-            gain: 'élevé'
-          },
-          {
-            type: 'place',
-            description: 'Les 2 chevaux parmi les 3 premiers (quel que soit l\'ordre)',
-            gain: 'modéré'
-          }
-        ]
-      }
-    });
-  }
+  // 2. 2 sur 4 en Base - si >= 10 partants
+  events.push({
+    id: 'deux_sur_quatre_base',
+    type: 'deux_sur_quatre_base',
+    label: {
+      fr: '2 sur 4 en Base',
+      en: '2 out of 4 with Base'
+    },
+    category: 'combination',
+    description: {
+      fr: 'Saisissez votre formule (ex: 14x 5-9)',
+      en: 'Enter your formula (ex: 14x 5-9)'
+    },
+    selectionMode: 'user_input', // L'utilisateur saisit sa formule
+    available: totalPartants >= 10,
+    unavailableReason: totalPartants < 10 ? 'Nécessite au moins 10 partants' : null,
+    pmuRules: {
+      miseBase: 3.00,
+      formatExemple: '14x 5-9'
+    }
+  });
 
-  // Tiercé - si >= 8 partants
-  if (totalPartants >= 8) {
-    events.push({
-      id: 'tierce',
-      type: 'tierce',
-      label: {
-        fr: 'Tiercé',
-        en: 'Tiercé'
-      },
-      category: 'combination',
-      description: {
-        fr: 'Trouvez les 3 premiers chevaux (ordre ou désordre)',
-        en: 'Find the first 3 horses (order or disorder)'
-      },
-      selectionType: 'multiple',
-      requiredSelections: 3,
-      maxSelections: 3,
-      preSelected: [],
-      pmuRules: {
-        miseBase: 1.00,
-        variantes: [
-          {
-            type: 'ordre',
-            description: 'Les 3 chevaux dans l\'ordre exact',
-            gain: 'maximum'
-          },
-          {
-            type: 'desordre',
-            description: 'Les 3 chevaux dans le désordre',
-            gain: 'standard'
-          }
-        ]
-      }
-    });
-  }
+  // 3. Quinté en Base - si >= 8 partants
+  events.push({
+    id: 'quinte_base',
+    type: 'quinte_base',
+    label: {
+      fr: 'Quinté en Base',
+      en: 'Quinté with Base'
+    },
+    category: 'combination',
+    description: {
+      fr: 'Saisissez votre formule (ex: 14-5-9xx)',
+      en: 'Enter your formula (ex: 14-5-9xx)'
+    },
+    selectionMode: 'user_input',
+    available: totalPartants >= 8,
+    unavailableReason: totalPartants < 8 ? 'Nécessite au moins 8 partants' : null,
+    pmuRules: {
+      miseBase: 2.00,
+      formatExemple: '14-5-9xx'
+    }
+  });
 
-  // 2 sur 4 - UNIQUEMENT si >= 10 partants (règle PMU stricte)
-  if (totalPartants >= 10) {
-    events.push({
-      id: 'deux_sur_quatre',
-      type: 'deux_sur_quatre',
-      label: {
-        fr: '2 sur 4',
-        en: '2 out of 4'
-      },
-      category: 'combination',
-      description: {
-        fr: 'Sélectionnez 2 chevaux qui finiront dans les 4 premiers (quel que soit l\'ordre)',
-        en: 'Select 2 horses that will finish in top 4 (any order)'
-      },
-      selectionType: 'multiple',
-      requiredSelections: 2,
-      maxSelections: 2,
-      preSelected: [],
-      pmuRules: {
-        miseBase: 3.00,
-        chancesGain: "1 sur 7 environ"
-      }
-    });
-  }
-
-  // Quinté+ - si >= 8 partants (plus logique que 5 pour un vrai Quinté)
-  if (totalPartants >= 8) {
-    events.push({
-      id: 'quinte_plus',
-      type: 'quinte_plus',
-      label: {
-        fr: 'Quinté+',
-        en: 'Quinté+'
-      },
-      category: 'combination',
-      description: {
-        fr: 'Trouvez les 5 premiers chevaux (ordre, désordre ou bonus 4/5 et 3)',
-        en: 'Find the first 5 horses (order, disorder or bonus 4/5 and 3)'
-      },
-      selectionType: 'multiple',
-      requiredSelections: 5,
-      maxSelections: 5,
-      preSelected: [],
-      pmuRules: {
-        miseBase: 2.00,
-        variantes: [
-          {
-            type: 'ordre',
-            description: 'Les 5 chevaux dans l\'ordre exact (gros gain)',
-            gain: 'maximum'
-          },
-          {
-            type: 'desordre',
-            description: 'Les 5 chevaux dans le désordre (gain moyen)',
-            gain: 'moyen'
-          },
-          {
-            type: 'bonus_4_sur_5',
-            description: '4 chevaux parmi les 5 premiers (bonus 4/5)',
-            gain: 'bonus'
-          },
-          {
-            type: 'bonus_3',
-            description: '3 chevaux parmi les 5 premiers (bonus 3)',
-            gain: 'consolation'
-          }
-        ]
-      }
-    });
-  }
+  // 4. Quinté Élargi - si >= 8 partants
+  events.push({
+    id: 'quinte_elargi',
+    type: 'quinte_elargi',
+    label: {
+      fr: 'Quinté Élargi',
+      en: 'Quinté Extended'
+    },
+    category: 'combination',
+    description: {
+      fr: 'Saisissez vos chevaux (ex: 9-5-9-7-14-15-4-10)',
+      en: 'Enter your horses (ex: 9-5-9-7-14-15-4-10)'
+    },
+    selectionMode: 'user_input',
+    available: totalPartants >= 8,
+    unavailableReason: totalPartants < 8 ? 'Nécessite au moins 8 partants' : null,
+    pmuRules: {
+      miseBase: 2.00,
+      formatExemple: '9-5-9-7-14-15-4-10'
+    }
+  });
 
   return events;
 };
 
 /**
- * Construit un événement final à partir des sélections - VERSION FINALE PMU
+ * Construit un événement à partir de l'input utilisateur
  */
-exports.buildHorseEventFromSelection = (eventType, selectedHorses, participants, raceId) => {
-  const selectedParticipants = participants.filter(p => selectedHorses.includes(p.numero));
-  const totalPartants = participants.length;
-  
-  // Validation des sélections
-  if (!selectedHorses || selectedHorses.length === 0) {
-    throw new AppError('Aucun cheval sélectionné', 400);
+exports.buildHorseEventFromUserInput = (eventType, selectedHorses, userInput, participants, totalPartants, raceId) => {
+  // Validation des types d'événements supportés
+  const supportedEventTypes = ['simple_place', 'deux_sur_quatre_base', 'quinte_base', 'quinte_elargi'];
+  if (!supportedEventTypes.includes(eventType)) {
+    throw new AppError(`Type d'événement non supporté: ${eventType}. Types supportés: ${supportedEventTypes.join(', ')}`, 400);
   }
 
-  // Déterminer les règles selon le nombre de partants
+  // Validation des conditions de partants
+  const validationRules = {
+    'deux_sur_quatre_base': { minPartants: 10, message: '2 sur 4 en Base nécessite au moins 10 partants' },
+    'quinte_base': { minPartants: 8, message: 'Quinté en Base nécessite au moins 8 partants' },
+    'quinte_elargi': { minPartants: 8, message: 'Quinté Élargi nécessite au moins 8 partants' }
+  };
+
+  const rule = validationRules[eventType];
+  if (rule && totalPartants < rule.minPartants) {
+    throw new AppError(rule.message, 400);
+  }
+
+  // Traitement selon le type d'événement
+  switch (eventType) {
+    case 'simple_place':
+      return exports.buildSimplePlaceEvent(selectedHorses, participants, totalPartants, raceId);
+    
+    case 'deux_sur_quatre_base':
+      return exports.buildDeuxSurQuatreBaseEvent(userInput, participants, totalPartants, raceId);
+    
+    case 'quinte_base':
+      return exports.buildQuinteBaseEvent(userInput, participants, totalPartants, raceId);
+    
+    case 'quinte_elargi':
+      return exports.buildQuinteElargiEvent(userInput, participants, totalPartants, raceId);
+    
+    default:
+      throw new AppError(`Type d'événement non géré: ${eventType}`, 400);
+  }
+};
+
+/**
+ * Construit un événement Simple Placé
+ */
+exports.buildSimplePlaceEvent = (selectedHorses, participants, totalPartants, raceId) => {
+  if (!selectedHorses || selectedHorses.length !== 1) {
+    throw new AppError('Simple Placé nécessite exactement 1 cheval sélectionné', 400);
+  }
+
+  const horseNumber = selectedHorses[0];
+  const selectedParticipant = participants.find(p => p.numero === horseNumber);
+  
+  if (!selectedParticipant) {
+    throw new AppError(`Cheval n°${horseNumber} introuvable dans cette course`, 400);
+  }
+
   const placesPayees = totalPartants >= 8 ? 3 : 2;
   const placesText = totalPartants >= 8 ? "3 premiers" : "2 premiers";
-  
-  // Normaliser l'eventType pour gérer les IDs uniques
-  let normalizedEventType = eventType;
-  if (eventType.startsWith('simple_place_')) {
-    normalizedEventType = 'simple_place';
-  }
-  
-  // Validation du nombre de chevaux selon le type d'événement
-  const requiredSelections = {
-    'simple_place': 1,
-    'couple': 2,
-    'tierce': 3,
-    'deux_sur_quatre': 2,
-    'quinte_plus': 5
-  };
-  
-  const required = requiredSelections[normalizedEventType];
-  if (required && selectedHorses.length !== required) {
-    throw new AppError(`${normalizedEventType} nécessite exactement ${required} cheval(x), ${selectedHorses.length} fourni(s)`, 400);
-  }
-  
-  // Validation des conditions de partants - MÊMES RÈGLES que generateHorseEvents
-  if ((normalizedEventType === 'couple' || normalizedEventType === 'tierce' || normalizedEventType === 'quinte_plus') && totalPartants < 8) {
-    throw new AppError(`${normalizedEventType} nécessite au moins 8 partants`, 400);
-  }
-  if (normalizedEventType === 'deux_sur_quatre' && totalPartants < 10) {
-    throw new AppError('2 sur 4 nécessite au moins 10 partants', 400);
-  }
-
-  const eventTemplates = {
-    simple_place: {
-      label: `Simple Placé - ${selectedParticipants[0]?.nom} (${selectedHorses[0]})`,
-      description: `Le cheval n°${selectedHorses[0]} finit dans les ${placesText}`,
-      expression: `placement_${selectedHorses[0]}_top${placesPayees}`,
-      miseBase: 1.50
-    },
-    couple: {
-      label: `Couplé - Chevaux ${selectedHorses.join(', ')}`,
-      description: `Les chevaux n°${selectedHorses.join(' et n°')} (gagnant ou placé)`,
-      expression: `couple_${selectedHorses.sort().join('_')}`,
-      miseBase: 1.50,
-      variantes: ['gagnant', 'placé']
-    },
-    tierce: {
-      label: `Tiercé - Chevaux ${selectedHorses.join(', ')}`,
-      description: `Les chevaux n°${selectedHorses.join(', n°')} dans les 3 premiers (ordre ou désordre)`,
-      expression: `tierce_${selectedHorses.sort().join('_')}`,
-      miseBase: 1.00,
-      variantes: ['ordre', 'désordre']
-    },
-    deux_sur_quatre: {
-      label: `2 sur 4 - Chevaux ${selectedHorses.join(', ')}`,
-      description: `Les chevaux n°${selectedHorses.join(' et n°')} finissent dans les 4 premiers (quel que soit l'ordre)`,
-      expression: `deux_sur_quatre_${selectedHorses.sort().join('_')}`,
-      miseBase: 3.00
-    },
-    quinte_plus: {
-      label: `Quinté+ - Chevaux ${selectedHorses.join(', ')}`,
-      description: `Les chevaux n°${selectedHorses.join(', n°')} dans les 5 premiers (ordre, désordre ou bonus)`,
-      expression: `quinte_plus_${selectedHorses.sort().join('_')}`,
-      miseBase: 2.00,
-      variantes: ['ordre', 'désordre', 'bonus_4_sur_5', 'bonus_3']
-    }
-  };
-
-  const template = eventTemplates[normalizedEventType];
-  
-  if (!template) {
-    throw new AppError(`Type d'événement inconnu: ${normalizedEventType}`, 400);
-  }
-
-  // Générer un ID unique pour l'événement construit
-  const eventId = normalizedEventType === 'simple_place' 
-    ? `simple_place_${selectedHorses[0]}_${raceId}`
-    : `${normalizedEventType}_${raceId}_${selectedHorses.sort().join('_')}`;
 
   return {
-    id: eventId,
+    id: `simple_place_${horseNumber}_${raceId}`,
     position: 1,
     priority: 'high',
     label: {
-      fr: template.label,
-      en: template.label,
-      current: template.label
+      fr: `Simple Placé - ${selectedParticipant.nom} (${horseNumber})`,
+      en: `Show Bet - ${selectedParticipant.nom} (${horseNumber})`,
+      current: `Simple Placé - ${selectedParticipant.nom} (${horseNumber})`
     },
-    expression: template.expression,
+    expression: `placement_${horseNumber}_top${placesPayees}`,
     category: 'horse_racing',
     description: {
-      fr: template.description,
-      en: template.description,
-      current: template.description
+      fr: `Le cheval n°${horseNumber} (${selectedParticipant.nom}) finit dans les ${placesText}`,
+      en: `Horse #${horseNumber} (${selectedParticipant.nom}) finishes in top ${placesPayees}`,
+      current: `Le cheval n°${horseNumber} (${selectedParticipant.nom}) finit dans les ${placesText}`
     },
     pmuCompliant: {
-      miseBase: template.miseBase,
-      variantes: template.variantes || null,
+      miseBase: 1.50,
       reglesPMU: true
     },
     horseSpecific: {
       raceId: raceId,
-      eventType: normalizedEventType,
-      originalEventType: eventType,
-      selectedHorses: selectedHorses.sort(),
-      selectedParticipants: selectedParticipants.map(p => ({
-        numero: p.numero,
-        nom: p.nom
-      })),
+      eventType: 'simple_place',
+      selectedHorse: horseNumber,
+      selectedParticipant: {
+        numero: selectedParticipant.numero,
+        nom: selectedParticipant.nom
+      },
       totalPartants: totalPartants,
       placesPayees: placesPayees
+    }
+  };
+};
+
+/**
+ * Construit un événement 2 sur 4 en Base - FORMAT CLIENT STRICT: "14x 5-9"
+ */
+exports.buildDeuxSurQuatreBaseEvent = (userInput, participants, totalPartants, raceId) => {
+  if (!userInput || typeof userInput !== 'string') {
+    throw new AppError('2 sur 4 en Base nécessite une saisie utilisateur (ex: 14x 5-9)', 400);
+  }
+
+  // Parser UNIQUEMENT le format "14x 5-9" ou "14x5-9"
+  const cleanInput = userInput.replace(/\s+/g, ''); // Supprimer les espaces
+  const match = cleanInput.match(/^(\d+)x(.+)$/i);
+  
+  if (!match) {
+    throw new AppError('Format invalide. Utilisez le format: 14x 5-9', 400);
+  }
+
+  const baseHorse = parseInt(match[1]);
+  const associatedHorses = match[2].split('-').map(n => parseInt(n.trim()));
+
+  // Validation des numéros
+  const validNumbers = participants.map(p => p.numero);
+  const allHorses = [baseHorse, ...associatedHorses];
+  const invalidHorses = allHorses.filter(num => !validNumbers.includes(num));
+  
+  if (invalidHorses.length > 0) {
+    throw new AppError(`Numéros de chevaux invalides: ${invalidHorses.join(', ')}. Numéros valides: ${validNumbers.join(', ')}`, 400);
+  }
+
+  // Calculer les combinaisons
+  const combinaisons = associatedHorses.map(associe => [baseHorse, associe]);
+  const nombreCombinaisons = combinaisons.length;
+
+  return {
+    id: `deux_sur_quatre_base_${raceId}_${baseHorse}_${associatedHorses.sort().join('_')}`,
+    position: 1,
+    priority: 'high',
+    label: {
+      fr: `2 sur 4 Base - ${userInput}`,
+      en: `2 out of 4 Base - ${userInput}`,
+      current: `2 sur 4 Base - ${userInput}`
+    },
+    expression: `deux_sur_quatre_base_${baseHorse}_${associatedHorses.sort().join('_')}`,
+    category: 'horse_racing',
+    description: {
+      fr: `Base ${baseHorse} avec ${associatedHorses.join(', ')} - ${nombreCombinaisons} combinaison(s)`,
+      en: `Base ${baseHorse} with ${associatedHorses.join(', ')} - ${nombreCombinaisons} combination(s)`,
+      current: `Base ${baseHorse} avec ${associatedHorses.join(', ')} - ${nombreCombinaisons} combinaison(s)`
+    },
+    pmuCompliant: {
+      miseBase: 3.00,
+      nombreCombinaisons: nombreCombinaisons,
+      coutTotal: 3.00 * nombreCombinaisons,
+      reglesPMU: true,
+      formatAffichageTableau: {
+        ligne1: `${baseHorse}x`,
+        ligne2: associatedHorses.join('-')
+      }
+    },
+    horseSpecific: {
+      raceId: raceId,
+      eventType: 'deux_sur_quatre_base',
+      userInput: userInput,
+      baseHorse: baseHorse,
+      associatedHorses: associatedHorses,
+      combinaisons: combinaisons,
+      totalPartants: totalPartants,
+      placesPayees: 4
+    }
+  };
+};
+
+/**
+ * Construit un événement Quinté en Base - FORMAT CLIENT STRICT: "14-5-9xx"
+ */
+exports.buildQuinteBaseEvent = (userInput, participants, totalPartants, raceId) => {
+  if (!userInput || typeof userInput !== 'string') {
+    throw new AppError('Quinté en Base nécessite une saisie utilisateur (ex: 14-5-9xx)', 400);
+  }
+
+  // Parser UNIQUEMENT le format "14-5-9xx"
+  const cleanInput = userInput.trim();
+  const match = cleanInput.match(/^(.+)xx$/i);
+  
+  if (!match) {
+    throw new AppError('Format invalide. Utilisez le format: 14-5-9xx', 400);
+  }
+
+  const baseHorses = match[1].split('-').map(n => parseInt(n.trim()));
+
+  // Validation
+  const validNumbers = participants.map(p => p.numero);
+  const invalidHorses = baseHorses.filter(num => !validNumbers.includes(num));
+  
+  if (invalidHorses.length > 0) {
+    throw new AppError(`Numéros de chevaux invalides: ${invalidHorses.join(', ')}`, 400);
+  }
+
+  if (baseHorses.length < 3) {
+    throw new AppError('Quinté en Base nécessite au moins 3 chevaux de base', 400);
+  }
+
+  return {
+    id: `quinte_base_${raceId}_${baseHorses.sort().join('_')}`,
+    position: 1,
+    priority: 'high',
+    label: {
+      fr: `Quinté Base - ${userInput}`,
+      en: `Quinté Base - ${userInput}`,
+      current: `Quinté Base - ${userInput}`
+    },
+    expression: `quinte_base_${baseHorses.sort().join('_')}`,
+    category: 'horse_racing',
+    description: {
+      fr: `Quinté avec base ${baseHorses.join(', ')} et champ total`,
+      en: `Quinté with base ${baseHorses.join(', ')} and full field`,
+      current: `Quinté avec base ${baseHorses.join(', ')} et champ total`
+    },
+    pmuCompliant: {
+      miseBase: 2.00,
+      reglesPMU: true,
+      formatAffichageTableau: {
+        ligne1: baseHorses.join('-') + 'xx',
+        ligne2: 'CHAMP TOTAL'
+      }
+    },
+    horseSpecific: {
+      raceId: raceId,
+      eventType: 'quinte_base',
+      userInput: userInput,
+      baseHorses: baseHorses,
+      champTotal: true,
+      totalPartants: totalPartants,
+      placesPayees: 5
+    }
+  };
+};
+
+/**
+ * Construit un événement Quinté Élargi - FORMAT CLIENT STRICT: "9-5-9-7-14-15-4-10"
+ */
+exports.buildQuinteElargiEvent = (userInput, participants, totalPartants, raceId) => {
+  if (!userInput || typeof userInput !== 'string') {
+    throw new AppError('Quinté Élargi nécessite une saisie utilisateur (ex: 9-5-9-7-14-15-4-10)', 400);
+  }
+
+  // Parser le format "9-5-9-7-14-15-4-10"
+  const selectedHorses = userInput.split('-').map(n => parseInt(n.trim()));
+
+  // Validation
+  const validNumbers = participants.map(p => p.numero);
+  const invalidHorses = selectedHorses.filter(num => !validNumbers.includes(num));
+  
+  if (invalidHorses.length > 0) {
+    throw new AppError(`Numéros de chevaux invalides: ${invalidHorses.join(', ')}`, 400);
+  }
+
+  if (selectedHorses.length < 5) {
+    throw new AppError('Quinté Élargi nécessite au moins 5 chevaux', 400);
+  }
+
+  return {
+    id: `quinte_elargi_${raceId}_${selectedHorses.sort().join('_')}`,
+    position: 1,
+    priority: 'high',
+    label: {
+      fr: `Quinté Élargi - ${userInput}`,
+      en: `Quinté Extended - ${userInput}`,
+      current: `Quinté Élargi - ${userInput}`
+    },
+    expression: `quinte_elargi_${selectedHorses.sort().join('_')}`,
+    category: 'horse_racing',
+    description: {
+      fr: `Quinté élargi avec les chevaux ${selectedHorses.join(', ')}`,
+      en: `Extended Quinté with horses ${selectedHorses.join(', ')}`,
+      current: `Quinté élargi avec les chevaux ${selectedHorses.join(', ')}`
+    },
+    pmuCompliant: {
+      miseBase: 2.00,
+      reglesPMU: true,
+      formatAffichageTableau: {
+        ligne1: selectedHorses.join('-'),
+        ligne2: null // Pas de deuxième ligne pour le quinté élargi
+      }
+    },
+    horseSpecific: {
+      raceId: raceId,
+      eventType: 'quinte_elargi',
+      userInput: userInput,
+      selectedHorses: selectedHorses,
+      totalPartants: totalPartants,
+      placesPayees: 5
     }
   };
 };
