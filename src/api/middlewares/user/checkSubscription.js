@@ -145,3 +145,21 @@ exports.checkVipAccessOptional = catchAsync(async (req, res, next) => {
   req.category = category;
   next();
 });
+
+/**
+ * NOUVEAU : Middleware pour empêcher les doubles souscriptions
+ * À utiliser avant de créer une nouvelle souscription (Mobile Money ou Google Play)
+ */
+exports.checkNoActiveSubscription = catchAsync(async (req, res, next) => {
+  if (!req.user) {
+    return next(new AppError('Authentification requise', 401, ErrorCodes.AUTH_TOKEN_MISSING));
+  }
+
+  const canSubscribe = await subscriptionService.canSubscribe(req.user._id);
+  
+  if (!canSubscribe) {
+    return next(new AppError('Vous avez déjà un abonnement actif', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  next();
+});

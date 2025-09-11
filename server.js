@@ -9,6 +9,7 @@ const { connectDB } = require('./config/database');
 // Services CRON
 const PredictionCronService = require('./src/api/services/common/predictionCorrectionService');
 const DataRefreshService = require('./src/api/services/common/dataRefreshService');
+const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -34,6 +35,8 @@ const startServer = async () => {
     // Service de mise à jour des données sportives
     refreshService = new DataRefreshService();
     await refreshService.start();
+
+    await googlePlayJobs.start();
 
     // Démarrer le serveur HTTP
     app.listen(PORT, '0.0.0.0', () => {

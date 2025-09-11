@@ -50,12 +50,14 @@ const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
 const afribaPayRoutes = require('./user/afribaPayRoutes');
 const userFormationRoutes = require('./user/formationRoutes');
-// const googlePlayRoutes = require('./user/googlePlayRoutes'); 
+const googlePlayRoutes = require('./user/googlePlayRoutes');
+const googlePlayWebhook = require('./user/googlePlayWebhook');
 
 router.use('/user/coupons', couponRoutes);
 router.use('/user/formations', userFormationRoutes); 
 router.use('/user', userSubscriptionRoutes);
-// router.use('/user/google-play', googlePlayRoutes);
+router.use('/user/google-play', googlePlayRoutes);
+router.use('/webhooks', googlePlayWebhook);
 
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');

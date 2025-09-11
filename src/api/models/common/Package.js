@@ -75,6 +75,28 @@ const packageSchema = new mongoose.Schema({
       }
     }
   },
+
+googleProductId: {
+  type: String,
+  trim: true,
+  sparse: true  // Permet d'avoir plusieurs null mais empêche les doublons si valeur
+},
+
+googlePlanId: {
+  monthly: {
+    type: String,
+    trim: true
+  },
+  quarterly: {
+    type: String,
+    trim: true
+  }
+},
+
+availableOnGooglePlay: {
+  type: Boolean,
+  default: false
+},
   formationId: {
     type: mongoose.Schema.ObjectId,
     ref: 'Formation'
@@ -93,6 +115,23 @@ const packageSchema = new mongoose.Schema({
 packageSchema.index({ isActive: 1 });
 packageSchema.index({ pricing: 1 });
 packageSchema.index({ formationId: 1 });
+
+
+// Ajouter cet index après les autres index:
+packageSchema.index({ googleProductId: 1 });
+
+// Ajouter cette méthode après les autres méthodes:
+packageSchema.methods.getGooglePlayInfo = function() {
+  if (!this.availableOnGooglePlay) {
+    return null;
+  }
+  
+  return {
+    productId: this.googleProductId,
+    plans: this.googlePlanId,
+    available: true
+  };
+};
 
 // Méthodes existantes
 packageSchema.methods.setPricing = function(currency, price) {

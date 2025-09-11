@@ -37,6 +37,23 @@ const subscriptionSchema = new mongoose.Schema({
     default: 'active'
   },
   paymentReference: String,
+  paymentProvider: {
+  type: String,
+  enum: ['MOBILE_MONEY', 'GOOGLE_PLAY'],
+  default: 'MOBILE_MONEY',
+  required: true
+},
+
+googlePlayTransaction: {
+  type: mongoose.Schema.ObjectId,
+  ref: 'GooglePlayTransaction'
+},
+
+autoRenewing: {
+  type: Boolean,
+  default: false
+},
+
   createdAt: {
     type: Date,
     default: Date.now

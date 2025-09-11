@@ -1,26 +1,24 @@
-// const express = require('express');
-// const {
-//   verifyPurchase,
-//   verifySubscription,
-//   handleWebhook,
-//   getUserTransactions,
-//   getActiveSubscriptions,
-//   getGooglePlayPackages
-// } = require('../../controllers/user/googlePlayController');
-// const userAuth = require('../../middlewares/user/userAuth');
+const express = require('express');
+const router = express.Router();
+const googlePlayController = require('../../controllers/user/googlePlayController');
+const userAuth = require('../../middlewares/user/userAuth');
 
-// const router = express.Router();
+// Routes protégées (utilisateur connecté)
+router.use(userAuth.protect);
 
-// // Routes publiques
-// router.get('/packages', getGooglePlayPackages); // Packages disponibles pour Google Play
-// router.post('/webhook', handleWebhook); // Webhook Google Play (non protégé)
+// Valider un achat
+router.post('/validate-purchase', googlePlayController.validatePurchase);
 
-// // Routes protégées
-// router.use(userAuth);
+// Vérifier le statut de l'abonnement
+router.get('/subscription-status', googlePlayController.getSubscriptionStatus);
 
-// router.post('/verify-purchase', verifyPurchase); // Produits uniques
-// router.post('/verify-subscription', verifySubscription); // Abonnements
-// router.get('/transactions', getUserTransactions);
-// router.get('/active-subscriptions', getActiveSubscriptions);
+// Acknowledge un achat
+router.post('/acknowledge/:purchaseToken', googlePlayController.acknowledgePurchase);
 
-// module.exports = router;
+// Obtenir les infos Google Play d'un package
+router.get('/products/:packageId', googlePlayController.getGoogleProductInfo);
+
+// Synchroniser manuellement l'abonnement
+router.post('/sync', googlePlayController.syncSubscription);
+
+module.exports = router;

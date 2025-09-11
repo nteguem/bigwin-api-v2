@@ -1,211 +1,180 @@
-// const GooglePlayService = require('../../services/user/GooglePlayService');
-// const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
-// const catchAsync = require('../../../utils/catchAsync');
-// const AppError = require('../../../utils/AppError');
-// const { sendResponse } = require('../../../utils/responseFormatter');
+const catchAsync = require('../../../utils/catchAsync');
+const AppError = require('../../../utils/AppError');
+const googlePlayService = require('../../services/user/GooglePlayService');
+const Package = require('../../models/common/Package');
 
-// /**
-//  * Vérifier et traiter un achat Google Play
-//  */
-// const verifyPurchase = catchAsync(async (req, res, next) => {
-//   const { purchaseToken, orderId, productId } = req.body;
-//   const userId = req.user._id;
+// Valider un achat depuis Flutter
+exports.validatePurchase = catchAsync(async (req, res, next) => {
+  const { purchaseToken, productId, packageId } = req.body;
+  const userId = req.user._id;
 
-//   // Vérifier si déjà traité
-//   const existingTransaction = await GooglePlayTransaction.findOne({ purchaseToken });
-//   if (existingTransaction) {
-//     return next(new AppError('Purchase already processed', 400));
-//   }
+  // Validation des données
+  if (!purchaseToken || !productId || !packageId) {
+    return next(new AppError('Données de validation manquantes', 400));
+  }
 
-//   // Trouver le package via Product ID
-//   const packageData = await GooglePlayService.findPackageByProductId(productId);
+  // Vérifier que le package existe
+  const packageItem = await Package.findById(packageId);
+  if (!packageItem) {
+    return next(new AppError('Package introuvable', 404));
+  }
 
-//   // Vérifier avec Google Play API
-//   const googleResponse = await GooglePlayService.verifyPurchase(purchaseToken, productId);
+  // Vérifier que le package a un produit Google
+  if (!packageItem.googleProductId) {
+    return next(new AppError('Ce package n\'est pas disponible sur Google Play', 400));
+  }
+
+  // Valider l'achat
+  const result = await googlePlayService.validatePurchase(
+    purchaseToken,
+    productId,
+    userId,
+    packageId
+  );
+
+  if (!result.success) {
+    return next(new AppError('Validation de l\'achat échouée', 400));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      subscription: result.subscription,
+      message: result.message
+    }
+  });
+});
+
+// Vérifier le statut de l'abonnement
+exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
+  const userId = req.user._id;
+
+  const status = await googlePlayService.checkSubscriptionStatus(userId);
+
+  res.status(200).json({
+    status: 'success',
+    data: status
+  });
+});
+
+// Webhook RTDN - Recevoir les notifications de Google
+exports.handleRTDN = catchAsync(async (req, res, next) => {
+  // Google envoie les données en base64
+  const message = req.body.message;
   
-//   // Vérifier l'état du paiement (0 = pending, 1 = purchased)
-//   if (googleResponse.purchaseState !== 1) {
-//     return next(new AppError('Purchase not completed', 400));
-//   }
+  if (!message || !message.data) {
+    return res.status(400).json({ error: 'Message invalide' });
+  }
 
-//   // Créer transaction
-//   const transaction = await GooglePlayService.createTransaction(
-//     userId,
-//     packageData,
-//     { purchaseToken, orderId, productId },
-//     googleResponse
-//   );
+  try {
+    // Décoder le message base64
+    const decodedData = Buffer.from(message.data, 'base64').toString('utf-8');
+    const notification = JSON.parse(decodedData);
 
-//   // Créer subscription
-//   const subscription = await GooglePlayService.createSubscription(
-//     userId,
-//     packageData,
-//     transaction._id,
-//     googleResponse
-//   );
+    // Vérifier si c'est une notification de test
+    if (notification.testNotification) {
+      console.log('Notification de test reçue');
+      return res.status(200).send();
+    }
 
-//   sendResponse(res, 201, 'Purchase verified and subscription created', {
-//     transaction: transaction._id,
-//     subscription: subscription._id,
-//     package: {
-//       name: packageData.name,
-//       duration: packageData.duration
-//     },
-//     endDate: subscription.endDate,
-//     autoRenewing: googleResponse.autoRenewing || false
-//   });
-// });
+    // Traiter la notification d'abonnement
+    if (notification.subscriptionNotification) {
+      await googlePlayService.processNotification(notification);
+    }
 
-// /**
-//  * Vérifier un abonnement Google Play
-//  */
-// const verifySubscription = catchAsync(async (req, res, next) => {
-//   const { purchaseToken, subscriptionId } = req.body;
-//   const userId = req.user._id;
+    // Toujours répondre 200 pour que Google ne renvoie pas
+    res.status(200).send();
 
-//   // Vérifier si déjà traité
-//   const existingTransaction = await GooglePlayTransaction.findOne({ purchaseToken });
-//   if (existingTransaction) {
-//     return next(new AppError('Subscription already processed', 400));
-//   }
+  } catch (error) {
+    console.error('Erreur traitement RTDN:', error);
+    // Répondre 200 même en cas d'erreur pour éviter les renvois
+    res.status(200).send();
+  }
+});
 
-//   // Trouver le package via Subscription ID (Product ID)
-//   const packageData = await GooglePlayService.findPackageByProductId(subscriptionId);
+// Acknowledge manuel d'un achat
+exports.acknowledgePurchase = catchAsync(async (req, res, next) => {
+  const { purchaseToken } = req.params;
+  const userId = req.user._id;
 
-//   // Vérifier avec Google Play API
-//   const googleResponse = await GooglePlayService.verifySubscription(purchaseToken, subscriptionId);
+  // Vérifier que l'achat appartient à l'utilisateur
+  const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
+  const transaction = await GooglePlayTransaction.findOne({
+    purchaseToken,
+    user: userId
+  });
+
+  if (!transaction) {
+    return next(new AppError('Transaction introuvable', 404));
+  }
+
+  if (transaction.acknowledged) {
+    return res.status(200).json({
+      status: 'success',
+      message: 'Achat déjà acknowledgé'
+    });
+  }
+
+  const success = await googlePlayService.acknowledgePurchase(purchaseToken);
+
+  if (!success) {
+    return next(new AppError('Échec de l\'acknowledge', 500));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Achat acknowledgé avec succès'
+  });
+});
+
+// Récupérer l'info du produit Google Play pour un package
+exports.getGoogleProductInfo = catchAsync(async (req, res, next) => {
+  const { packageId } = req.params;
+
+  const packageItem = await Package.findById(packageId);
   
-//   // Vérifier l'état du paiement
-//   if (googleResponse.paymentState !== 1) {
-//     return next(new AppError('Subscription not active', 400));
-//   }
+  if (!packageItem) {
+    return next(new AppError('Package introuvable', 404));
+  }
 
-//   // Créer transaction
-//   const transaction = await GooglePlayService.createTransaction(
-//     userId,
-//     packageData,
-//     { purchaseToken, subscriptionId, productId: subscriptionId },
-//     googleResponse,
-//     true
-//   );
+  if (!packageItem.googleProductId) {
+    return next(new AppError('Ce package n\'est pas disponible sur Google Play', 404));
+  }
 
-//   // Créer subscription
-//   const subscription = await GooglePlayService.createSubscription(
-//     userId,
-//     packageData,
-//     transaction._id,
-//     googleResponse
-//   );
+  res.status(200).json({
+    status: 'success',
+    data: {
+      packageId: packageItem._id,
+      packageName: packageItem.name,
+      googleProductId: packageItem.googleProductId,
+      pricing: packageItem.pricing
+    }
+  });
+});
 
-//   sendResponse(res, 201, 'Subscription verified and created', {
-//     transaction: transaction._id,
-//     subscription: subscription._id,
-//     package: {
-//       name: packageData.name,
-//       duration: packageData.duration
-//     },
-//     startDate: subscription.startDate,
-//     endDate: subscription.endDate,
-//     autoRenewing: googleResponse.autoRenewing
-//   });
-// });
+// Synchroniser manuellement un abonnement
+exports.syncSubscription = catchAsync(async (req, res, next) => {
+  const userId = req.user._id;
 
-// /**
-//  * Webhook Google Play via Pub/Sub
-//  */
-// const handleWebhook = catchAsync(async (req, res, next) => {
-//   const pubsubMessage = req.body;
-  
-//   if (!pubsubMessage || !pubsubMessage.message) {
-//     return res.status(400).send('Invalid Pub/Sub message');
-//   }
+  // Récupérer la transaction active de l'utilisateur
+  const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
+  const transaction = await GooglePlayTransaction.findOne({
+    user: userId,
+    status: { $ne: 'EXPIRED' }
+  }).sort({ createdAt: -1 });
 
-//   // Décoder le message Base64
-//   let notification;
-//   try {
-//     const data = Buffer.from(pubsubMessage.message.data, 'base64').toString('utf-8');
-//     notification = JSON.parse(data);
-//   } catch (error) {
-//     return res.status(400).send('Invalid notification data');
-//   }
+  if (!transaction) {
+    return next(new AppError('Aucun abonnement Google Play trouvé', 404));
+  }
 
-//   // Traiter la notification
-//   await GooglePlayService.processWebhookNotification(notification);
-  
-//   // Accusé de réception pour Pub/Sub
-//   res.status(200).send('OK');
-// });
+  const syncedTx = await googlePlayService.syncSubscription(transaction.purchaseToken);
 
-// /**
-//  * Obtenir les transactions Google Play d'un utilisateur
-//  */
-// const getUserTransactions = catchAsync(async (req, res, next) => {
-//   const userId = req.user._id;
-  
-//   const transactions = await GooglePlayTransaction
-//     .find({ user: userId })
-//     .populate('package', 'name description duration google_play_product_id')
-//     .sort({ createdAt: -1 });
-
-//   sendResponse(res, 200, 'Transactions retrieved successfully', transactions);
-// });
-
-// /**
-//  * Obtenir le statut des abonnements actifs
-//  */
-// const getActiveSubscriptions = catchAsync(async (req, res, next) => {
-//   const userId = req.user._id;
-  
-//   const activeTransactions = await GooglePlayTransaction
-//     .find({ 
-//       user: userId, 
-//       status: { $in: ['verified', 'renewed'] }
-//     })
-//     .populate('package', 'name description duration')
-//     .sort({ createdAt: -1 });
-
-//   const subscriptionsData = await Promise.all(
-//     activeTransactions.map(async (transaction) => {
-//       const subscription = await Subscription.findOne({
-//         paymentReference: transaction._id,
-//         status: 'active'
-//       });
-
-//       return {
-//         transaction: transaction._id,
-//         package: transaction.package,
-//         purchaseDate: transaction.purchaseTime,
-//         expiryDate: transaction.expiryTime || subscription?.endDate,
-//         autoRenewing: transaction.autoRenewing,
-//         status: transaction.status,
-//         subscriptionActive: !!subscription
-//       };
-//     })
-//   );
-
-//   sendResponse(res, 200, 'Active subscriptions retrieved', subscriptionsData);
-// });
-
-// /**
-//  * Obtenir les packages disponibles pour Google Play
-//  */
-// const getGooglePlayPackages = catchAsync(async (req, res, next) => {
-//   const Package = require('../../models/common/Package');
-  
-//   const packages = await Package.find({
-//     'platform_availability.google_play': true,
-//     isActive: true,
-//     google_play_product_id: { $exists: true, $ne: null }
-//   }).select('name description duration google_play_product_id pricing badge economy');
-
-//   sendResponse(res, 200, 'Google Play packages retrieved', packages);
-// });
-
-// module.exports = {
-//   verifyPurchase,
-//   verifySubscription,
-//   handleWebhook,
-//   getUserTransactions,
-//   getActiveSubscriptions,
-//   getGooglePlayPackages
-// };
+  res.status(200).json({
+    status: 'success',
+    data: {
+      message: 'Synchronisation effectuée',
+      status: syncedTx.status,
+      expiryTime: syncedTx.expiryTime
+    }
+  });
+});

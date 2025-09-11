@@ -2,12 +2,13 @@ const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
 const User = require('../../models/user/User');
 const Category = require('../../models/common/Category');
-const commissionService = require('../common/commissionService'); // Import du service commission
+const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
+const commissionService = require('../common/commissionService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 class SubscriptionService {
   /**
-   * Créer un abonnement pour un utilisateur
+   * Créer un abonnement pour un utilisateur (Mobile Money)
    */
   async createSubscription(userId, packageId, currency, paymentReference = null) {
     // Vérifier que le package existe et est actif
@@ -17,10 +18,11 @@ class SubscriptionService {
     }
 
     // Vérifier que le prix existe pour la devise
-     const price = packageNew.pricing.get(currency.toUpperCase());
-  if (!price) {
-    throw new AppError(`Prix non disponible en ${currency}`, 400, ErrorCodes.VALIDATION_ERROR);
-  }
+    const price = packageNew.pricing.get(currency.toUpperCase());
+    if (!price) {
+      throw new AppError(`Prix non disponible en ${currency}`, 400, ErrorCodes.VALIDATION_ERROR);
+    }
+    
     // Récupérer l'utilisateur
     const user = await User.findById(userId);
     if (!user) {
@@ -41,8 +43,10 @@ class SubscriptionService {
         amount: price,
         currency
       },
-      paymentReference
+      paymentReference,
+      paymentProvider: 'MOBILE_MONEY'
     });
+    
     // Créer commission si l'utilisateur a un parrain
     if (user.referredBy) {
       await commissionService.createCommission(subscription._id);
@@ -52,7 +56,48 @@ class SubscriptionService {
   }
 
   /**
-   * NOUVELLE MÉTHODE : Obtenir les informations complètes d'abonnement d'un utilisateur
+   * NOUVELLE : Créer un abonnement Google Play
+   */
+  async createGooglePlaySubscription(userId, packageId, googleTransactionId, purchaseData) {
+    // Vérifier que le package existe
+    const packageNew = await Package.findById(packageId);
+    if (!packageNew || !packageNew.isActive) {
+      throw new AppError('Package non disponible', 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Récupérer l'utilisateur
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Créer l'abonnement
+    const subscription = await Subscription.create({
+      user: userId,
+      package: packageId,
+      startDate: purchaseData.startDate,
+      endDate: purchaseData.endDate,
+      pricing: {
+        amount: purchaseData.amount,
+        currency: purchaseData.currency
+      },
+      status: 'active',
+      paymentProvider: 'GOOGLE_PLAY',
+      paymentReference: purchaseData.orderId,
+      googlePlayTransaction: googleTransactionId,
+      autoRenewing: purchaseData.autoRenewing
+    });
+
+    // Créer commission si l'utilisateur a un parrain
+    if (user.referredBy) {
+      await commissionService.createCommission(subscription._id);
+    }
+
+    return subscription;
+  }
+
+  /**
+   * Obtenir les informations complètes d'abonnement d'un utilisateur
    */
   async getUserSubscriptionInfo(userId) {
     const activeSubscriptions = await this.getActiveSubscriptions(userId);
@@ -71,7 +116,9 @@ class SubscriptionService {
         currency: subscription.pricing.currency
       },
       categories: subscription.package.categories || [],
-      subscriptionId: subscription._id
+      subscriptionId: subscription._id,
+      paymentProvider: subscription.paymentProvider,
+      autoRenewing: subscription.autoRenewing || false
     }));
 
     return {
@@ -82,19 +129,28 @@ class SubscriptionService {
   }
 
   /**
-   * Obtenir les abonnements actifs d'un utilisateur
+   * MODIFIÉE : Obtenir les abonnements actifs d'un utilisateur (Mobile Money + Google Play)
    */
   async getActiveSubscriptions(userId) {
     return await Subscription.find({
       user: userId,
       status: 'active',
-      endDate: { $gt: new Date() }
+      $or: [
+        // Mobile Money: vérifier la date
+        {
+          paymentProvider: 'MOBILE_MONEY',
+          endDate: { $gt: new Date() }
+        },
+        // Google Play: juste le status (géré par RTDN)
+        {
+          paymentProvider: 'GOOGLE_PLAY'
+        }
+      ]
     }).populate('package');
   }
 
   /**
    * Vérifier si un utilisateur a accès à une catégorie
-   * MODIFIÉ : Vérifie les catégories ACTUELLES du package (retrait immédiat)
    */
   async hasAccessToCategory(userId, categoryId) {
     const activeSubscriptions = await this.getActiveSubscriptions(userId);
@@ -112,8 +168,7 @@ class SubscriptionService {
   }
 
   /**
-   * MODIFIÉ : Vérifier si un utilisateur a accès à au moins une catégorie VIP
-   * Utilise les catégories ACTUELLES des packages (retrait immédiat)
+   * Vérifier si un utilisateur a accès à au moins une catégorie VIP
    */
   async hasAnyVipAccess(userId) {
     // Récupérer les abonnements actifs de l'utilisateur
@@ -152,8 +207,7 @@ class SubscriptionService {
   }
 
   /**
-   * MODIFIÉ : Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès
-   * Utilise les catégories ACTUELLES des packages (retrait immédiat)
+   * Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès
    */
   async getUserVipCategories(userId) {
     const activeSubscriptions = await this.getActiveSubscriptions(userId);
@@ -198,7 +252,7 @@ class SubscriptionService {
   }
 
   /**
-   * Annuler un abonnement
+   * MODIFIÉE : Annuler un abonnement
    */
   async cancelSubscription(subscriptionId, userId) {
     const subscription = await Subscription.findOne({
@@ -214,7 +268,12 @@ class SubscriptionService {
       throw new AppError('Seuls les abonnements actifs peuvent être annulés', 400, ErrorCodes.VALIDATION_ERROR);
     }
 
-    // Annuler l'abonnement
+    // Pour Google Play, on ne peut pas annuler depuis notre backend
+    if (subscription.paymentProvider === 'GOOGLE_PLAY') {
+      throw new AppError('Les abonnements Google Play doivent être annulés depuis Google Play Store', 400, ErrorCodes.VALIDATION_ERROR);
+    }
+
+    // Annuler l'abonnement Mobile Money
     await subscription.cancel();
 
     // Annuler la commission associée via commissionService
@@ -242,6 +301,48 @@ class SubscriptionService {
     ]);
 
     return stats;
+  }
+
+  /**
+   * NOUVELLE : Vérifier si un utilisateur peut souscrire
+   */
+  async canSubscribe(userId) {
+    const activeSubscription = await Subscription.findOne({
+      user: userId,
+      status: 'active',
+      $or: [
+        {
+          paymentProvider: 'MOBILE_MONEY',
+          endDate: { $gt: new Date() }
+        },
+        {
+          paymentProvider: 'GOOGLE_PLAY'
+        }
+      ]
+    });
+    
+    return !activeSubscription;
+  }
+
+  /**
+   * NOUVELLE : Obtenir le type de provider d'un abonnement actif
+   */
+  async getActiveSubscriptionProvider(userId) {
+    const subscription = await Subscription.findOne({
+      user: userId,
+      status: 'active',
+      $or: [
+        {
+          paymentProvider: 'MOBILE_MONEY',
+          endDate: { $gt: new Date() }
+        },
+        {
+          paymentProvider: 'GOOGLE_PLAY'
+        }
+      ]
+    });
+
+    return subscription ? subscription.paymentProvider : null;
   }
 }
 

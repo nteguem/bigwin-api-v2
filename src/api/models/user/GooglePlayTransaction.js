@@ -1,79 +1,70 @@
 const mongoose = require('mongoose');
 
 const googlePlayTransactionSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  package: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Package',
-    required: true
-  },
+  // Identifiants Google
   purchaseToken: {
     type: String,
     required: true,
     unique: true
   },
-  orderId: {
+  orderId: String,
+  productId: String,
+  
+  // Relations
+  user: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  package: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Package',
+    required: true
+  },
+  subscription: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Subscription'
+  },
+  
+  // État
+  status: {
     type: String,
-    required: true
+    enum: ['ACTIVE', 'EXPIRED', 'CANCELED', 'ON_HOLD', 'PAUSED'],
+    default: 'ACTIVE'
   },
-  productId: {
-    type: String,
-    required: true
-  },
-  purchaseTime: {
-    type: Date,
-    required: true
-  },
-  expiryTime: {
-    type: Date // Pour les abonnements récurrents
-  },
+  
+  // Dates
+  startTime: Date,
+  expiryTime: Date,
+  
+  // Paiement
+  priceAmountMicros: Number,
+  priceCurrencyCode: String,
+  
+  // Flags
   autoRenewing: {
+    type: Boolean,
+    default: true
+  },
+  acknowledged: {
     type: Boolean,
     default: false
   },
-  status: {
-    type: String,
-    enum: [
-      'pending',
-      'verified', 
-      'cancelled',
-      'expired',
-      'revoked',
-      'renewed'
-    ],
-    default: 'pending'
-  },
-  subscriptionState: {
-    type: Number // État Google Play (0=pending, 1=active, etc.)
-  },
-  cancelReason: {
-    type: Number // Raison annulation Google Play
-  },
-  priceAmountMicros: {
-    type: String // Prix en micro-unités de Google
-  },
-  priceCurrencyCode: {
-    type: String // Code devise de Google
-  },
-  googleResponse: {
-    type: Object // Réponse complète Google Play API
-  },
-  webhookEvents: [{
-    event_type: String,
-    received_at: { type: Date, default: Date.now },
-    processed: { type: Boolean, default: false }
-  }]
+  
+  // Dernière notification
+  lastNotificationType: Number,
+  lastNotificationTime: Date
 }, {
   timestamps: true
 });
 
-// Index pour optimisation
+// Index
 googlePlayTransactionSchema.index({ user: 1, status: 1 });
 googlePlayTransactionSchema.index({ purchaseToken: 1 });
-googlePlayTransactionSchema.index({ productId: 1 });
+
+// Vérifier si actif
+googlePlayTransactionSchema.methods.isActive = function() {
+  return this.status === 'ACTIVE' && this.expiryTime > new Date();
+};
 
 module.exports = mongoose.model('GooglePlayTransaction', googlePlayTransactionSchema);
