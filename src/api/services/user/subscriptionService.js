@@ -131,24 +131,26 @@ class SubscriptionService {
   /**
    * MODIFIÉE : Obtenir les abonnements actifs d'un utilisateur (Mobile Money + Google Play)
    */
-  async getActiveSubscriptions(userId) {
-    return await Subscription.find({
-      user: userId,
-      status: 'active',
-      $or: [
-        // Mobile Money: vérifier la date
-        {
-          paymentProvider: 'MOBILE_MONEY',
-          endDate: { $gt: new Date() }
-        },
-        // Google Play: juste le status (géré par RTDN)
-        {
-          paymentProvider: 'GOOGLE_PLAY'
-        }
-      ]
-    }).populate('package');
-  }
-
+async getActiveSubscriptions(userId) {
+  return await Subscription.find({
+    user: userId,
+    status: 'active',
+    $or: [
+      // Tous les abonnements qui ne sont PAS Google Play (inclut ceux sans paymentProvider)
+      {
+        $or: [
+          { paymentProvider: { $exists: false } },
+          { paymentProvider: { $ne: 'GOOGLE_PLAY' } }
+        ],
+        endDate: { $gt: new Date() }
+      },
+      // Google Play
+      {
+        paymentProvider: 'GOOGLE_PLAY'
+      }
+    ]
+  }).populate('package');
+}
   /**
    * Vérifier si un utilisateur a accès à une catégorie
    */

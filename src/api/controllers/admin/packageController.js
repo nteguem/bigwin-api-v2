@@ -7,31 +7,43 @@ const catchAsync = require('../../../utils/catchAsync');
 /**
  * Obtenir tous les packages (admin)
  */
-/**
- * Obtenir tous les packages (admin)
- */
-/**
- * Obtenir tous les packages (admin)
- */
 exports.getAllPackages = catchAsync(async (req, res, next) => {
   const { lang = 'fr', currency = 'XAF' } = req.query;
   
+  // Récupération de tous les packages
   const packages = await Package.find()
     .populate('categories', 'name isVip')
     .populate('formationId');
 
-  // Trier manuellement par prix dans la devise demandée
-  const sortedPackages = packages.sort((a, b) => {
+  // FILTRER uniquement les packages qui ont la devise demandée
+  const packagesWithCurrency = packages.filter(pkg => {
+    const price = pkg.getPricing(currency);
+    return price !== null && price !== undefined;
+  });
+
+  // Si aucun package n'a cette devise, retourner vide
+  if (!packagesWithCurrency.length) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        packages: [],
+        count: 0,
+        currency: currency
+      }
+    });
+  }
+
+  // Trier par prix dans la devise demandée
+  const sortedPackages = packagesWithCurrency.sort((a, b) => {
     const priceA = a.getPricing(currency) || 0;
     const priceB = b.getPricing(currency) || 0;
-    return priceA - priceB; // Tri croissant
+    return priceA - priceB;
   });
 
   // Formater selon la langue ET filtrer par devise
   const formattedPackages = sortedPackages.map(pkg => {
     const formatted = pkg.formatForLanguage(lang);
     
-    // Filtrer pricing et economy pour ne garder que la devise demandée
     formatted.pricing = formatted.pricing[currency] || 0;
     formatted.economy = formatted.economy ? (formatted.economy[currency] || 0) : null;
     
@@ -42,11 +54,11 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
     success: true,
     data: {
       packages: formattedPackages,
-      count: formattedPackages.length
+      count: formattedPackages.length,
+      currency: currency
     }
   });
 });
-
 /**
  * Obtenir un package par ID
  */

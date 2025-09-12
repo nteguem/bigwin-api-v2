@@ -59,34 +59,64 @@ exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
 
 // Webhook RTDN - Recevoir les notifications de Google
 exports.handleRTDN = catchAsync(async (req, res, next) => {
-  // Google envoie les données en base64
+  console.log('=== WEBHOOK REÇU ===');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body complet:', JSON.stringify(req.body, null, 2));
+  
+  // Vérifier si c'est un test manuel ou Google
+  if (!req.body || !req.body.message) {
+    console.log('Test manuel ou format invalide');
+    return res.status(200).json({
+      status: 'success',
+      message: 'Webhook reçu (test format)',
+      received: req.body
+    });
+  }
+
   const message = req.body.message;
   
-  if (!message || !message.data) {
-    return res.status(400).json({ error: 'Message invalide' });
+  if (!message.data) {
+    console.log('Pas de data dans le message');
+    return res.status(200).send();
   }
 
   try {
     // Décoder le message base64
     const decodedData = Buffer.from(message.data, 'base64').toString('utf-8');
+    console.log('Data décodée:', decodedData);
+    
+    // Vérifier si c'est un test simple (pas JSON)
+    if (decodedData === 'test' || decodedData.length < 10) {
+      console.log('✅ Test basique reçu et décodé correctement');
+      return res.status(200).json({
+        status: 'success',
+        message: 'Test décodage OK',
+        decoded: decodedData
+      });
+    }
+    
     const notification = JSON.parse(decodedData);
+    console.log('Notification parsée:', JSON.stringify(notification, null, 2));
 
-    // Vérifier si c'est une notification de test
+    // Vérifier si c'est une notification de test Google
     if (notification.testNotification) {
-      console.log('Notification de test reçue');
+      console.log('✅ Notification de test Google reçue !');
       return res.status(200).send();
     }
 
     // Traiter la notification d'abonnement
     if (notification.subscriptionNotification) {
+      console.log('📱 Notification d\'abonnement reçue');
       await googlePlayService.processNotification(notification);
     }
 
+    console.log('===================');
     // Toujours répondre 200 pour que Google ne renvoie pas
     res.status(200).send();
 
   } catch (error) {
-    console.error('Erreur traitement RTDN:', error);
+    console.error('❌ Erreur traitement RTDN:', error.message);
+    console.log('===================');
     // Répondre 200 même en cas d'erreur pour éviter les renvois
     res.status(200).send();
   }

@@ -23,7 +23,8 @@ class GooglePlayService {
   }
 
   // Valider un achat depuis Flutter
- // Remplacer la méthode validatePurchase dans GooglePlayService.js par celle-ci :
+
+// Remplacer la méthode validatePurchase dans GooglePlayService.js par celle-ci :
 
 async validatePurchase(purchaseToken, productId, userId, packageId) {
   try {
@@ -59,103 +60,128 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
     }
 
     // 3. Récupérer le package
-    const package = await Package.findById(packageId);
-    if (!package) {
+    const packageItem = await Package.findById(packageId);
+    if (!packageItem) {
       throw new Error('Package non trouvé: ' + packageId);
     }
 
-    // 4. Parser les dates
+    // 4. Parser les dates CORRECTEMENT
     let startDate, endDate;
     
-    // startTime peut être en millisecondes (string) ou en secondes
+    // Les timestamps Google sont en MILLISECONDES depuis epoch
     if (data.startTime) {
-      startDate = new Date(parseInt(data.startTime));
-      // Vérifier si la date est valide
-      if (isNaN(startDate.getTime())) {
+      // Convertir la string en nombre et créer la date
+      const startTimestamp = parseInt(data.startTime);
+      startDate = new Date(startTimestamp);
+      
+      // Vérifier si la date est trop ancienne (1970)
+      if (startDate.getFullYear() < 2020) {
+        console.log('[GooglePlay] Date invalide détectée, utilisation de la date actuelle');
         startDate = new Date();
       }
     } else {
       startDate = new Date();
     }
 
-    // expiryTime peut être en millisecondes (string) ou en secondes
     if (data.expiryTime) {
-      endDate = new Date(parseInt(data.expiryTime));
-      // Vérifier si la date est valide
-      if (isNaN(endDate.getTime())) {
-        // Utiliser la durée du package
-        endDate = new Date(startDate.getTime() + (package.duration * 24 * 60 * 60 * 1000));
+      const expiryTimestamp = parseInt(data.expiryTime);
+      endDate = new Date(expiryTimestamp);
+      
+      // Vérifier si la date est trop ancienne (1970)
+      if (endDate.getFullYear() < 2020) {
+        console.log('[GooglePlay] Date expiration invalide, calcul depuis durée package');
+        endDate = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
       }
     } else {
       // Utiliser la durée du package (en jours)
-      endDate = new Date(startDate.getTime() + (package.duration * 24 * 60 * 60 * 1000));
+      endDate = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
     }
 
-    console.log('[GooglePlay] Dates calculées:', { startDate, endDate });
+    console.log('[GooglePlay] Dates calculées:', { 
+      startDate: startDate.toISOString(), 
+      endDate: endDate.toISOString() 
+    });
 
-    // 5. Extraire le prix et la devise
-    let priceAmountMicros = 0;
-    let priceCurrencyCode = 'EUR';
+    // 5. Extraire le prix et la devise DEPUIS GOOGLE
+    let priceAmountMicros = null;
+    let priceCurrencyCode = null;
     
-    // Essayer différentes structures de données possibles
+    // Essayer d'extraire le prix depuis la réponse Google
     try {
       if (data.lineItems && Array.isArray(data.lineItems) && data.lineItems.length > 0) {
         const lineItem = data.lineItems[0];
         console.log('[GooglePlay] LineItem trouvé:', JSON.stringify(lineItem, null, 2));
         
-        // Cas 1: Structure avec offerDetails
+        // Différentes structures possibles selon la version de l'API
         if (lineItem.offerDetails) {
-          priceAmountMicros = lineItem.offerDetails.priceAmountMicros || 0;
-          priceCurrencyCode = lineItem.offerDetails.priceCurrencyCode || 'EUR';
-        }
-        // Cas 2: Structure avec productDetails.basePlanDetails
-        else if (lineItem.productDetails && lineItem.productDetails.basePlanDetails) {
-          priceAmountMicros = lineItem.productDetails.basePlanDetails.priceAmountMicros || 0;
-          priceCurrencyCode = lineItem.productDetails.basePlanDetails.priceCurrencyCode || 'EUR';
-        }
-        // Cas 3: Structure avec productDetails direct
-        else if (lineItem.productDetails) {
-          priceAmountMicros = lineItem.productDetails.priceAmountMicros || 0;
-          priceCurrencyCode = lineItem.productDetails.priceCurrencyCode || 'EUR';
-        }
-        // Cas 4: Prix directement sur lineItem
-        else if (lineItem.priceAmountMicros) {
+          priceAmountMicros = lineItem.offerDetails.priceAmountMicros;
+          priceCurrencyCode = lineItem.offerDetails.priceCurrencyCode;
+        } else if (lineItem.productDetails) {
+          if (lineItem.productDetails.basePlanDetails) {
+            priceAmountMicros = lineItem.productDetails.basePlanDetails.priceAmountMicros;
+            priceCurrencyCode = lineItem.productDetails.basePlanDetails.priceCurrencyCode;
+          } else if (lineItem.productDetails.priceAmountMicros) {
+            priceAmountMicros = lineItem.productDetails.priceAmountMicros;
+            priceCurrencyCode = lineItem.productDetails.priceCurrencyCode;
+          }
+        } else if (lineItem.priceAmountMicros) {
           priceAmountMicros = lineItem.priceAmountMicros;
-          priceCurrencyCode = lineItem.priceCurrencyCode || 'EUR';
+          priceCurrencyCode = lineItem.priceCurrencyCode;
         }
       }
     } catch (priceError) {
       console.error('[GooglePlay] Erreur extraction prix:', priceError);
     }
     
-    // Si toujours pas de prix, utiliser le prix du package
-    if (!priceAmountMicros || priceAmountMicros === 0) {
+    // Si Google envoie le prix, on l'utilise tel quel
+    // Sinon, on prend le prix du package
+    if (!priceAmountMicros) {
       console.log('[GooglePlay] Pas de prix Google, utilisation du prix package');
-      // Essayer EUR d'abord, puis XAF, puis n'importe quelle devise
-      let packagePrice = package.pricing.get('EUR');
-      if (!packagePrice) {
-        packagePrice = package.pricing.get('XAF');
+      
+      // Prendre le prix du package dans n'importe quelle devise disponible
+      let packagePrice = null;
+      let currency = null;
+      
+      // Ordre de préférence des devises
+      const currencyPreference = ['EUR', 'USD', 'XAF', 'XOF', 'GMD', 'CDF', 'GNF'];
+      
+      for (const curr of currencyPreference) {
+        if (packageItem.pricing.has(curr)) {
+          packagePrice = packageItem.pricing.get(curr);
+          currency = curr;
+          break;
+        }
       }
-      if (!packagePrice && package.pricing.size > 0) {
-        // Prendre la première devise disponible
-        const firstCurrency = Array.from(package.pricing.keys())[0];
-        packagePrice = package.pricing.get(firstCurrency);
-        priceCurrencyCode = firstCurrency;
+      
+      // Si aucune devise préférée, prendre la première disponible
+      if (!packagePrice && packageItem.pricing.size > 0) {
+        const firstCurrency = Array.from(packageItem.pricing.keys())[0];
+        packagePrice = packageItem.pricing.get(firstCurrency);
+        currency = firstCurrency;
       }
-      if (!packagePrice) {
-        packagePrice = 10; // Prix par défaut
+      
+      if (packagePrice) {
+        // NE PAS convertir en micros si c'est notre prix
+        priceAmountMicros = packagePrice;
+        priceCurrencyCode = currency;
+      } else {
+        // Prix par défaut si vraiment rien n'est trouvé
+        priceAmountMicros = 10;
+        priceCurrencyCode = 'EUR';
       }
-      priceAmountMicros = packagePrice * 1000000;
     }
 
-    console.log('[GooglePlay] Prix final:', { priceAmountMicros, priceCurrencyCode });
+    console.log('[GooglePlay] Prix final:', { 
+      priceAmountMicros, 
+      priceCurrencyCode,
+      isFromGoogle: !!data.lineItems
+    });
 
     // 6. Déterminer l'état de l'abonnement
     let subscriptionState = 'ACTIVE';
     let autoRenewing = false;
     
     if (data.subscriptionState) {
-      // Mapper les états Google vers nos états
       const stateMap = {
         'SUBSCRIPTION_STATE_ACTIVE': 'ACTIVE',
         'SUBSCRIPTION_STATE_CANCELED': 'CANCELED',
@@ -194,13 +220,24 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
     console.log('[GooglePlay] Transaction créée:', googleTx._id);
 
     // 8. Créer la subscription
+    // Pour le montant dans Subscription, on utilise le prix normal (pas en micros)
+    let subscriptionAmount;
+    
+    // Si le prix vient de Google (en micros), on convertit
+    if (data.lineItems && priceAmountMicros > 1000000) {
+      subscriptionAmount = Math.round(priceAmountMicros / 1000000);
+    } else {
+      // Sinon c'est déjà le bon montant
+      subscriptionAmount = priceAmountMicros;
+    }
+    
     const subscription = await Subscription.create({
       user: userId,
       package: packageId,
       startDate,
       endDate,
       pricing: {
-        amount: Math.round(priceAmountMicros / 1000000), // Convertir en montant normal
+        amount: subscriptionAmount,
         currency: priceCurrencyCode
       },
       status: 'active',
@@ -249,7 +286,6 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
     throw new Error(errorMessage);
   }
 }
-
   // Acknowledge un achat (obligatoire sous 3 jours)
   async acknowledgePurchase(purchaseToken) {
     try {
