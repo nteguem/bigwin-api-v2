@@ -23,83 +23,232 @@ class GooglePlayService {
   }
 
   // Valider un achat depuis Flutter
-  async validatePurchase(purchaseToken, productId, userId, packageId) {
-    try {
-      // 1. Vérifier avec l'API Google
-      const { data } = await this.androidPublisher.purchases.subscriptionsv2.get({
-        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
-        token: purchaseToken
-      });
+ // Remplacer la méthode validatePurchase dans GooglePlayService.js par celle-ci :
 
-      if (!data) {
-        throw new Error('Achat invalide');
-      }
+async validatePurchase(purchaseToken, productId, userId, packageId) {
+  try {
+    console.log('[GooglePlay] Début validation:', { purchaseToken, productId, packageId });
+    
+    // 1. Vérifier avec l'API Google
+    const { data } = await this.androidPublisher.purchases.subscriptionsv2.get({
+      packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+      token: purchaseToken
+    });
 
-      // 2. Vérifier si déjà traité
-      const existingTx = await GooglePlayTransaction.findOne({ purchaseToken });
-      if (existingTx) {
-        return { 
-          success: true, 
-          message: 'Achat déjà traité',
-          subscription: await Subscription.findById(existingTx.subscription)
-        };
-      }
+    console.log('[GooglePlay] Réponse API Google:', JSON.stringify(data, null, 2));
 
-      // 3. Récupérer le package et calculer les dates
-      const startDate = new Date(parseInt(data.startTime));
-      const endDate = new Date(parseInt(data.expiryTime));
-
-      // 4. Créer la transaction Google Play
-      const googleTx = await GooglePlayTransaction.create({
-        purchaseToken,
-        orderId: data.latestOrderId,
-        productId,
-        user: userId,
-        package: packageId,
-        status: 'ACTIVE',
-        startTime: startDate,
-        expiryTime: endDate,
-        priceAmountMicros: data.lineItems[0].productDetails.basePlanDetails.priceAmountMicros,
-        priceCurrencyCode: data.lineItems[0].productDetails.basePlanDetails.priceCurrencyCode,
-        autoRenewing: data.lineItems[0].autoRenewingPlan?.autoRenewEnabled || false,
-        acknowledged: false
-      });
-
-      // 5. Créer la subscription
-      const subscription = await Subscription.create({
-        user: userId,
-        package: packageId,
-        startDate,
-        endDate,
-        pricing: {
-          amount: googleTx.priceAmountMicros / 1000000,
-          currency: googleTx.priceCurrencyCode
-        },
-        status: 'active',
-        paymentProvider: 'GOOGLE_PLAY',
-        paymentReference: data.latestOrderId,
-        googlePlayTransaction: googleTx._id,
-        autoRenewing: googleTx.autoRenewing
-      });
-
-      // 6. Mettre à jour la transaction avec l'ID de subscription
-      googleTx.subscription = subscription._id;
-      await googleTx.save();
-
-      // 7. Acknowledge l'achat
-      await this.acknowledgePurchase(purchaseToken);
-
-      return {
-        success: true,
-        subscription,
-        message: 'Abonnement activé avec succès'
-      };
-
-    } catch (error) {
-      console.error('Erreur validation Google Play:', error);
-      throw error;
+    if (!data) {
+      throw new Error('Réponse invalide de Google Play');
     }
+
+    // 2. Vérifier si déjà traité
+    const existingTx = await GooglePlayTransaction.findOne({ purchaseToken });
+    if (existingTx) {
+      console.log('[GooglePlay] Transaction déjà traitée:', existingTx._id);
+      const subscription = await Subscription.findById(existingTx.subscription)
+        .populate('package');
+      
+      return { 
+        success: true, 
+        message: 'Achat déjà traité',
+        data: {
+          subscription,
+          message: 'Abonnement déjà actif'
+        }
+      };
+    }
+
+    // 3. Récupérer le package
+    const package = await Package.findById(packageId);
+    if (!package) {
+      throw new Error('Package non trouvé: ' + packageId);
+    }
+
+    // 4. Parser les dates
+    let startDate, endDate;
+    
+    // startTime peut être en millisecondes (string) ou en secondes
+    if (data.startTime) {
+      startDate = new Date(parseInt(data.startTime));
+      // Vérifier si la date est valide
+      if (isNaN(startDate.getTime())) {
+        startDate = new Date();
+      }
+    } else {
+      startDate = new Date();
+    }
+
+    // expiryTime peut être en millisecondes (string) ou en secondes
+    if (data.expiryTime) {
+      endDate = new Date(parseInt(data.expiryTime));
+      // Vérifier si la date est valide
+      if (isNaN(endDate.getTime())) {
+        // Utiliser la durée du package
+        endDate = new Date(startDate.getTime() + (package.duration * 24 * 60 * 60 * 1000));
+      }
+    } else {
+      // Utiliser la durée du package (en jours)
+      endDate = new Date(startDate.getTime() + (package.duration * 24 * 60 * 60 * 1000));
+    }
+
+    console.log('[GooglePlay] Dates calculées:', { startDate, endDate });
+
+    // 5. Extraire le prix et la devise
+    let priceAmountMicros = 0;
+    let priceCurrencyCode = 'EUR';
+    
+    // Essayer différentes structures de données possibles
+    try {
+      if (data.lineItems && Array.isArray(data.lineItems) && data.lineItems.length > 0) {
+        const lineItem = data.lineItems[0];
+        console.log('[GooglePlay] LineItem trouvé:', JSON.stringify(lineItem, null, 2));
+        
+        // Cas 1: Structure avec offerDetails
+        if (lineItem.offerDetails) {
+          priceAmountMicros = lineItem.offerDetails.priceAmountMicros || 0;
+          priceCurrencyCode = lineItem.offerDetails.priceCurrencyCode || 'EUR';
+        }
+        // Cas 2: Structure avec productDetails.basePlanDetails
+        else if (lineItem.productDetails && lineItem.productDetails.basePlanDetails) {
+          priceAmountMicros = lineItem.productDetails.basePlanDetails.priceAmountMicros || 0;
+          priceCurrencyCode = lineItem.productDetails.basePlanDetails.priceCurrencyCode || 'EUR';
+        }
+        // Cas 3: Structure avec productDetails direct
+        else if (lineItem.productDetails) {
+          priceAmountMicros = lineItem.productDetails.priceAmountMicros || 0;
+          priceCurrencyCode = lineItem.productDetails.priceCurrencyCode || 'EUR';
+        }
+        // Cas 4: Prix directement sur lineItem
+        else if (lineItem.priceAmountMicros) {
+          priceAmountMicros = lineItem.priceAmountMicros;
+          priceCurrencyCode = lineItem.priceCurrencyCode || 'EUR';
+        }
+      }
+    } catch (priceError) {
+      console.error('[GooglePlay] Erreur extraction prix:', priceError);
+    }
+    
+    // Si toujours pas de prix, utiliser le prix du package
+    if (!priceAmountMicros || priceAmountMicros === 0) {
+      console.log('[GooglePlay] Pas de prix Google, utilisation du prix package');
+      // Essayer EUR d'abord, puis XAF, puis n'importe quelle devise
+      let packagePrice = package.pricing.get('EUR');
+      if (!packagePrice) {
+        packagePrice = package.pricing.get('XAF');
+      }
+      if (!packagePrice && package.pricing.size > 0) {
+        // Prendre la première devise disponible
+        const firstCurrency = Array.from(package.pricing.keys())[0];
+        packagePrice = package.pricing.get(firstCurrency);
+        priceCurrencyCode = firstCurrency;
+      }
+      if (!packagePrice) {
+        packagePrice = 10; // Prix par défaut
+      }
+      priceAmountMicros = packagePrice * 1000000;
+    }
+
+    console.log('[GooglePlay] Prix final:', { priceAmountMicros, priceCurrencyCode });
+
+    // 6. Déterminer l'état de l'abonnement
+    let subscriptionState = 'ACTIVE';
+    let autoRenewing = false;
+    
+    if (data.subscriptionState) {
+      // Mapper les états Google vers nos états
+      const stateMap = {
+        'SUBSCRIPTION_STATE_ACTIVE': 'ACTIVE',
+        'SUBSCRIPTION_STATE_CANCELED': 'CANCELED',
+        'SUBSCRIPTION_STATE_IN_GRACE_PERIOD': 'ACTIVE',
+        'SUBSCRIPTION_STATE_ON_HOLD': 'ON_HOLD',
+        'SUBSCRIPTION_STATE_PAUSED': 'PAUSED',
+        'SUBSCRIPTION_STATE_EXPIRED': 'EXPIRED'
+      };
+      subscriptionState = stateMap[data.subscriptionState] || 'ACTIVE';
+    }
+
+    // Vérifier l'auto-renouvellement
+    if (data.lineItems && data.lineItems[0]) {
+      autoRenewing = data.lineItems[0].autoRenewingPlan?.autoRenewEnabled || false;
+    } else {
+      autoRenewing = data.autoRenewing || false;
+    }
+
+    // 7. Créer la transaction Google Play
+    const googleTx = await GooglePlayTransaction.create({
+      purchaseToken,
+      orderId: data.latestOrderId || data.orderId || `GP_${Date.now()}`,
+      productId,
+      user: userId,
+      package: packageId,
+      status: subscriptionState,
+      startTime: startDate,
+      expiryTime: endDate,
+      priceAmountMicros,
+      priceCurrencyCode,
+      autoRenewing,
+      acknowledged: false,
+      purchaseTime: startDate
+    });
+
+    console.log('[GooglePlay] Transaction créée:', googleTx._id);
+
+    // 8. Créer la subscription
+    const subscription = await Subscription.create({
+      user: userId,
+      package: packageId,
+      startDate,
+      endDate,
+      pricing: {
+        amount: Math.round(priceAmountMicros / 1000000), // Convertir en montant normal
+        currency: priceCurrencyCode
+      },
+      status: 'active',
+      paymentProvider: 'GOOGLE_PLAY',
+      paymentReference: googleTx.orderId,
+      googlePlayTransaction: googleTx._id,
+      autoRenewing
+    });
+
+    console.log('[GooglePlay] Subscription créée:', subscription._id);
+
+    // 9. Mettre à jour la transaction avec l'ID de subscription
+    googleTx.subscription = subscription._id;
+    await googleTx.save();
+
+    // 10. Acknowledge l'achat (non bloquant)
+    this.acknowledgePurchase(purchaseToken).catch(error => {
+      console.error('[GooglePlay] Erreur acknowledge (non bloquant):', error.message);
+    });
+
+    // 11. Retourner le résultat avec populate
+    const populatedSubscription = await Subscription.findById(subscription._id)
+      .populate('package');
+
+    return {
+      success: true,
+      data: {
+        subscription: populatedSubscription,
+        message: 'Abonnement activé avec succès'
+      }
+    };
+
+  } catch (error) {
+    console.error('[GooglePlay] Erreur validation complète:', error);
+    
+    // Retourner une erreur plus descriptive
+    let errorMessage = 'Erreur de validation: ';
+    if (error.response && error.response.data) {
+      errorMessage += JSON.stringify(error.response.data);
+    } else if (error.message) {
+      errorMessage += error.message;
+    } else {
+      errorMessage += 'Erreur inconnue';
+    }
+    
+    throw new Error(errorMessage);
   }
+}
 
   // Acknowledge un achat (obligatoire sous 3 jours)
   async acknowledgePurchase(purchaseToken) {
