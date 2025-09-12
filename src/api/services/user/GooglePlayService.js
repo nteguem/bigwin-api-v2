@@ -348,20 +348,61 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
   }
 
   // Gérer le renouvellement
-  async handleRenewal(googleTx) {
+// Remplace ta fonction handleRenewal par celle-ci
+async handleRenewal(googleTx) {
+  try {
+    console.log('[RENEWAL] Début handleRenewal pour:', googleTx.purchaseToken);
+    
     // Récupérer les nouvelles infos depuis Google
     const { data } = await this.androidPublisher.purchases.subscriptionsv2.get({
       packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
       token: googleTx.purchaseToken
     });
 
-    const newExpiryTime = new Date(parseInt(data.expiryTime));
+    console.log('[RENEWAL] Réponse API Google:', JSON.stringify(data, null, 2));
 
-    // Mettre à jour la transaction
+    // Calculer la nouvelle date d'expiration
+    let newExpiryTime;
+    
+    if (data.expiryTime) {
+      const expiryTimestamp = parseInt(data.expiryTime);
+      newExpiryTime = new Date(expiryTimestamp);
+      
+      // Vérifier si la date est valide
+      if (isNaN(newExpiryTime.getTime()) || newExpiryTime.getFullYear() < 2020) {
+        console.log('[RENEWAL] Date expiration invalide, utilisation de la durée du package');
+        // Utiliser la durée du package pour calculer la nouvelle date
+        const Package = require('../../models/common/Package');
+        const packageData = await Package.findById(googleTx.package);
+        if (packageData) {
+          newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
+        } else {
+          // Fallback: ajouter 30 jours par défaut
+          newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
+        }
+      }
+    } else {
+      console.log('[RENEWAL] Pas de expiryTime dans la réponse, calcul avec durée package');
+      // Utiliser la durée du package
+      const Package = require('../../models/common/Package');
+      const packageData = await Package.findById(googleTx.package);
+      if (packageData) {
+        newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
+      } else {
+        // Fallback: ajouter 30 jours par défaut
+        newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
+      }
+    }
+
+    console.log('[RENEWAL] Nouvelle date expiration:', newExpiryTime.toISOString());
+
+    // Mettre à jour la transaction Google Play
     googleTx.expiryTime = newExpiryTime;
     googleTx.status = 'ACTIVE';
+    await googleTx.save();
 
     // Mettre à jour la subscription
+    const Subscription = require('../../models/common/Subscription');
     await Subscription.findByIdAndUpdate(
       googleTx.subscription,
       { 
@@ -369,8 +410,14 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
         status: 'active'
       }
     );
-  }
 
+    console.log('[RENEWAL] Renouvellement traité avec succès');
+    
+  } catch (error) {
+    console.error('[RENEWAL] Erreur handleRenewal:', error);
+    throw error;
+  }
+}
   // Gérer l'annulation
   async handleCancellation(googleTx) {
     googleTx.status = 'CANCELED';
