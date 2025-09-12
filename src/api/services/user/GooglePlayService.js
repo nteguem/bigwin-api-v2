@@ -348,7 +348,6 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
   }
 
   // Gérer le renouvellement
-// Remplace ta fonction handleRenewal par celle-ci
 async handleRenewal(googleTx) {
   try {
     console.log('[RENEWAL] Début handleRenewal pour:', googleTx.purchaseToken);
@@ -361,44 +360,56 @@ async handleRenewal(googleTx) {
 
     console.log('[RENEWAL] Réponse API Google:', JSON.stringify(data, null, 2));
 
-    // Calculer la nouvelle date d'expiration
+    // Calculer la nouvelle date d'expiration - CORRIGÉ
     let newExpiryTime;
     
-    if (data.expiryTime) {
+    // Chercher d'abord dans lineItems (nouveau format)
+    if (data.lineItems && data.lineItems.length > 0 && data.lineItems[0].expiryTime) {
+      newExpiryTime = new Date(data.lineItems[0].expiryTime);
+      console.log('[RENEWAL] Date trouvée dans lineItems[0].expiryTime');
+    }
+    // Fallback: ancien format
+    else if (data.expiryTime) {
       const expiryTimestamp = parseInt(data.expiryTime);
       newExpiryTime = new Date(expiryTimestamp);
-      
-      // Vérifier si la date est valide
-      if (isNaN(newExpiryTime.getTime()) || newExpiryTime.getFullYear() < 2020) {
-        console.log('[RENEWAL] Date expiration invalide, utilisation de la durée du package');
-        // Utiliser la durée du package pour calculer la nouvelle date
-        const Package = require('../../models/common/Package');
-        const packageData = await Package.findById(googleTx.package);
-        if (packageData) {
-          newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
-        } else {
-          // Fallback: ajouter 30 jours par défaut
-          newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
-        }
-      }
-    } else {
-      console.log('[RENEWAL] Pas de expiryTime dans la réponse, calcul avec durée package');
-      // Utiliser la durée du package
+      console.log('[RENEWAL] Date trouvée dans data.expiryTime');
+    }
+    // Dernier fallback: durée du package
+    else {
+      console.log('[RENEWAL] Aucune date Google, calcul avec durée package');
       const Package = require('../../models/common/Package');
       const packageData = await Package.findById(googleTx.package);
       if (packageData) {
         newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
       } else {
-        // Fallback: ajouter 30 jours par défaut
+        newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
+      }
+    }
+
+    // Vérifier si la date est valide
+    if (isNaN(newExpiryTime.getTime()) || newExpiryTime.getFullYear() < 2020) {
+      console.log('[RENEWAL] Date invalide, fallback sur durée package');
+      const Package = require('../../models/common/Package');
+      const packageData = await Package.findById(googleTx.package);
+      if (packageData) {
+        newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
+      } else {
         newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
       }
     }
 
     console.log('[RENEWAL] Nouvelle date expiration:', newExpiryTime.toISOString());
 
+    // Extraire l'auto-renewal
+    let autoRenewing = false;
+    if (data.lineItems && data.lineItems[0] && data.lineItems[0].autoRenewingPlan) {
+      autoRenewing = data.lineItems[0].autoRenewingPlan.autoRenewEnabled;
+    }
+
     // Mettre à jour la transaction Google Play
     googleTx.expiryTime = newExpiryTime;
     googleTx.status = 'ACTIVE';
+    googleTx.autoRenewing = autoRenewing;
     await googleTx.save();
 
     // Mettre à jour la subscription
@@ -407,7 +418,8 @@ async handleRenewal(googleTx) {
       googleTx.subscription,
       { 
         endDate: newExpiryTime,
-        status: 'active'
+        status: 'active',
+        autoRenewing: autoRenewing
       }
     );
 
