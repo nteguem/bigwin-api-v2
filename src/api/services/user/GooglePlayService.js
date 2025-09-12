@@ -309,43 +309,55 @@ async validatePurchase(purchaseToken, productId, userId, packageId) {
   }
 
   // Traiter une notification RTDN
-  async processNotification(notification) {
-    try {
-      const { purchaseToken, subscriptionId } = notification.subscriptionNotification;
-      const notificationType = notification.subscriptionNotification.notificationType;
+async processNotification(notification) {
+  try {
+    const { purchaseToken, subscriptionId } = notification.subscriptionNotification;
+    const notificationType = notification.subscriptionNotification.notificationType;
 
-      // Récupérer la transaction
-      const googleTx = await GooglePlayTransaction.findOne({ purchaseToken });
-      if (!googleTx) {
-        console.log('Transaction non trouvée:', purchaseToken);
-        return;
-      }
+    console.log(`[NOTIFICATION] Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
-      // Enregistrer la notification
-      googleTx.lastNotificationType = notificationType;
-      googleTx.lastNotificationTime = new Date();
-
-      // Traiter selon le type
-      switch (notificationType) {
-        case 2: // SUBSCRIPTION_RENEWED
-          await this.handleRenewal(googleTx);
-          break;
-        case 3: // SUBSCRIPTION_CANCELED
-          await this.handleCancellation(googleTx);
-          break;
-        case 5: // SUBSCRIPTION_ON_HOLD
-          await this.handleOnHold(googleTx);
-          break;
-        case 13: // SUBSCRIPTION_EXPIRED
-          await this.handleExpiration(googleTx);
-          break;
-      }
-
-      await googleTx.save();
-    } catch (error) {
-      console.error('Erreur traitement notification:', error);
+    // Récupérer la transaction
+    const googleTx = await GooglePlayTransaction.findOne({ purchaseToken });
+    if (!googleTx) {
+      console.log('Transaction non trouvée:', purchaseToken);
+      return;
     }
+
+    // Enregistrer la notification
+    googleTx.lastNotificationType = notificationType;
+    googleTx.lastNotificationTime = new Date();
+
+    // Traiter selon le type
+    switch (notificationType) {
+      case 2: // SUBSCRIPTION_RENEWED
+        console.log('[NOTIFICATION] → SUBSCRIPTION_RENEWED');
+        await this.handleRenewal(googleTx);
+        break;
+      case 3: // SUBSCRIPTION_CANCELED
+        console.log('[NOTIFICATION] → SUBSCRIPTION_CANCELED');
+        await this.handleCancellation(googleTx);
+        break;
+      case 5: // SUBSCRIPTION_ON_HOLD (ancienne version)
+        console.log('[NOTIFICATION] → SUBSCRIPTION_ON_HOLD (type 5)');
+        await this.handleOnHold(googleTx);
+        break;
+      case 11: // SUBSCRIPTION_ON_HOLD (nouvelle version)
+        console.log('[NOTIFICATION] → SUBSCRIPTION_ON_HOLD (type 11)');
+        await this.handleOnHold(googleTx);
+        break;
+      case 13: // SUBSCRIPTION_EXPIRED
+        console.log('[NOTIFICATION] → SUBSCRIPTION_EXPIRED');
+        await this.handleExpiration(googleTx);
+        break;
+      default:
+        console.log(`[NOTIFICATION] Type ${notificationType} non géré`);
+    }
+
+    await googleTx.save();
+  } catch (error) {
+    console.error('Erreur traitement notification:', error);
   }
+}
 
   // Gérer le renouvellement
 async handleRenewal(googleTx) {
