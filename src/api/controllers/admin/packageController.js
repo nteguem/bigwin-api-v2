@@ -12,7 +12,7 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
   
   // Récupération de tous les packages
   const packages = await Package.find()
-    .populate('categories', 'name isVip')
+    .populate('categories', 'name description isVip')
     .populate('formationId');
 
   // FILTRER uniquement les packages qui ont la devise demandée
