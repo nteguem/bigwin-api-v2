@@ -70,46 +70,89 @@ class DashboardService {
   /**
    * Obtenir la liste des filleuls d'un affilié
    */
-  async getReferrals(affiliateId, offset = 0, limit = 20) {
-    const referrals = await User.find({ referredBy: affiliateId })
-      .select('phoneNumber pseudo countryCode createdAt')
-      .sort({ createdAt: -1 })
-      .skip(parseInt(offset))
-      .limit(parseInt(limit));
+async getReferrals(affiliateId, offset = 0, limit = 20) {
+  const referrals = await User.find({ referredBy: affiliateId })
+    .select('phoneNumber pseudo countryCode createdAt')
+    .sort({ createdAt: -1 })
+    .skip(parseInt(offset))
+    .limit(parseInt(limit));
 
-    const total = await User.countDocuments({ referredBy: affiliateId });
-
-    // Enrichir avec les abonnements actifs
-    const enrichedReferrals = await Promise.all(
-      referrals.map(async (user) => {
-        const activeSubscriptions = await Subscription.countDocuments({
-          user: user._id,
-          status: 'active',
-          endDate: { $gt: new Date() }
-        });
-
-        const totalSpent = await Subscription.aggregate([
-          { $match: { user: user._id } },
-          { $group: { _id: null, total: { $sum: '$pricing.amount' } } }
-        ]);
-
-        return {
-          ...user.toObject(),
-          activeSubscriptions,
-          totalSpent: totalSpent[0]?.total || 0
-        };
-      })
-    );
-
-    return {
-      referrals: enrichedReferrals,
-      pagination: {
-        offset: parseInt(offset),
-        limit: parseInt(limit),
-        total
+  const total = await User.countDocuments({ referredBy: affiliateId });
+  
+  // Compter les filleuls actifs (avec abonnements)
+  const activeReferralsCount = await User.aggregate([
+    { $match: { referredBy: affiliateId } },
+    {
+      $lookup: {
+        from: 'subscriptions',
+        localField: '_id',
+        foreignField: 'user',
+        as: 'subscriptions'
       }
-    };
-  }
+    },
+    {
+      $match: {
+        'subscriptions.status': 'active',
+        'subscriptions.endDate': { $gt: new Date() }
+      }
+    },
+    { $count: 'activeCount' }
+  ]);
+
+  // Enrichir avec les forfaits achetés et commissions
+  const enrichedReferrals = await Promise.all(
+    referrals.map(async (user) => {
+      // Abonnements actifs
+      const activeSubscriptions = await Subscription.countDocuments({
+        user: user._id,
+        status: 'active',
+        endDate: { $gt: new Date() }
+      });
+
+      // Total dépensé
+      const totalSpent = await Subscription.aggregate([
+        { $match: { user: user._id } },
+        { $group: { _id: null, total: { $sum: '$pricing.amount' } } }
+      ]);
+
+      // Liste des forfaits achetés avec détails
+      const packages = await Subscription.find({ user: user._id })
+        .populate('package', 'name')
+        .select('package pricing status startDate endDate');
+
+      // Commissions totales générées par ce filleul
+      const totalCommissions = await Commission.aggregate([
+        { $match: { affiliate: affiliateId, user: user._id } },
+        { $group: { _id: null, total: { $sum: '$commissionAmount' } } }
+      ]);
+
+      return {
+        ...user.toObject(),
+        activeSubscriptions,
+        totalSpent: totalSpent[0]?.total || 0,
+        packages: packages.map(pkg => ({
+          name: pkg.package?.name?.fr || 'Package inconnu',
+          amount: pkg.pricing?.amount || 0,
+          currency: pkg.pricing?.currency || 'XAF',
+          status: pkg.status,
+          startDate: pkg.startDate,
+          endDate: pkg.endDate
+        })),
+        totalCommissions: totalCommissions[0]?.total || 0
+      };
+    })
+  );
+
+  return {
+    referrals: enrichedReferrals,
+    pagination: {
+      offset: parseInt(offset),
+      limit: parseInt(limit),
+      total,
+      active: activeReferralsCount[0]?.activeCount || 0
+    }
+  };
+}
 
  /**
  * Obtenir l'historique des commissions d'un affilié
