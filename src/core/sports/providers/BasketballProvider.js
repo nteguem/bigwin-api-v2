@@ -94,7 +94,7 @@ class BasketballProvider extends SportProvider {
           id: game.league.id.toString(),
           name: game.league.name,
           country: countryName,
-          countryId: countryId, // ID cohérent pour les URL
+          countryId: countryId,
           logo: game.league.logo,
           flag: game.country.flag
         },
@@ -110,7 +110,7 @@ class BasketballProvider extends SportProvider {
             logo: game.teams.away.logo
           }
         },
-        venue: null, // Pas de détails de stade dans l'API basketball
+        venue: null,
         status: normalizedStatus,
         score: {
           home: game.scores.home.total,
@@ -141,7 +141,7 @@ class BasketballProvider extends SportProvider {
       };
     });
     
-    // Convertir en format pour les index - MÊME FORMAT QUE FOOTBALL
+    // Format identique au FootballProvider
     const countriesArray = Array.from(countriesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     const leaguesObj = {};
     
@@ -155,7 +155,7 @@ class BasketballProvider extends SportProvider {
       source: 'api-basketball',
       matches,
       indexes: {
-        countries: countriesArray, // Maintenant avec {id, name, flag}
+        countries: countriesArray, // [{id, name, flag}, ...]
         leagues: leaguesObj // Indexé par countryId
       }
     };
