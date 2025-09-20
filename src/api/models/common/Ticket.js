@@ -70,13 +70,11 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         // Récupérer le nom de la catégorie
         const Category = mongoose.model('Category');
         const category = await Category.findById(doc.category);
-        const categoryName = category ? category.name : 'Catégorie inconnue';
+        const categoryName = category ? category.description : 'Catégorie inconnue';
         
         // Vérifier si c'est un LIVE
-        const isLive = categoryName.toUpperCase().includes('BIGWIN LIVE');
-        
-        console.log("🎯 Envoi notification - Catégorie:", categoryName, isLive ? '(LIVE)' : '(NORMAL)');
-        
+        const isLive = categoryName.toUpperCase().includes('LIVE');
+                
         // Import du service de notification
         const notificationService = require("../../services/common/notificationService");
         

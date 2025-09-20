@@ -9,7 +9,7 @@ class TicketController {
   async getTickets(req, res) {
     try {
       const { offset = 0, limit = 10, category, date, isVisible } = req.query;
-            
+      
       const result = await ticketService.getTickets({
         offset: parseInt(offset),
         limit: parseInt(limit),
@@ -118,6 +118,26 @@ class TicketController {
       formatSuccess(res, {
         data: ticket,
         message: 'Ticket updated successfully'
+      });
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
+  }
+
+  // DELETE /tickets/:id - Supprimer un ticket et ses prédictions
+  async deleteTicket(req, res) {
+    try {
+      const { id } = req.params;
+      
+      const result = await ticketService.deleteTicket(id);
+
+      if (!result) {
+        return formatError(res, 'Ticket not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: null,
+        message: 'Ticket and associated predictions deleted successfully'
       });
     } catch (error) {
       formatError(res, error.message, 500);

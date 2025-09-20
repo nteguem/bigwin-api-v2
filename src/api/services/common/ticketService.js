@@ -83,6 +83,26 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     return await Ticket.findByIdAndUpdate(id, data, { new: true });
   }
 
+  // NOUVEAU : Supprimer un ticket et toutes ses prédictions
+  async deleteTicket(id) {
+    // Vérifier que le ticket existe
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return null;
+    }
+
+    // Supprimer toutes les prédictions associées au ticket
+    await Prediction.deleteMany({ ticket: id });
+
+    // Supprimer le ticket
+    await Ticket.findByIdAndDelete(id);
+
+    return { 
+      deletedTicket: ticket,
+      message: 'Ticket and associated predictions deleted successfully'
+    };
+  }
+
   // Calculer et mettre à jour le closingAt d'un ticket
   async updateClosingTime(ticketId) {
     const predictions = await predictionService.getPredictionsByTicket(ticketId);
