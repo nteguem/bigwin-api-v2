@@ -104,8 +104,8 @@ class TennisProvider extends SportProvider {
       tournamentInfos[tournamentId] = await this.getTournamentInfo(tournamentId);
     }
     
-    // Créer l'index des pays et ligues
-    const countries = new Set();
+    // Créer l'index des pays et ligues avec IDs cohérents - FORMAT HARMONISÉ
+    const countriesMap = new Map();
     const leagues = {};
     
     // Normaliser les matchs
@@ -113,28 +113,30 @@ class TennisProvider extends SportProvider {
       // Récupérer les infos du tournoi depuis le cache
       const tournamentInfo = tournamentInfos[match.tournamentId];
       
-      // Pays des joueurs
-      const player1Country = match.player1?.countryAcr || 'Unknown';
-      const player2Country = match.player2?.countryAcr || 'Unknown';
-      countries.add(player1Country);
-      countries.add(player2Country);
-      
       // Pays et nom du tournoi
       const tournamentCountry = tournamentInfo.coutry?.name || 'International';
       const tournamentName = tournamentInfo.name || `Tournament ${match.tournamentId}`;
+      const countryId = tournamentCountry.toLowerCase().replace(/\s+/g, '-');
       
-      countries.add(tournamentCountry);
-      
-      // Indexer les tournois par pays
-      if (!leagues[tournamentCountry]) {
-        leagues[tournamentCountry] = new Set();
+      // Stocker le mapping pays avec drapeau (approximatif pour tennis)
+      if (!countriesMap.has(countryId)) {
+        countriesMap.set(countryId, {
+          id: countryId,
+          name: tournamentCountry,
+          flag: this.getCountryFlag(tournamentCountry)
+        });
       }
-      leagues[tournamentCountry].add(tournamentName);
+      
+      // Indexer les tournois par ID de pays
+      if (!leagues[countryId]) {
+        leagues[countryId] = new Set();
+      }
+      leagues[countryId].add(tournamentName);
       
       // Le tennis n'a pas de statut explicite dans cette API, on suppose "NOT_STARTED"
       const normalizedStatus = 'NOT_STARTED';
       
-      // Retourner le match normalisé
+      // Retourner le match normalisé avec countryId cohérent
       return {
         id: match.id.toString(),
         date: match.date,
@@ -142,7 +144,9 @@ class TennisProvider extends SportProvider {
           id: match.tournamentId.toString(),
           name: tournamentName,
           country: tournamentCountry,
-          logo: null, // Pas de logo dans cette API
+          countryId: countryId, // ID cohérent pour les URL
+          logo: null,
+          flag: this.getCountryFlag(tournamentCountry),
           season: new Date(match.date).getFullYear(),
           courtType: tournamentInfo.court?.name,
           roundType: tournamentInfo.round?.name
@@ -152,13 +156,13 @@ class TennisProvider extends SportProvider {
             id: match.player1Id.toString(),
             name: match.player1?.name || 'Player 1',
             logo: null,
-            country: player1Country
+            country: match.player1?.countryAcr || 'Unknown'
           },
           away: {
             id: match.player2Id.toString(),
             name: match.player2?.name || 'Player 2',
             logo: null,
-            country: player2Country
+            country: match.player2?.countryAcr || 'Unknown'
           }
         },
         venue: {
@@ -212,12 +216,12 @@ class TennisProvider extends SportProvider {
       };
     });
     
-    // Convertir les ensembles en tableaux pour l'indexation
-    const countriesArray = Array.from(countries);
+    // Format identique aux autres providers
+    const countriesArray = Array.from(countriesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     const leaguesObj = {};
     
-    for (const country in leagues) {
-      leaguesObj[country] = Array.from(leagues[country]);
+    for (const countryId in leagues) {
+      leaguesObj[countryId] = Array.from(leagues[countryId]).sort();
     }
     
     return {
@@ -227,8 +231,8 @@ class TennisProvider extends SportProvider {
       rawData,
       matches: normalizedMatches,
       indexes: {
-        countries: countriesArray,
-        leagues: leaguesObj
+        countries: countriesArray, // [{id, name, flag}, ...]
+        leagues: leaguesObj // Indexé par countryId
       },
       pagination: {
         hasNextPage: rawData.hasNextPage || false,
@@ -237,6 +241,41 @@ class TennisProvider extends SportProvider {
       },
       apiCallsUsed: uniqueTournamentIds.length + 1 // 1 pour fixtures + 1 par tournoi unique
     };
+  }
+
+  /**
+   * Génère une URL de drapeau approximative pour un pays
+   * @param {string} countryName - Nom du pays
+   * @returns {string} - URL du drapeau
+   */
+  getCountryFlag(countryName) {
+    // Mapping approximatif pour les pays les plus courants
+    const countryFlags = {
+      'france': 'fr',
+      'united states': 'us',
+      'united kingdom': 'gb',
+      'spain': 'es',
+      'italy': 'it',
+      'germany': 'de',
+      'australia': 'au',
+      'brazil': 'br',
+      'argentina': 'ar',
+      'russia': 'ru',
+      'canada': 'ca',
+      'switzerland': 'ch',
+      'netherlands': 'nl',
+      'belgium': 'be',
+      'austria': 'at',
+      'serbia': 'rs',
+      'croatia': 'hr',
+      'czech republic': 'cz',
+      'poland': 'pl',
+      'greece': 'gr',
+      'international': 'xx'
+    };
+
+    const flagCode = countryFlags[countryName.toLowerCase()] || 'xx';
+    return `https://media.api-sports.io/flags/${flagCode}.svg`;
   }
 }
 
