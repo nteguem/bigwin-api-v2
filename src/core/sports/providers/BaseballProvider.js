@@ -51,21 +51,30 @@ class BaseballProvider extends SportProvider {
     const games = rawData.response || [];
     const date = rawData.parameters?.date;
     
-    // Créer l'index des pays et ligues
-    const countries = new Set();
+    // Créer l'index des pays et ligues avec IDs cohérents
+    const countriesMap = new Map();
     const leagues = {};
     
     // Normaliser les matchs
     const matches = games.map(game => {
-      // Extraire le pays
-      const country = game.country.name;
-      countries.add(country);
+      // Extraire le pays et créer un ID cohérent
+      const countryName = game.country.name;
+      const countryId = countryName.toLowerCase().replace(/\s+/g, '-');
       
-      // Indexer les ligues par pays
-      if (!leagues[country]) {
-        leagues[country] = new Set();
+      // Stocker le mapping pays avec drapeau
+      if (!countriesMap.has(countryId)) {
+        countriesMap.set(countryId, {
+          id: countryId,
+          name: countryName,
+          flag: game.country.flag || `https://media.api-sports.io/flags/xx.svg`
+        });
       }
-      leagues[country].add(game.league.name);
+      
+      // Indexer les ligues par ID de pays
+      if (!leagues[countryId]) {
+        leagues[countryId] = new Set();
+      }
+      leagues[countryId].add(game.league.name);
       
       // Normaliser le statut
       let normalizedStatus;
@@ -77,15 +86,17 @@ class BaseballProvider extends SportProvider {
         default: normalizedStatus = game.status.short;
       }
       
-      // Retourner le match normalisé
+      // Retourner le match normalisé avec countryId cohérent
       return {
         id: game.id.toString(),
         date: game.date,
         league: {
           id: game.league.id.toString(),
           name: game.league.name,
-          country: country,
+          country: countryName,
+          countryId: countryId,
           logo: game.league.logo,
+          flag: game.country.flag,
           season: game.league.season
         },
         teams: {
@@ -100,7 +111,7 @@ class BaseballProvider extends SportProvider {
             logo: game.teams.away.logo
           }
         },
-        venue: null, // Pas de détails de stade dans l'API baseball
+        venue: null,
         status: normalizedStatus,
         score: {
           home: game.scores.home.total,
@@ -131,12 +142,12 @@ class BaseballProvider extends SportProvider {
       };
     });
     
-    // Convertir les ensembles en tableaux pour l'indexation
-    const countriesArray = Array.from(countries);
+    // Format identique aux autres providers
+    const countriesArray = Array.from(countriesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     const leaguesObj = {};
     
-    for (const country in leagues) {
-      leaguesObj[country] = Array.from(leagues[country]);
+    for (const countryId in leagues) {
+      leaguesObj[countryId] = Array.from(leagues[countryId]).sort();
     }
     
     return {
@@ -146,8 +157,8 @@ class BaseballProvider extends SportProvider {
       rawData,
       matches,
       indexes: {
-        countries: countriesArray,
-        leagues: leaguesObj
+        countries: countriesArray, // [{id, name, flag}, ...]
+        leagues: leaguesObj // Indexé par countryId
       }
     };
   }
