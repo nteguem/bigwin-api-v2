@@ -141,9 +141,19 @@ const fetchAndStoreData = async (sport, date, forceRefresh = false) => {
     logger.info(`Fetching fresh data from API for ${sport} on ${date}`);
     const rawData = await provider.fetchFixtures(date);
     
-    // AJOUT : Validation des données de l'API
-    if (!rawData || !rawData.response) {
+    // MODIFIÉ : Validation des données de l'API adaptée par sport
+    if (!rawData) {
       throw new Error(`Invalid API response for ${sport} on ${date}`);
+    }
+    
+    // Pour les sports RapidAPI, vérifier rawData.response
+    if (sport !== 'horse' && !rawData.response) {
+      throw new Error(`Invalid API response for ${sport} on ${date}: missing response field`);
+    }
+    
+    // Pour horse, vérifier la structure PMU
+    if (sport === 'horse' && !rawData.programme && !rawData.reunions && !rawData.courses) {
+      throw new Error(`Invalid API response for horse on ${date}: missing programme/reunions/courses`);
     }
     
     // Gérer les providers avec normalizeData async ou sync
