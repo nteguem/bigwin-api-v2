@@ -72,7 +72,7 @@ class DashboardService {
    */
   async getReferrals(affiliateId, offset = 0, limit = 20) {
     const referrals = await User.find({ referredBy: affiliateId })
-      .select('phone firstName lastName createdAt')
+      .select('phoneNumber pseudo countryCode createdAt')
       .sort({ createdAt: -1 })
       .skip(parseInt(offset))
       .limit(parseInt(limit));
