@@ -161,7 +161,7 @@ class HorseProvider extends SportProvider {
         rawData: rawData || {},
         matches: [],
         indexes: {
-          countries: ['france'],
+          countries: [{id: 'france', name: 'France', flag: 'https://media.api-sports.io/flags/fr.svg'}],
           leagues: { 'france': [] }
         }
       };
@@ -202,15 +202,24 @@ class HorseProvider extends SportProvider {
         rawData,
         matches: [],
         indexes: {
-          countries: ['france'],
+          countries: [{id: 'france', name: 'France', flag: 'https://media.api-sports.io/flags/fr.svg'}],
           leagues: { 'france': [] }
         }
       };
     }
     
-    // Créer l'index des pays et ligues (hippodromes)
-    const countries = new Set(['france']);
-    const leagues = { 'france': new Set() };
+    // Créer l'index des pays et ligues (hippodromes) - FORMAT HARMONISÉ
+    const countriesMap = new Map();
+    const leagues = {};
+    
+    // Ajouter la France au map
+    countriesMap.set('france', {
+      id: 'france',
+      name: 'France',
+      flag: 'https://media.api-sports.io/flags/fr.svg'
+    });
+    
+    leagues['france'] = new Set();
     
     // Normaliser les courses
     const matches = [];
@@ -240,8 +249,10 @@ class HorseProvider extends SportProvider {
           league: {
             id: reunion.hippodrome?.code || 'UNK',
             name: reunion.hippodrome?.libelleCourt || 'Hippodrome inconnu',
-            country: 'france',
-            logo: null
+            country: 'France',
+            countryId: 'france', // ID cohérent pour les URL
+            logo: '🏇',
+            flag: 'https://media.api-sports.io/flags/fr.svg'
           },
           teams: {
             home: {
@@ -310,10 +321,12 @@ class HorseProvider extends SportProvider {
       });
     });
     
-    // Convertir les ensembles en tableaux
+    // Format identique aux autres providers
+    const countriesArray = Array.from(countriesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     const leaguesObj = {};
-    for (const country in leagues) {
-      leaguesObj[country] = Array.from(leagues[country]);
+    
+    for (const countryId in leagues) {
+      leaguesObj[countryId] = Array.from(leagues[countryId]).sort();
     }
     
     return {
@@ -323,8 +336,8 @@ class HorseProvider extends SportProvider {
       rawData,
       matches: matches.sort((a, b) => new Date(a.date) - new Date(b.date)),
       indexes: {
-        countries: Array.from(countries),
-        leagues: leaguesObj
+        countries: countriesArray, // [{id, name, flag}, ...]
+        leagues: leaguesObj // Indexé par countryId
       }
     };
   }
