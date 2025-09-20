@@ -146,9 +146,14 @@ const fetchAndStoreData = async (sport, date, forceRefresh = false) => {
       throw new Error(`Invalid API response for ${sport} on ${date}`);
     }
     
-    // Pour les sports RapidAPI, vérifier rawData.response
-    if (sport !== 'horse' && !rawData.response) {
+    // Pour les sports RapidAPI classiques (football, basketball, rugby, etc.), vérifier rawData.response
+    if (['football', 'basketball', 'rugby', 'handball', 'volleyball', 'baseball', 'hockey'].includes(sport) && !rawData.response) {
       throw new Error(`Invalid API response for ${sport} on ${date}: missing response field`);
+    }
+    
+    // Pour tennis, vérifier rawData.data
+    if (sport === 'tennis' && !rawData.data) {
+      throw new Error(`Invalid API response for tennis on ${date}: missing data field`);
     }
     
     // Pour horse, vérifier la structure PMU
