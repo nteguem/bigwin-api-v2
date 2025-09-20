@@ -419,6 +419,51 @@
         "fr": "Les deux équipes marquent et plus de 2.5 buts au total",
         "en": "Both teams score and over 2.5 total goals"
       }
+    },
+    {
+      "id": "next_goal_home",
+      "position": 29,
+      "priority": "medium",
+      "label": {
+        "fr": "Prochain but : Domicile",
+        "en": "Next goal: Home"
+      },
+      "expression": "nextGoal === 'home'",
+      "category": "next_events",
+      "description": {
+        "fr": "Le prochain but sera marqué par l'équipe domicile",
+        "en": "The next goal will be scored by the home team"
+      }
+    },
+    {
+      "id": "next_goal_away",
+      "position": 30,
+      "priority": "medium",
+      "label": {
+        "fr": "Prochain but : Extérieur",
+        "en": "Next goal: Away"
+      },
+      "expression": "nextGoal === 'away'",
+      "category": "next_events",
+      "description": {
+        "fr": "Le prochain but sera marqué par l'équipe extérieur",
+        "en": "The next goal will be scored by the away team"
+      }
+    },
+    {
+      "id": "next_goal_none",
+      "position": 31,
+      "priority": "medium",
+      "label": {
+        "fr": "Pas de prochain but",
+        "en": "No next goal"
+      },
+      "expression": "nextGoal === 'none'",
+      "category": "next_events",
+      "description": {
+        "fr": "Aucun autre but ne sera marqué dans le match",
+        "en": "No more goals will be scored in the match"
+      }
     }
   ],
   "parametricEvents": [
@@ -666,6 +711,47 @@
           "default": 2
         }
       ]
+    },
+    {
+      "id": "next_goal_minute_range",
+      "position": 6,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Prochain but entre {{min_minute}}' et {{max_minute}}'",
+        "en": "Next goal between {{min_minute}}' and {{max_minute}}'"
+      },
+      "expressionTemplate": "nextGoalMinute >= {{min_minute}} && nextGoalMinute <= {{max_minute}}",
+      "category": "next_events",
+      "description": {
+        "fr": "Le prochain but sera marqué dans une tranche de minutes spécifique",
+        "en": "The next goal will be scored within a specific minute range"
+      },
+      "paramFields": [
+        {
+          "name": "min_minute",
+          "type": "number",
+          "label": {
+            "fr": "Minute minimum",
+            "en": "Minimum minute"
+          },
+          "min": 0,
+          "max": 90,
+          "step": 1,
+          "default": 60
+        },
+        {
+          "name": "max_minute",
+          "type": "number",
+          "label": {
+            "fr": "Minute maximum",
+            "en": "Maximum minute"
+          },
+          "min": 0,
+          "max": 120,
+          "step": 1,
+          "default": 75
+        }
+      ]
     }
   ],
   "categories": {
@@ -700,6 +786,10 @@
     "team_goals": {
       "fr": "Buts par équipe",
       "en": "Goals by team"
+    },
+    "next_events": {
+      "fr": "Prochains événements",
+      "en": "Next events"
     }
   }
 }
