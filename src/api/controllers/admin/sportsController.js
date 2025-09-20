@@ -10,6 +10,8 @@ const {
 const { AppError } = require('../../../utils/errorHandler');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
+
+
 /**
  * GET /api/sports
  */
@@ -44,14 +46,8 @@ exports.getCountries = async (req, res, next) => {
 
     const data = await fetchAndStoreData(sport, date, force);
 
-    const countries = data.indexes.countries.map(country => {
-      const countryId = country.toLowerCase().replace(/\s+/g, '-');
-      return {
-        id: countryId,
-        name: country,
-        flag: `https://media.api-sports.io/flags/${countryId.substring(0, 2)}.svg`
-      };
-    });
+    // Utiliser directement l'index des pays du provider
+    const countries = data.indexes.countries;
 
     formatSuccess(res, {
       data: countries,
@@ -76,33 +72,25 @@ exports.getLeagues = async (req, res, next) => {
 
     const data = await fetchAndStoreData(sport, date, force);
 
-    // Normaliser le nom du pays depuis l'URL
-    const countryFromUrl = country.replace(/-/g, ' ');
-    
-    // Trouver le pays correspondant (case-insensitive)
-    const countryName = data.indexes.countries.find(
-      c => c.toLowerCase() === countryFromUrl.toLowerCase()
-    );
-
-    if (!countryName) {
+    // Vérifier que le pays existe
+    if (!data.indexes.leagues[country]) {
       throw new AppError(`Country not found: ${country}`, 404);
     }
 
-    // Pour les courses hippiques, enrichir les données hippodromes
+    // Pour les courses hippiques
     if (sport === 'horse') {
       const hippodromes = data.matches
-        .filter(match => match.league.country.toLowerCase() === countryName.toLowerCase())
+        .filter(match => match.league.countryId === country)
         .reduce((acc, match) => {
           let hippodrome = acc.find(h => h.id === match.league.id);
           
           if (!hippodrome) {
-            // Extraire le numéro de réunion depuis l'ID du match (ex: R2-C1 -> R2)
-            const reunionNumber = match.id.split('-')[0]; // R2
+            const reunionNumber = match.id.split('-')[0];
             
             hippodrome = {
               id: match.league.id,
               name: match.league.name,
-              logo: exports.getHippodromeEmoji(match.league.id),
+              logo: exports.getHippodromeEmoji ? exports.getHippodromeEmoji(match.league.id) : '🏇',
               reunionNumber: reunionNumber,
               racesCount: 0,
               disciplines: new Set(),
@@ -113,15 +101,12 @@ exports.getLeagues = async (req, res, next) => {
             acc.push(hippodrome);
           }
           
-          // Compter les courses
           hippodrome.racesCount++;
           
-          // Collecter les disciplines
           if (match.sportSpecific?.discipline) {
             hippodrome.disciplines.add(match.sportSpecific.discipline);
           }
           
-          // Détecter les courses spéciales (Quinté Plus, etc.)
           if (match.sportSpecific?.bettingTypes) {
             const hasQuinte = match.sportSpecific.bettingTypes.some(bet => 
               bet.type.toLowerCase().includes('multi') || 
@@ -132,7 +117,6 @@ exports.getLeagues = async (req, res, next) => {
             }
           }
           
-          // Trouver la prochaine course
           const raceTime = new Date(match.date);
           const now = new Date();
           if (raceTime > now && (!hippodrome.nextRaceTime || raceTime < new Date(hippodrome.nextRaceTime))) {
@@ -142,13 +126,11 @@ exports.getLeagues = async (req, res, next) => {
           return acc;
         }, []);
       
-      // Transformer les disciplines en tableau et trier par numéro de réunion
       const leagues = hippodromes.map(h => ({
         ...h,
         disciplines: Array.from(h.disciplines),
         displayName: `${h.reunionNumber} ${h.name.toUpperCase()}`
       })).sort((a, b) => {
-        // Trier par numéro de réunion (R1, R2, R3...)
         const numA = parseInt(a.reunionNumber.replace('R', ''));
         const numB = parseInt(b.reunionNumber.replace('R', ''));
         return numA - numB;
@@ -160,9 +142,9 @@ exports.getLeagues = async (req, res, next) => {
       });
     }
 
-    // Code standard pour les autres sports
+    // Pour les autres sports
     const leagues = data.matches
-      .filter(match => match.league.country.toLowerCase() === countryName.toLowerCase())
+      .filter(match => match.league.countryId === country)
       .reduce((acc, match) => {
         if (!acc.find(l => l.id === match.league.id)) {
           acc.push({
@@ -173,6 +155,8 @@ exports.getLeagues = async (req, res, next) => {
         }
         return acc;
       }, []);
+
+    leagues.sort((a, b) => a.name.localeCompare(b.name));
 
     formatSuccess(res, {
       data: leagues,
@@ -197,22 +181,10 @@ exports.getFixtures = async (req, res, next) => {
 
     const data = await fetchAndStoreData(sport, date, force);
 
-    // Normaliser le nom du pays depuis l'URL
-    const countryFromUrl = country.replace(/-/g, ' ');
-    
-    // Trouver le pays correspondant (case-insensitive)
-    const countryName = data.indexes.countries.find(
-      c => c.toLowerCase() === countryFromUrl.toLowerCase()
-    );
-
-    if (!countryName) {
-      throw new AppError(`Country not found: ${country}`, 404);
-    }
-
-    // Filtrer les courses (fixtures) par pays et hippodrome (league)
+    // Filtrer par countryId et league
     const fixtures = data.matches.filter(
       match => 
-        match.league.country.toLowerCase() === countryName.toLowerCase() && 
+        match.league.countryId === country && 
         match.league.id === league
     );
 
@@ -222,35 +194,20 @@ exports.getFixtures = async (req, res, next) => {
 
     // Format spécialisé pour les courses hippiques
     if (sport === 'horse') {
-      const horseData = exports.formatHorseRaces(fixtures, league);
+      const horseData = exports.formatHorseRaces ? exports.formatHorseRaces(fixtures, league) : fixtures;
       return formatSuccess(res, {
         data: horseData
       });
     }
 
-    // Format standard pour les autres sports
-    let fixturesWithFlag = fixtures;
-    
-    if (sport !== 'horse') {
-      const countryId = country.toLowerCase().replace(/\s+/g, '-');
-      const countryFlag = `https://media.api-sports.io/flags/${countryId.substring(0, 2)}.svg`;
-      
-      fixturesWithFlag = fixtures.map(fixture => ({
-        ...fixture,
-        league: {
-          ...fixture.league,
-          countryFlag
-        }
-      }));
-    } else {
-      fixturesWithFlag = fixtures.map(fixture => ({
-        ...fixture,
-        league: {
-          ...fixture.league,
-          countryFlag: 'https://media.api-sports.io/flags/fr.svg'
-        }
-      }));
-    }
+    // Format standard - utiliser le vrai drapeau de l'API
+    const fixturesWithFlag = fixtures.map(fixture => ({
+      ...fixture,
+      league: {
+        ...fixture.league,
+        countryFlag: fixture.league.flag
+      }
+    }));
 
     formatSuccess(res, {
       data: fixturesWithFlag,
@@ -262,7 +219,7 @@ exports.getFixtures = async (req, res, next) => {
 };
 
 /**
- * GET /api/sports/:sport/matches/:matchId?date=YYYY-MM-DD&force=true
+ * GET /api/sports/:sport/matches/:matchId
  */
 exports.getMatchDetails = async (req, res, next) => {
   try {
@@ -273,22 +230,14 @@ exports.getMatchDetails = async (req, res, next) => {
       throw new AppError(`Sport not found: ${sport}`, 404);
     }
 
-    const matchData = await findMatch(sport, matchId, date || null, force === 'true');
+    const match = await findMatch(sport, matchId, date, force === 'true');
 
-    if (!matchData) {
+    if (!match) {
       throw new AppError(`Match not found: ${matchId}`, 404);
     }
 
-    // Format spécialisé pour les détails des courses hippiques
-    if (sport === 'horse') {
-      const raceDetails = exports.formatHorseRaceDetails(matchData);
-      return formatSuccess(res, { 
-        data: raceDetails 
-      });
-    }
-
-    formatSuccess(res, { 
-      data: matchData 
+    formatSuccess(res, {
+      data: match
     });
   } catch (error) {
     next(error);

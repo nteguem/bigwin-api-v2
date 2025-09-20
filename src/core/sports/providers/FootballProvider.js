@@ -1,5 +1,5 @@
 /**
- * @fileoverview Fournisseur de données pour le football
+ * @fileoverview Fournisseur de données pour le football - VERSION CORRIGÉE
  */
 const SportProvider = require('./SportProvider');
 
@@ -51,21 +51,30 @@ class FootballProvider extends SportProvider {
     const fixtures = rawData.response || [];
     const date = rawData.parameters?.date;
     
-    // Créer l'index des pays et ligues
-    const countries = new Set();
+    // Créer l'index des pays et ligues avec IDs cohérents
+    const countriesMap = new Map();
     const leagues = {};
     
     // Normaliser les matchs
     const matches = fixtures.map(fixture => {
-      // Extraire le pays
-      const country = fixture.league.country;
-      countries.add(country);
+      // Extraire le pays et créer un ID cohérent
+      const countryName = fixture.league.country;
+      const countryId = countryName.toLowerCase().replace(/\s+/g, '-');
       
-      // Indexer les ligues par pays
-      if (!leagues[country]) {
-        leagues[country] = new Set();
+      // Stocker le mapping pays
+      if (!countriesMap.has(countryId)) {
+        countriesMap.set(countryId, {
+          id: countryId,
+          name: countryName,
+          flag: fixture.league.flag
+        });
       }
-      leagues[country].add(fixture.league.name);
+      
+      // Indexer les ligues par ID de pays
+      if (!leagues[countryId]) {
+        leagues[countryId] = new Set();
+      }
+      leagues[countryId].add(fixture.league.name);
       
       // Normaliser le statut
       let normalizedStatus;
@@ -77,15 +86,17 @@ class FootballProvider extends SportProvider {
         default: normalizedStatus = fixture.fixture.status.short;
       }
       
-      // Retourner le match normalisé
+      // Retourner le match normalisé avec countryId cohérent
       return {
         id: fixture.fixture.id.toString(),
         date: fixture.fixture.date,
         league: {
           id: fixture.league.id.toString(),
           name: fixture.league.name,
-          country: country,
-          logo: fixture.league.logo
+          country: countryName,
+          countryId: countryId, // AJOUT : ID cohérent pour les URL
+          logo: fixture.league.logo,
+          flag: fixture.league.flag
         },
         teams: {
           home: {
@@ -114,27 +125,28 @@ class FootballProvider extends SportProvider {
         sportSpecific: {
           elapsed: fixture.fixture.status.elapsed,
           referee: fixture.fixture.referee,
+          round: fixture.league.round,
+          season: fixture.league.season
         }
       };
     });
     
-    // Convertir les ensembles en tableaux pour l'indexation
-    const countriesArray = Array.from(countries);
+    // Convertir en format pour les index
+    const countriesArray = Array.from(countriesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     const leaguesObj = {};
     
-    for (const country in leagues) {
-      leaguesObj[country] = Array.from(leagues[country]);
+    for (const countryId in leagues) {
+      leaguesObj[countryId] = Array.from(leagues[countryId]).sort();
     }
     
     return {
       sport: 'football',
       date,
       source: 'api-football',
-      rawData,
       matches,
       indexes: {
-        countries: countriesArray,
-        leagues: leaguesObj
+        countries: countriesArray, // Maintenant avec {id, name, flag}
+        leagues: leaguesObj // Indexé par countryId
       }
     };
   }
