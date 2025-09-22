@@ -80,7 +80,7 @@ const sportsConfig = {
     name: 'Tennis',
     icon: '🎾',
     sportId: 'tennis',
-    apiKey: process.env.RAPID_API_KEY,
+    apiKey: process.env.RAPID_API_KEY_TENNIS,
     baseUrl: 'https://tennis-api-atp-wta-itf.p.rapidapi.com',
     host: 'tennis-api-atp-wta-itf.p.rapidapi.com'
   },
