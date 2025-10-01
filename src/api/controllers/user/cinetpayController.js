@@ -131,25 +131,31 @@ exports.webhook = catchAsync(async (req, res, next) => {
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // // Vérifier HMAC si configuré
-    // if (process.env.CINETPAY_SECRET_KEY && receivedToken) {
-    //   const isValidToken = cinetpayService.verifyHmacToken(receivedToken, req.body);
-    //   if (!isValidToken) {
-    //     console.warn('CinetPay - Invalid HMAC token');
-    //   }
-    // }
+    // Vérifier HMAC avec le bon SECRET_KEY selon la devise de la transaction
+    if (receivedToken) {
+      const isValidToken = cinetpayService.verifyHmacToken(
+        receivedToken, 
+        req.body, 
+        transaction.currency // Passez la devise de la transaction
+      );
+      if (!isValidToken) {
+        console.warn(`CinetPay - Invalid HMAC token for ${transaction.currency} transaction ${transactionId}`);
+      } else {
+        console.log(`CinetPay - Valid HMAC token for ${transaction.currency} transaction ${transactionId}`);
+      }
+    }
 
     // Mettre à jour la transaction avec les données webhook
-    transaction.cpmTransDate = req.body.cpm_trans_date ;
+    transaction.cpmTransDate = req.body.cpm_trans_date;
     transaction.cpmErrorMessage = cpm_error_message;
     transaction.paymentMethod = req.body.payment_method;
-    transaction.cpmPhonePrefix = req.body.cmp_phone_prefixe;
-    transaction.cpmLanguage = req.body.cmp_language;
-    transaction.cpmVersion = req.body.cmp_version;
-    transaction.cmpPaymentConfig = req.body.cmp_payment_config;
-    transaction.cmpPageAction = req.body.cmp_page_action;
-    transaction.cmpCustom = req.body.cmp_custom;
-    transaction.cmpDesignation = req.body.cmp_designation;
+    transaction.cpmPhonePrefix = req.body.cpm_phone_prefixe;
+    transaction.cpmLanguage = req.body.cpm_language;
+    transaction.cpmVersion = req.body.cpm_version;
+    transaction.cmpPaymentConfig = req.body.cpm_payment_config;
+    transaction.cmpPageAction = req.body.cpm_page_action;
+    transaction.cmpCustom = req.body.cpm_custom;
+    transaction.cmpDesignation = req.body.cpm_designation;
     transaction.webhookSignature = req.body.signature;
 
     // Déterminer le statut
@@ -164,8 +170,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
     }
 
     await transaction.save();
+    console.log(`Transaction ${transactionId} updated to status: ${transaction.status}`);
 
-    // Traiter la transaction mise à jour
+    // Traiter la transaction mise à jour (la transaction est déjà populée)
     await paymentMiddleware.processTransactionUpdate(transaction);
 
     res.status(200).json({
@@ -175,7 +182,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   } catch (error) {
     console.error('Webhook processing error:', error.message);
+    console.error('Error stack:', error.stack);
     
+    // Toujours retourner 200 pour que CinetPay ne renvoie pas le webhook
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',

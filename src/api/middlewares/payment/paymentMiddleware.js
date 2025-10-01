@@ -6,7 +6,7 @@ async function handleSuccessfulTransaction(transaction) {
     if (transaction.isSuccessful() && !transaction.processed) {
       console.log(`Processing successful transaction: ${transaction._id}`);
       
-      // Créer la souscription avec XAF par défaut
+      // Créer la souscription 
       const subscription = await subscriptionService.createSubscription(
         transaction.user,
         transaction.package,
