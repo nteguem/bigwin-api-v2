@@ -135,32 +135,49 @@ function verifyHmacToken(receivedToken, data, currency) {
 /**
  * Initier un paiement CinetPay
  */
+/**
+ * Initier un paiement CinetPay
+ */
 async function initiatePayment(userId, packageId, phoneNumber, customerName, email) {
   try {
+    console.log('========== INITIATE PAYMENT START ==========');
+    console.log('UserId:', userId);
+    console.log('PackageId:', packageId);
+    console.log('PhoneNumber:', phoneNumber);
+    
     // 1. Récupérer le package
     const packageDoc = await Package.findById(packageId);
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
+    console.log('Package found:', packageDoc.name.fr);
 
     // 2. Détecter automatiquement la devise selon le numéro
     const currency = detectCurrencyFromPhone(phoneNumber);
-    console.log(`Currency detected: ${currency} for phone ${phoneNumber}`);
+    console.log('Currency detected:', currency, 'for phone:', phoneNumber);
 
     // 3. Récupérer le prix dans la devise détectée
     const amount = packageDoc.pricing.get(currency);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
+    console.log('Amount:', amount, currency);
 
     // 4. Obtenir la configuration pour cette devise
     const config = getConfigForCurrency(currency);
+    console.log('Config selected for', currency);
+    console.log('SITE_ID:', config.SITE_ID);
+    console.log('API_KEY (first 15 chars):', config.API_KEY.substring(0, 15));
+    console.log('SECRET_KEY (first 15 chars):', config.SECRET_KEY.substring(0, 15));
 
     // 5. Générer un ID de transaction unique
     const transactionId = `TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
+    console.log('Transaction ID generated:', transactionId);
 
     // 6. Générer les URLs
     const { notify_url, return_url } = generateUrls();
+    console.log('notify_url:', notify_url);
+    console.log('return_url:', return_url);
 
     // 7. Créer la transaction en base
     const cinetpayTransaction = new CinetpayTransaction({
@@ -178,7 +195,7 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
     });
 
     await cinetpayTransaction.save();
-    console.log(`Transaction created in DB: ${transactionId} (${currency})`);
+    console.log('Transaction saved in DB with ID:', cinetpayTransaction._id);
 
     // 8. Préparer les données pour l'API CinetPay
     const paymentData = {
@@ -196,7 +213,9 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
       lang: 'FR'
     };
 
-    console.log(`Initiating ${currency} payment with SITE_ID: ${config.SITE_ID}`);
+    console.log('========== CALLING CINETPAY API ==========');
+    console.log('API URL:', API_URL);
+    console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
 
     // 9. Appeler l'API CinetPay
     const response = await axios.post(API_URL, paymentData, {
@@ -205,10 +224,16 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
       }
     });
 
-    console.log('CinetPay payment initialization response:', response.data);
+    console.log('========== CINETPAY API RESPONSE ==========');
+    console.log('Status:', response.status);
+    console.log('Response Code:', response.data.code);
+    console.log('Response Message:', response.data.message);
+    console.log('Full Response:', JSON.stringify(response.data, null, 2));
+    console.log('==========================================');
 
     // 10. Vérifier la réponse
     if (response.data.code !== '201') {
+      console.error('Payment initialization failed with code:', response.data.code);
       // Supprimer la transaction si l'initialisation échoue
       await CinetpayTransaction.findByIdAndDelete(cinetpayTransaction._id);
       
@@ -224,9 +249,18 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
     cinetpayTransaction.paymentUrl = response.data.data.payment_url;
     cinetpayTransaction.apiResponseId = response.data.api_response_id;
     await cinetpayTransaction.save();
+    
+    console.log('Transaction updated with payment token');
+    console.log('Payment URL:', response.data.data.payment_url);
 
     // 12. Populer et retourner
     await cinetpayTransaction.populate(['package', 'user']);
+
+    console.log('========== INITIATE PAYMENT SUCCESS ==========');
+    console.log('Transaction ID:', transactionId);
+    console.log('Currency:', currency);
+    console.log('SITE_ID used:', config.SITE_ID);
+    console.log('==============================================');
 
     return {
       transaction: cinetpayTransaction,
@@ -234,14 +268,18 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
     };
 
   } catch (error) {
-    console.error('Error in initiatePayment:', error.message);
+    console.error('========== INITIATE PAYMENT ERROR ==========');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
     
     if (error instanceof CinetpayError || error instanceof AppError) {
+      console.error('Error type:', error.name);
+      console.error('Error status:', error.statusCode);
       throw error;
     }
 
     if (error.response) {
-      console.error('CinetPay API error:', error.response.data);
+      console.error('API Error Response:', JSON.stringify(error.response.data, null, 2));
       throw new CinetpayError(
         error.response.data.message || error.response.data.description || error.message,
         error.response.status,
@@ -249,6 +287,8 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
       );
     }
 
+    console.error('Error stack:', error.stack);
+    console.error('===========================================');
     throw error;
   }
 }
