@@ -131,13 +131,13 @@ exports.webhook = catchAsync(async (req, res, next) => {
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Vérifier HMAC si configuré
-    if (process.env.CINETPAY_SECRET_KEY && receivedToken) {
-      const isValidToken = cinetpayService.verifyHmacToken(receivedToken, req.body);
-      if (!isValidToken) {
-        console.warn('CinetPay - Invalid HMAC token');
-      }
-    }
+    // // Vérifier HMAC si configuré
+    // if (process.env.CINETPAY_SECRET_KEY && receivedToken) {
+    //   const isValidToken = cinetpayService.verifyHmacToken(receivedToken, req.body);
+    //   if (!isValidToken) {
+    //     console.warn('CinetPay - Invalid HMAC token');
+    //   }
+    // }
 
     // Mettre à jour la transaction avec les données webhook
     transaction.cpmTransDate = req.body.cpm_trans_date ;
