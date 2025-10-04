@@ -72,15 +72,43 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         const category = await Category.findById(doc.category);
         const categoryName = category ? category.description : 'Catégorie inconnue';
         
-        // Vérifier si c'est un LIVE
+        // Vérifier le type de catégorie
         const isLive = categoryName.toUpperCase().includes('LIVE');
+        const isDailyCoupon = categoryName.toUpperCase().includes('COUPON DU JOUR') || 
+                             category?.name === 'CDJ';
                 
         // Import du service de notification
         const notificationService = require("../../services/common/notificationService");
         
         let notification;
         
-        if (isLive) {
+        if (isDailyCoupon) {
+          // Notification pour Coupon du Jour (CDJ)
+          notification = {
+            headings: {
+              en: "💎 Daily Sure Bet - BigWin!",
+              fr: "💎 Coup Sûr du Jour - BigWin!"
+            },
+            contents: {
+              en: `🎯 Today's guaranteed @2.00 odds is here! Grab it now!`,
+              fr: `🎯 Le coup sûr du jour cote @2.00 est là ! À ne pas manquer !`
+            },
+            data: {
+              type: "daily_coupon",
+              ticket_id: doc._id.toString(),
+              category_name: categoryName,
+              action: "view_daily_coupon",
+              guaranteed_odds: "2.00",
+              success_rate: "99%"
+            },
+            options: {
+              android_accent_color: "FFD700", // Or/Gold pour le coup sûr
+              small_icon: "ic_notification",
+              large_icon: "ic_launcher",
+              priority: 10 // Haute priorité
+            }
+          };
+        } else if (isLive) {
           // Notification pour les LIVE - Messages optimisés
           notification = {
             headings: {
@@ -135,7 +163,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         console.log("📊 Statistiques:", {
           notificationId: result.id,
           recipients: result.recipients,
-          type: isLive ? 'LIVE' : 'NORMAL',
+          type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
           category: categoryName
         });
         
