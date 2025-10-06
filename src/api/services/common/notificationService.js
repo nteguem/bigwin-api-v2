@@ -1,7 +1,7 @@
 // src/api/services/common/notificationService.js
 const axios = require('axios');
 const logger = require('../../../utils/logger');
-const AppError = require('../../../utils/AppError');
+const {AppError} = require('../../../utils/AppError');
 
 class NotificationService {
   constructor() {
