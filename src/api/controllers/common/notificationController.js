@@ -1,7 +1,7 @@
 // src/api/controllers/common/notificationController.js
 const notificationService = require('../../services/common/notificationService');
 const catchAsync = require('../../../utils/catchAsync');
-const AppError = require('../../../utils/AppError');
+const {AppError} = require('../../../utils/AppError');
 
 /**
  * Endpoint de base : Envoyer à des playerIds
