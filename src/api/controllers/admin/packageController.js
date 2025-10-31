@@ -10,8 +10,16 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.getAllPackages = catchAsync(async (req, res, next) => {
   const { lang = 'fr', currency } = req.query;
   
-  // Récupération uniquement des packages actifs
-  const packages = await Package.find({ isActive: true })
+  // Construire le filtre de base
+  const filter = {};
+  
+  // Filtrer par isActive UNIQUEMENT si currency est fourni
+  if (currency) {
+    filter.isActive = true;
+  }
+  
+  // Récupération des packages selon le filtre
+  const packages = await Package.find(filter)
     .populate('categories', 'name description isVip')
     .populate('formationId');
 
