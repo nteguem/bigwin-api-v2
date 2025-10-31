@@ -8,56 +8,70 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir tous les packages (admin)
  */
 exports.getAllPackages = catchAsync(async (req, res, next) => {
-  const { lang = 'fr', currency = 'XAF' } = req.query;
+  const { lang = 'fr', currency } = req.query;
   
   // Récupération uniquement des packages actifs
   const packages = await Package.find({ isActive: true })
     .populate('categories', 'name description isVip')
     .populate('formationId');
 
-  // FILTRER uniquement les packages qui ont la devise demandée
-  const packagesWithCurrency = packages.filter(pkg => {
-    const price = pkg.getPricing(currency);
-    return price !== null && price !== undefined;
-  });
+  let finalPackages = packages;
 
-  // Si aucun package n'a cette devise, retourner vide
-  if (!packagesWithCurrency.length) {
-    return res.status(200).json({
-      success: true,
-      data: {
-        packages: [],
-        count: 0,
-        currency: currency
-      }
+  // FILTRER par devise uniquement si currency est fourni
+  if (currency) {
+    finalPackages = packages.filter(pkg => {
+      const price = pkg.getPricing(currency);
+      return price !== null && price !== undefined;
+    });
+
+    // Si aucun package n'a cette devise, retourner vide
+    if (!finalPackages.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          packages: [],
+          count: 0,
+          currency: currency
+        }
+      });
+    }
+
+    // Trier par prix dans la devise demandée
+    finalPackages = finalPackages.sort((a, b) => {
+      const priceA = a.getPricing(currency) || 0;
+      const priceB = b.getPricing(currency) || 0;
+      return priceA - priceB;
     });
   }
 
-  // Trier par prix dans la devise demandée
-  const sortedPackages = packagesWithCurrency.sort((a, b) => {
-    const priceA = a.getPricing(currency) || 0;
-    const priceB = b.getPricing(currency) || 0;
-    return priceA - priceB;
-  });
-
-  // Formater selon la langue ET filtrer par devise
-  const formattedPackages = sortedPackages.map(pkg => {
+  // Formater selon la langue
+  const formattedPackages = finalPackages.map(pkg => {
     const formatted = pkg.formatForLanguage(lang);
     
-    formatted.pricing = formatted.pricing[currency] || 0;
-    formatted.economy = formatted.economy ? (formatted.economy[currency] || 0) : null;
+    // Si une devise est spécifiée, ne retourner que le prix pour cette devise
+    if (currency) {
+      formatted.pricing = formatted.pricing[currency] || 0;
+      formatted.economy = formatted.economy ? (formatted.economy[currency] || 0) : null;
+    }
+    // Sinon, retourner tous les prix (déjà formatés par formatForLanguage)
     
     return formatted;
   });
 
-  res.status(200).json({
+  const response = {
     success: true,
     data: {
       packages: formattedPackages,
-      count: formattedPackages.length,
-      currency: currency
+      count: formattedPackages.length
     }
-  });
+  };
+
+  // Ajouter la devise dans la réponse seulement si elle a été fournie
+  if (currency) {
+    response.data.currency = currency;
+  }
+
+  res.status(200).json(response);
 });
 /**
  * Obtenir un package par ID
