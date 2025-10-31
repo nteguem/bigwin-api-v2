@@ -10,8 +10,8 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.getAllPackages = catchAsync(async (req, res, next) => {
   const { lang = 'fr', currency = 'XAF' } = req.query;
   
-  // Récupération de tous les packages
-  const packages = await Package.find()
+  // Récupération uniquement des packages actifs
+  const packages = await Package.find({ isActive: true })
     .populate('categories', 'name description isVip')
     .populate('formationId');
 

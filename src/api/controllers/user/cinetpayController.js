@@ -131,20 +131,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Vérifier HMAC avec le bon SECRET_KEY selon la devise de la transaction
-    // if (receivedToken) {
-    //   const isValidToken = cinetpayService.verifyHmacToken(
-    //     receivedToken, 
-    //     req.body, 
-    //     transaction.currency // Passez la devise de la transaction
-    //   );
-    //   if (!isValidToken) {
-    //     console.warn(`CinetPay - Invalid HMAC token for ${transaction.currency} transaction ${transactionId}`);
-    //   } else {
-    //     console.log(`CinetPay - Valid HMAC token for ${transaction.currency} transaction ${transactionId}`);
-    //   }
-    // }
-
     // Mettre à jour la transaction avec les données webhook
     transaction.cpmTransDate = req.body.cpm_trans_date;
     transaction.cpmErrorMessage = cpm_error_message;
