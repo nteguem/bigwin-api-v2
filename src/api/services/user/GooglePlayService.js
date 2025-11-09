@@ -293,8 +293,9 @@ class GooglePlayService {
       console.log('[GooglePlay ONE-TIME] Début validation:', { purchaseToken, productId, packageId });
       
       // 1. Vérifier avec l'API Google (nouvelle API productsv2)
-      const { data } = await this.androidPublisher.purchases.productsv2.get({
+      const { data } = await this.androidPublisher.purchases.products.get({
         packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+        productId: productId,
         token: purchaseToken
       });
 
