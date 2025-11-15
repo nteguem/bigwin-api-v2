@@ -3,13 +3,14 @@ const axios = require('axios');
 const xml2js = require('xml2js');
 const DpoPayTransaction = require('../../models/user/DpoPayTransaction');
 const Package = require('../../models/common/Package');
+const User = require('../../models/user/User'); // ✅ AJOUTÉ
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 // Configuration
 const API_URL = 'https://secure.3gdirectpay.com/API/v6/';
 const PAYMENT_URL = 'https://secure.3gdirectpay.com/payv2.php';
-const COMPANY_TOKEN = process.env.DPO_COMPANY_TOKEN; // 8F2ADF51-1B25-4FA8-94BD-0DB2AD4BDFC5
-const SERVICE_TYPE = process.env.DPO_SERVICE_TYPE; // 106074
+const COMPANY_TOKEN = process.env.DPO_COMPANY_TOKEN;
+const SERVICE_TYPE = process.env.DPO_SERVICE_TYPE;
 
 if (!COMPANY_TOKEN || !SERVICE_TYPE) {
   throw new Error('Variables d\'environnement DPO manquantes: DPO_COMPANY_TOKEN, DPO_SERVICE_TYPE');
@@ -23,6 +24,27 @@ class DpoPayError extends Error {
     this.statusCode = statusCode;
     this.responseData = responseData;
   }
+}
+
+// ✅ NOUVEAU - Mapper devise → pays
+function getCurrencyCountry(currency) {
+  const mapping = {
+    'XAF': 'Cameroon',
+    'XOF': "Cote d'Ivoire",
+    'GMD': 'Gambia',
+    'CDF': 'Democratic Republic of Congo',
+    'GNF': 'Guinea',
+    'KES': 'Kenya',
+    'TZS': 'Tanzania',
+    'UGX': 'Uganda',
+    'RWF': 'Rwanda',
+    'GHS': 'Ghana',
+    'ZMW': 'Zambia',
+    'BWP': 'Botswana',
+    'MWK': 'Malawi',
+    'ZAR': 'South Africa'
+  };
+  return mapping[currency] || '';
 }
 
 /**
@@ -108,6 +130,12 @@ async function createToken(userId, packageId, phoneNumber, currency) {
       throw new AppError(`Prix ${currency} non disponible`, 400, ErrorCodes.VALIDATION_ERROR);
     }
 
+    // ✅ NOUVEAU - Récupérer le user
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
+    }
+
     // Générer orderId et URLs
     const orderId = `dpo-${Date.now()}`;
     const { redirect_url, back_url } = generateUrls();
@@ -120,8 +148,11 @@ async function createToken(userId, packageId, phoneNumber, currency) {
       redirectUrl: redirect_url,
       backUrl: back_url,
       phoneNumber,
+      customerFirstName: user.firstName || 'Client',      // ✅ AJOUTÉ
+      customerLastName: user.lastName || 'BigWin',        // ✅ AJOUTÉ
+      customerEmail: user.email || '',                    // ✅ AJOUTÉ
       serviceDescription: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
-      defaultPaymentCountry: currency === 'XAF' ? 'Cameroon' : ''
+      defaultPaymentCountry: getCurrencyCountry(currency) // ✅ MODIFIÉ
     });
 
     console.log(`[DPO-1] XML Request:`, xmlPayload);
