@@ -3,10 +3,9 @@ const axios = require('axios');
 const xml2js = require('xml2js');
 const DpoPayTransaction = require('../../models/user/DpoPayTransaction');
 const Package = require('../../models/common/Package');
-const User = require('../../models/user/User'); // ✅ AJOUTÉ
+const User = require('../../models/user/User');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
-// Configuration
 const API_URL = 'https://secure.3gdirectpay.com/API/v6/';
 const PAYMENT_URL = 'https://secure.3gdirectpay.com/payv2.php';
 const COMPANY_TOKEN = process.env.DPO_COMPANY_TOKEN;
@@ -16,7 +15,6 @@ if (!COMPANY_TOKEN || !SERVICE_TYPE) {
   throw new Error('Variables d\'environnement DPO manquantes: DPO_COMPANY_TOKEN, DPO_SERVICE_TYPE');
 }
 
-// Classe d'erreur
 class DpoPayError extends Error {
   constructor(message, statusCode, responseData) {
     super(message);
@@ -26,25 +24,18 @@ class DpoPayError extends Error {
   }
 }
 
-// ✅ LISTE OFFICIELLE DPO
+// Mapper devise → pays
 function getCurrencyCountry(currency) {
   const mapping = {
-    // Afrique de l'Ouest
-    'XOF': "Ivory Coast",  // ✅ Anglais sans accent
+    'XOF': "Ivory Coast",
     'GHS': 'Ghana',
     'NGN': 'Nigeria',
-    
-    // Afrique Centrale  
     'CDF': 'Democratic Republic of Congo',
-    
-    // Afrique de l'Est
     'KES': 'Kenya',
     'UGX': 'Uganda',
     'TZS': 'Tanzania',
     'RWF': 'Rwanda',
     'ETB': 'Ethiopia',
-    
-    // Afrique Australe
     'ZAR': 'South Africa',
     'ZMW': 'Zambia',
     'ZWL': 'Zimbabwe',
@@ -57,9 +48,57 @@ function getCurrencyCountry(currency) {
   };
   return mapping[currency] || '';
 }
-/**
- * Générer les URLs
- */
+
+// Mapper devise → code pays ISO
+function getCurrencyCountryCode(currency) {
+  const mapping = {
+    'XOF': 'CI',
+    'GHS': 'GH',
+    'NGN': 'NG',
+    'CDF': 'CD',
+    'KES': 'KE',
+    'UGX': 'UG',
+    'TZS': 'TZ',
+    'RWF': 'RW',
+    'ETB': 'ET',
+    'ZAR': 'ZA',
+    'ZMW': 'ZM',
+    'ZWL': 'ZW',
+    'BWP': 'BW',
+    'NAD': 'NA',
+    'MWK': 'MW',
+    'LSL': 'LS',
+    'SZL': 'SZ',
+    'MUR': 'MU'
+  };
+  return mapping[currency] || '';
+}
+
+// Mapper devise → ville
+function getCurrencyCity(currency) {
+  const mapping = {
+    'XOF': 'Abidjan',
+    'GHS': 'Accra',
+    'NGN': 'Lagos',
+    'CDF': 'Kinshasa',
+    'KES': 'Nairobi',
+    'UGX': 'Kampala',
+    'TZS': 'Dar es Salaam',
+    'RWF': 'Kigali',
+    'ETB': 'Addis Ababa',
+    'ZAR': 'Johannesburg',
+    'ZMW': 'Lusaka',
+    'ZWL': 'Harare',
+    'BWP': 'Gaborone',
+    'NAD': 'Windhoek',
+    'MWK': 'Lilongwe',
+    'LSL': 'Maseru',
+    'SZL': 'Mbabane',
+    'MUR': 'Port Louis'
+  };
+  return mapping[currency] || '';
+}
+
 function generateUrls() {
   const baseUrl = process.env.APP_BASE_URL;
   return {
@@ -68,9 +107,6 @@ function generateUrls() {
   };
 }
 
-/**
- * Construire XML pour createToken
- */
 function buildCreateTokenXml(data) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <API3G>
@@ -84,12 +120,16 @@ function buildCreateTokenXml(data) {
     <BackURL>${data.backUrl}</BackURL>
     <CompanyRefUnique>0</CompanyRefUnique>
     <PTL>5</PTL>
-    <customerFirstName>${data.customerFirstName || ''}</customerFirstName>
-    <customerLastName>${data.customerLastName || ''}</customerLastName>
+    <customerFirstName>${data.customerFirstName}</customerFirstName>
+    <customerLastName>${data.customerLastName}</customerLastName>
+    <customerAddress>${data.customerAddress}</customerAddress>
+    <customerCity>${data.customerCity}</customerCity>
+    <customerCountry>${data.customerCountryCode}</customerCountry>
+    <customerZip>${data.customerZip}</customerZip>
     <customerPhone>${data.phoneNumber}</customerPhone>
-    <customerEmail>${data.customerEmail || ''}</customerEmail>
+    <customerEmail>${data.customerEmail}</customerEmail>
     <DefaultPayment>MO</DefaultPayment>
-    <DefaultPaymentCountry>${data.defaultPaymentCountry || ''}</DefaultPaymentCountry>
+    <DefaultPaymentCountry>${data.defaultPaymentCountry}</DefaultPaymentCountry>
   </Transaction>
   <Services>
     <Service>
@@ -101,9 +141,6 @@ function buildCreateTokenXml(data) {
 </API3G>`;
 }
 
-/**
- * Construire XML pour verifyToken
- */
 function buildVerifyTokenXml(transactionToken) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <API3G>
@@ -113,44 +150,39 @@ function buildVerifyTokenXml(transactionToken) {
 </API3G>`;
 }
 
-/**
- * Parser XML response
- */
 async function parseXmlResponse(xmlString) {
   const parser = new xml2js.Parser({ explicitArray: false });
   return await parser.parseStringPromise(xmlString);
 }
 
-/**
- * Créer un token de transaction
- */
 async function createToken(userId, packageId, phoneNumber, currency) {
   try {
     console.log(`[DPO-START] Démarrage createToken userId=${userId}, package=${packageId}`);
 
-    // Récupérer le package
     const packageDoc = await Package.findById(packageId);
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Récupérer le prix
     const amount = packageDoc.pricing.get(currency);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible`, 400, ErrorCodes.VALIDATION_ERROR);
     }
 
-    // ✅ NOUVEAU - Récupérer le user
     const user = await User.findById(userId);
     if (!user) {
       throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Générer orderId et URLs
     const orderId = `dpo-${Date.now()}`;
     const { redirect_url, back_url } = generateUrls();
+    
+    const countryName = getCurrencyCountry(currency);
+    const countryCode = getCurrencyCountryCode(currency);
+    const city = getCurrencyCity(currency);
 
-    // Construire XML
+    console.log(`[DPO-DEBUG] Country: ${countryName}, Code: ${countryCode}, City: ${city}`);
+
     const xmlPayload = buildCreateTokenXml({
       amount,
       currency,
@@ -158,30 +190,29 @@ async function createToken(userId, packageId, phoneNumber, currency) {
       redirectUrl: redirect_url,
       backUrl: back_url,
       phoneNumber,
-      customerFirstName: user.firstName || 'Client',      // ✅ AJOUTÉ
-      customerLastName: user.lastName || 'BigWin',        // ✅ AJOUTÉ
-      customerEmail: user.email || '',                    // ✅ AJOUTÉ
+      customerFirstName: user.firstName || 'Client',
+      customerLastName: user.lastName || 'BigWin',
+      customerEmail: user.email || `${user._id}@bigwin.app`,
+      customerAddress: city || 'N/A',
+      customerCity: city,
+      customerCountryCode: countryCode,
+      customerZip: '00000',
       serviceDescription: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
-      defaultPaymentCountry: getCurrencyCountry(currency) // ✅ MODIFIÉ
+      defaultPaymentCountry: countryName
     });
 
-    console.log(`[DPO-1] XML Request:`, xmlPayload);
+    console.log(`[DPO-XML]`, xmlPayload);
 
-    // Appeler l'API DPO
     const response = await axios.post(API_URL, xmlPayload, {
-      headers: {
-        'Content-Type': 'application/xml'
-      },
+      headers: { 'Content-Type': 'application/xml' },
       timeout: 30000
     });
 
-    console.log(`[DPO-2] Response:`, response.data);
+    console.log(`[DPO-RESPONSE]`, response.data);
 
-    // Parser la réponse
     const parsedResponse = await parseXmlResponse(response.data);
     const result = parsedResponse.API3G;
 
-    // Vérifier les erreurs
     if (result.Result !== '000') {
       throw new DpoPayError(
         result.ResultExplanation || 'Erreur lors de la création du token',
@@ -190,10 +221,8 @@ async function createToken(userId, packageId, phoneNumber, currency) {
       );
     }
 
-    // Construire l'URL de checkout
     const checkoutUrl = `${PAYMENT_URL}?ID=${result.TransToken}`;
 
-    // Créer la transaction
     const dpoTransaction = new DpoPayTransaction({
       transactionToken: result.TransToken,
       orderId,
@@ -236,9 +265,6 @@ async function createToken(userId, packageId, phoneNumber, currency) {
   }
 }
 
-/**
- * Vérifier le statut d'une transaction
- */
 async function verifyToken(transactionToken) {
   try {
     console.log(`[DPO-VERIFY] Token:`, transactionToken);
@@ -246,9 +272,7 @@ async function verifyToken(transactionToken) {
     const xmlPayload = buildVerifyTokenXml(transactionToken);
 
     const response = await axios.post(API_URL, xmlPayload, {
-      headers: {
-        'Content-Type': 'application/xml'
-      },
+      headers: { 'Content-Type': 'application/xml' },
       timeout: 30000
     });
 
@@ -257,7 +281,6 @@ async function verifyToken(transactionToken) {
 
     console.log(`[DPO-VERIFY] Response:`, result);
 
-    // Mettre à jour la transaction
     const transaction = await DpoPayTransaction.findOne({ transactionToken })
       .populate(['package', 'user']);
 
@@ -265,7 +288,6 @@ async function verifyToken(transactionToken) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Mapper le statut DPO vers notre statut
     let status = 'PENDING';
     if (result.Result === '000') {
       status = 'PAID';
@@ -275,7 +297,6 @@ async function verifyToken(transactionToken) {
       status = 'FAILED';
     }
 
-    // Mettre à jour
     transaction.status = status;
     transaction.transactionApproval = result.TransactionApproval;
     transaction.transactionCurrency = result.TransactionCurrency;
@@ -310,9 +331,6 @@ async function verifyToken(transactionToken) {
   }
 }
 
-/**
- * Vérifier par orderId
- */
 async function checkTransactionStatus(orderId) {
   const transaction = await DpoPayTransaction.findOne({ 
     $or: [{ orderId }, { transactionToken: orderId }] 
@@ -322,7 +340,6 @@ async function checkTransactionStatus(orderId) {
     throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
   }
 
-  // Vérifier auprès de DPO
   return await verifyToken(transaction.transactionToken);
 }
 
