@@ -49,6 +49,7 @@ const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
 const afribaPayRoutes = require('./user/afribaPayRoutes');
+const dpoPayRoutes = require('./user/dpoPayRoutes'); // ✅ AJOUTÉ
 const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
@@ -75,6 +76,8 @@ router.use('/payments/smobilpay', smobilpayRoutes);
 router.use('/payments/cinetpay', cinetpayRoutes);
 // Routes de paiement AfribaPay
 router.use('/payments/afribapay', afribaPayRoutes);
+// Routes de paiement DPO Pay
+router.use('/payments/dpopay', dpoPayRoutes); // ✅ AJOUTÉ
 
 /**
  * GET /api/
