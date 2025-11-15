@@ -30,11 +30,11 @@ class DpoPayError extends Error {
 function getCurrencyCountry(currency) {
   const mapping = {
     // Afrique de l'Ouest
-    'XOF': "Cote d'Ivoire",      // Côte d'Ivoire, Sénégal
+    'XOF': "Ivory Coast",  // ✅ Anglais sans accent
     'GHS': 'Ghana',
     'NGN': 'Nigeria',
     
-    // Afrique Centrale
+    // Afrique Centrale  
     'CDF': 'Democratic Republic of Congo',
     
     // Afrique de l'Est
