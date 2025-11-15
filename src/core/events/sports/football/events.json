@@ -350,8 +350,8 @@
       "position": 24,
       "priority": "medium",
       "label": {
-        "fr": "Domicile gagne MT et FT",
-        "en": "Home wins HT & FT"
+        "fr": "Domicile/Domicile (1/1)",
+        "en": "Home/Home (1/1)"
       },
       "expression": "score.details.halftime.home > score.details.halftime.away && score.home > score.away",
       "category": "combo",
@@ -361,27 +361,57 @@
       }
     },
     {
-      "id": "away_away",
+      "id": "home_draw",
       "position": 25,
-      "priority": "medium",
+      "priority": "low",
       "label": {
-        "fr": "Extérieur gagne MT et FT",
-        "en": "Away wins HT & FT"
+        "fr": "Domicile/Nul (1/X)",
+        "en": "Home/Draw (1/X)"
       },
-      "expression": "score.details.halftime.away > score.details.halftime.home && score.away > score.home",
+      "expression": "score.details.halftime.home > score.details.halftime.away && score.home === score.away",
       "category": "combo",
       "description": {
-        "fr": "L'équipe extérieur mène à la pause et gagne le match",
-        "en": "Away team leads at halftime and wins the match"
+        "fr": "L'équipe domicile mène à la pause mais le match se termine par un nul",
+        "en": "Home team leads at halftime but the match ends in a draw"
+      }
+    },
+    {
+      "id": "home_away",
+      "position": 26,
+      "priority": "low",
+      "label": {
+        "fr": "Domicile/Extérieur (1/2)",
+        "en": "Home/Away (1/2)"
+      },
+      "expression": "score.details.halftime.home > score.details.halftime.away && score.away > score.home",
+      "category": "combo",
+      "description": {
+        "fr": "L'équipe domicile mène à la pause mais l'équipe extérieur remonte et gagne",
+        "en": "Home team leads at halftime but away team comes back and wins"
+      }
+    },
+    {
+      "id": "draw_home",
+      "position": 27,
+      "priority": "medium",
+      "label": {
+        "fr": "Nul/Domicile (X/1)",
+        "en": "Draw/Home (X/1)"
+      },
+      "expression": "score.details.halftime.home === score.details.halftime.away && score.home > score.away",
+      "category": "combo",
+      "description": {
+        "fr": "Égalité à la mi-temps et l'équipe domicile gagne le match",
+        "en": "Draw at halftime and home team wins the match"
       }
     },
     {
       "id": "draw_draw",
-      "position": 26,
+      "position": 28,
       "priority": "low",
       "label": {
-        "fr": "Nul MT et FT",
-        "en": "Draw HT & FT"
+        "fr": "Nul/Nul (X/X)",
+        "en": "Draw/Draw (X/X)"
       },
       "expression": "score.details.halftime.home === score.details.halftime.away && score.home === score.away",
       "category": "combo",
@@ -391,8 +421,68 @@
       }
     },
     {
+      "id": "draw_away",
+      "position": 29,
+      "priority": "medium",
+      "label": {
+        "fr": "Nul/Extérieur (X/2)",
+        "en": "Draw/Away (X/2)"
+      },
+      "expression": "score.details.halftime.home === score.details.halftime.away && score.away > score.home",
+      "category": "combo",
+      "description": {
+        "fr": "Égalité à la mi-temps et l'équipe extérieur gagne le match",
+        "en": "Draw at halftime and away team wins the match"
+      }
+    },
+    {
+      "id": "away_home",
+      "position": 30,
+      "priority": "low",
+      "label": {
+        "fr": "Extérieur/Domicile (2/1)",
+        "en": "Away/Home (2/1)"
+      },
+      "expression": "score.details.halftime.away > score.details.halftime.home && score.home > score.away",
+      "category": "combo",
+      "description": {
+        "fr": "L'équipe extérieur mène à la pause mais l'équipe domicile remonte et gagne",
+        "en": "Away team leads at halftime but home team comes back and wins"
+      }
+    },
+    {
+      "id": "away_draw",
+      "position": 31,
+      "priority": "low",
+      "label": {
+        "fr": "Extérieur/Nul (2/X)",
+        "en": "Away/Draw (2/X)"
+      },
+      "expression": "score.details.halftime.away > score.details.halftime.home && score.home === score.away",
+      "category": "combo",
+      "description": {
+        "fr": "L'équipe extérieur mène à la pause mais le match se termine par un nul",
+        "en": "Away team leads at halftime but the match ends in a draw"
+      }
+    },
+    {
+      "id": "away_away",
+      "position": 32,
+      "priority": "medium",
+      "label": {
+        "fr": "Extérieur/Extérieur (2/2)",
+        "en": "Away/Away (2/2)"
+      },
+      "expression": "score.details.halftime.away > score.details.halftime.home && score.away > score.home",
+      "category": "combo",
+      "description": {
+        "fr": "L'équipe extérieur mène à la pause et gagne le match",
+        "en": "Away team leads at halftime and wins the match"
+      }
+    },
+    {
       "id": "home_clean_sheet",
-      "position": 27,
+      "position": 33,
       "priority": "medium",
       "label": {
         "fr": "Domicile sans encaisser",
@@ -407,7 +497,7 @@
     },
     {
       "id": "away_clean_sheet",
-      "position": 28,
+      "position": 34,
       "priority": "medium",
       "label": {
         "fr": "Exterieur sans encaisser",
@@ -422,7 +512,7 @@
     },
     {
       "id": "both_teams_score_3plus",
-      "position": 29,
+      "position": 35,
       "priority": "medium",
       "label": {
         "fr": "Les 2 marquent + 2.5",
@@ -437,7 +527,7 @@
     },
     {
       "id": "next_goal_home",
-      "position": 30,
+      "position": 36,
       "priority": "medium",
       "label": {
         "fr": "Prochain but : Domicile",
@@ -452,7 +542,7 @@
     },
     {
       "id": "next_goal_away",
-      "position": 31,
+      "position": 37,
       "priority": "medium",
       "label": {
         "fr": "Prochain but : Extérieur",
@@ -467,7 +557,7 @@
     },
     {
       "id": "next_goal_none",
-      "position": 32,
+      "position": 38,
       "priority": "medium",
       "label": {
         "fr": "Pas de prochain but",

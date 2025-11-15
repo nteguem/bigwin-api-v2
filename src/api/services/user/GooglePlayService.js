@@ -34,21 +34,6 @@ const { data } = await this.androidPublisher.purchases.products.get({
   token: purchaseToken
 });
 
-// ===== LOGS DE DEBUG COMPLETS =====
-console.log('[GooglePlay ONE-TIME] ========================================');
-console.log('[GooglePlay ONE-TIME] Réponse API Google COMPLÈTE:');
-console.log(JSON.stringify(data, null, 2));
-console.log('[GooglePlay ONE-TIME] ========================================');
-console.log('[GooglePlay ONE-TIME] Champs individuels:');
-console.log('  - purchaseState:', data.purchaseState);
-console.log('  - consumptionState:', data.consumptionState);
-console.log('  - acknowledgementState:', data.acknowledgementState);
-console.log('  - purchaseTimeMillis:', data.purchaseTimeMillis);
-console.log('  - orderId:', data.orderId);
-console.log('  - kind:', data.kind);
-console.log('[GooglePlay ONE-TIME] ========================================');
-// =====================================
-
 if (!data) {
   throw new Error('Réponse invalide de Google Play');
 }
