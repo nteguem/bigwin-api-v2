@@ -26,27 +26,37 @@ class DpoPayError extends Error {
   }
 }
 
-// ✅ NOUVEAU - Mapper devise → pays
+// ✅ LISTE OFFICIELLE DPO
 function getCurrencyCountry(currency) {
   const mapping = {
-    'XAF': 'Cameroon',
-    'XOF': "Cote d'Ivoire",
-    'GMD': 'Gambia',
-    'CDF': 'Democratic Republic of Congo',
-    'GNF': 'Guinea',
-    'KES': 'Kenya',
-    'TZS': 'Tanzania',
-    'UGX': 'Uganda',
-    'RWF': 'Rwanda',
+    // Afrique de l'Ouest
+    'XOF': "Cote d'Ivoire",      // Côte d'Ivoire, Sénégal
     'GHS': 'Ghana',
+    'NGN': 'Nigeria',
+    
+    // Afrique Centrale
+    'CDF': 'Democratic Republic of Congo',
+    
+    // Afrique de l'Est
+    'KES': 'Kenya',
+    'UGX': 'Uganda',
+    'TZS': 'Tanzania',
+    'RWF': 'Rwanda',
+    'ETB': 'Ethiopia',
+    
+    // Afrique Australe
+    'ZAR': 'South Africa',
     'ZMW': 'Zambia',
+    'ZWL': 'Zimbabwe',
     'BWP': 'Botswana',
+    'NAD': 'Namibia',
     'MWK': 'Malawi',
-    'ZAR': 'South Africa'
+    'LSL': 'Lesotho',
+    'SZL': 'Eswatini',
+    'MUR': 'Mauritius'
   };
   return mapping[currency] || '';
 }
-
 /**
  * Générer les URLs
  */
