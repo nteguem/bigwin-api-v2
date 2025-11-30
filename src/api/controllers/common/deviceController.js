@@ -1,14 +1,19 @@
 // src/api/controllers/common/deviceController.js
+
 const deviceService = require('../../services/common/deviceService');
 const catchAsync = require('../../../utils/catchAsync');
 
 class DeviceController {
   
   registerDevice = catchAsync(async (req, res) => {
+    // ⭐ Récupérer appId
+    const appId = req.appId;
+    
     const { deviceId, playerId, platform, deviceInfo } = req.body;
     const userId = req.user ? req.user.id : null;
     
-    const device = await deviceService.registerDevice({
+    // ⭐ Passer appId au service
+    const device = await deviceService.registerDevice(appId, {
       deviceId,
       playerId,
       platform,
@@ -23,37 +28,65 @@ class DeviceController {
   });
   
   linkDevice = catchAsync(async (req, res) => {
+    // ⭐ Récupérer appId
+    const appId = req.appId;
+    
     const { deviceId } = req.body;
     const userId = req.user.id;
     
-    const device = await deviceService.linkDeviceToUser(deviceId, userId);
+    // ⭐ Passer appId au service
+    const device = await deviceService.linkDeviceToUser(appId, deviceId, userId);
     
-    res.status(200).json(formatResponse(device));
+    res.status(200).json({
+      success: true,
+      data: device
+    });
   });
   
   unlinkDevice = catchAsync(async (req, res) => {
+    // ⭐ Récupérer appId
+    const appId = req.appId;
+    
     const { deviceId } = req.body;
     
-    const device = await deviceService.unlinkDeviceFromUser(deviceId);
+    // ⭐ Passer appId au service
+    const device = await deviceService.unlinkDeviceFromUser(appId, deviceId);
     
-    res.status(200).json(formatResponse(device));
+    res.status(200).json({
+      success: true,
+      data: device
+    });
   });
   
   updateDevice = catchAsync(async (req, res) => {
+    // ⭐ Récupérer appId
+    const appId = req.appId;
+    
     const { deviceId } = req.params;
     const updateData = req.body;
     
-    const device = await deviceService.updateDevice(deviceId, updateData);
+    // ⭐ Passer appId au service
+    const device = await deviceService.updateDevice(appId, deviceId, updateData);
     
-    res.status(200).json(formatResponse(device));
+    res.status(200).json({
+      success: true,
+      data: device
+    });
   });
   
   deactivateDevice = catchAsync(async (req, res) => {
+    // ⭐ Récupérer appId
+    const appId = req.appId;
+    
     const { deviceId } = req.params;
     
-    const device = await deviceService.deactivateDevice(deviceId);
+    // ⭐ Passer appId au service
+    const device = await deviceService.deactivateDevice(appId, deviceId);
     
-    res.status(200).json(formatResponse(device));
+    res.status(200).json({
+      success: true,
+      data: device
+    });
   });
 }
 

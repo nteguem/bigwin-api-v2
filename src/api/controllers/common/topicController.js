@@ -1,4 +1,5 @@
 // src/api/controllers/common/topicController.js
+
 const topicService = require('../../services/common/topicService');
 const catchAsync = require('../../../utils/catchAsync');
 

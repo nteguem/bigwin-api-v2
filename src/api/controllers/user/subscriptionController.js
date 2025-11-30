@@ -1,3 +1,5 @@
+// controllers/user/subscriptionController.js
+
 const subscriptionService = require('../../services/user/subscriptionService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
@@ -8,12 +10,15 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.purchasePackage = catchAsync(async (req, res, next) => {
   const { packageId, currency = 'XAF', paymentReference } = req.body;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   if (!packageId) {
     return next(new AppError('ID du package requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
+  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
     sub.package._id.toString() === packageId
   );
@@ -22,8 +27,9 @@ exports.purchasePackage = catchAsync(async (req, res, next) => {
     return next(new AppError('Vous avez déjà un abonnement actif pour ce package', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Créer l'abonnement
+  // ⭐ Créer l'abonnement avec appId
   const subscription = await subscriptionService.createSubscription(
+    appId, // ⭐ AJOUT
     req.user._id,
     packageId,
     currency,
@@ -46,7 +52,11 @@ exports.purchasePackage = catchAsync(async (req, res, next) => {
  * Obtenir tous les abonnements de l'utilisateur
  */
 exports.getMySubscriptions = catchAsync(async (req, res, next) => {
-  const subscriptions = await subscriptionService.getUserSubscriptions(req.user._id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Passer appId au service
+  const subscriptions = await subscriptionService.getUserSubscriptions(appId, req.user._id);
 
   res.status(200).json({
     success: true,
@@ -61,7 +71,11 @@ exports.getMySubscriptions = catchAsync(async (req, res, next) => {
  * Obtenir les abonnements actifs de l'utilisateur
  */
 exports.getMyActiveSubscriptions = catchAsync(async (req, res, next) => {
-  const subscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Passer appId au service
+  const subscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
 
   res.status(200).json({
     success: true,
@@ -76,10 +90,15 @@ exports.getMyActiveSubscriptions = catchAsync(async (req, res, next) => {
  * Obtenir un abonnement spécifique
  */
 exports.getSubscription = catchAsync(async (req, res, next) => {
-  const Subscription = require('../../models/user/Subscription');
+  // ⭐ Récupérer appId
+  const appId = req.appId;
   
+  const Subscription = require('../../models/common/Subscription');
+  
+  // ⭐ Filtrer par appId
   const subscription = await Subscription.findOne({
     _id: req.params.id,
+    appId, // ⭐ AJOUT
     user: req.user._id
   }).populate('package');
 
@@ -101,7 +120,11 @@ exports.getSubscription = catchAsync(async (req, res, next) => {
 exports.checkCategoryAccess = catchAsync(async (req, res, next) => {
   const { categoryId } = req.params;
 
-  const hasAccess = await subscriptionService.hasAccessToCategory(req.user._id, categoryId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Passer appId au service
+  const hasAccess = await subscriptionService.hasAccessToCategory(appId, req.user._id, categoryId);
 
   res.status(200).json({
     success: true,
@@ -117,7 +140,11 @@ exports.checkCategoryAccess = catchAsync(async (req, res, next) => {
  * Obtenir le statut d'abonnement détaillé
  */
 exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Passer appId au service
+  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
 
   // Récupérer toutes les catégories accessibles
   const accessibleCategories = [];
@@ -145,17 +172,23 @@ exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
  */
 exports.getSubscriptionHistory = catchAsync(async (req, res, next) => {
   const { page = 1, limit = 10 } = req.query;
-  const Subscription = require('../../models/user/Subscription');
+  
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  const Subscription = require('../../models/common/Subscription');
 
   const skip = (page - 1) * limit;
   
-  const subscriptions = await Subscription.find({ user: req.user._id })
+  // ⭐ Filtrer par appId
+  const subscriptions = await Subscription.find({ appId, user: req.user._id })
     .populate('package', 'name pricing duration')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit));
 
-  const total = await Subscription.countDocuments({ user: req.user._id });
+  // ⭐ Compter avec appId
+  const total = await Subscription.countDocuments({ appId, user: req.user._id });
 
   res.status(200).json({
     success: true,

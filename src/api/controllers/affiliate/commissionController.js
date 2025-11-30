@@ -1,3 +1,5 @@
+// controllers/affiliate/affiliateCommissionController.js
+
 const Commission = require('../../models/common/Commission');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
@@ -16,7 +18,11 @@ exports.getMyCommissions = catchAsync(async (req, res, next) => {
     endDate
   } = req.query;
 
-  const filters = { affiliate: req.affiliate._id };
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
+  const filters = { appId, affiliate: req.affiliate._id };
 
   // Construire les filtres
   if (status) filters.status = status;
@@ -65,7 +71,12 @@ exports.getMyCommissions = catchAsync(async (req, res, next) => {
 exports.getPendingCommissions = catchAsync(async (req, res, next) => {
   const { offset = 0, limit = 20 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const commissions = await Commission.find({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     status: 'pending'
   })
@@ -82,14 +93,16 @@ exports.getPendingCommissions = catchAsync(async (req, res, next) => {
     .limit(parseInt(limit));
 
   const total = await Commission.countDocuments({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     status: 'pending'
   });
 
-  // Calculer le total en attente
+  // ⭐ Calculer le total en attente POUR CETTE APP
   const pendingTotal = await Commission.aggregate([
     {
       $match: {
+        appId, // ⭐ AJOUT
         affiliate: req.affiliate._id,
         status: 'pending'
       }
@@ -122,7 +135,12 @@ exports.getPendingCommissions = catchAsync(async (req, res, next) => {
 exports.getPaidCommissions = catchAsync(async (req, res, next) => {
   const { offset = 0, limit = 20 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const commissions = await Commission.find({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     status: 'paid'
   })
@@ -139,6 +157,7 @@ exports.getPaidCommissions = catchAsync(async (req, res, next) => {
     .limit(parseInt(limit));
 
   const total = await Commission.countDocuments({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     status: 'paid'
   });
@@ -160,8 +179,13 @@ exports.getPaidCommissions = catchAsync(async (req, res, next) => {
  * Obtenir une commission spécifique
  */
 exports.getCommission = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const commission = await Commission.findOne({
     _id: req.params.id,
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id
   })
     .populate('user', 'phone firstName lastName email createdAt')
@@ -191,9 +215,14 @@ exports.getCommission = catchAsync(async (req, res, next) => {
 exports.getCommissionsByPeriod = catchAsync(async (req, res, next) => {
   const { months = 12 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const stats = await Commission.aggregate([
     {
       $match: {
+        appId, // ⭐ AJOUT
         affiliate: req.affiliate._id
       }
     },
@@ -270,9 +299,14 @@ exports.getCommissionsByPeriod = catchAsync(async (req, res, next) => {
  * Obtenir le résumé des commissions de l'affilié
  */
 exports.getCommissionSummary = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const summary = await Commission.aggregate([
     {
       $match: {
+        appId, // ⭐ AJOUT
         affiliate: req.affiliate._id
       }
     },
@@ -289,9 +323,11 @@ exports.getCommissionSummary = catchAsync(async (req, res, next) => {
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
 
+  // ⭐ Filtrer par appId
   const thisMonthStats = await Commission.aggregate([
     {
       $match: {
+        appId, // ⭐ AJOUT
         affiliate: req.affiliate._id,
         month: currentMonth,
         year: currentYear
@@ -310,9 +346,11 @@ exports.getCommissionSummary = catchAsync(async (req, res, next) => {
   const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
   const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
 
+  // ⭐ Filtrer par appId
   const lastMonthStats = await Commission.aggregate([
     {
       $match: {
+        appId, // ⭐ AJOUT
         affiliate: req.affiliate._id,
         month: lastMonth,
         year: lastMonthYear
@@ -360,13 +398,17 @@ exports.searchCommissions = catchAsync(async (req, res, next) => {
     limit = 20 
   } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   if (!search || search.trim().length < 2) {
     return next(new AppError('Terme de recherche requis (minimum 2 caractères)', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Rechercher dans les utilisateurs d'abord
+  // ⭐ Rechercher dans les utilisateurs POUR CETTE APP
   const User = require('../../models/user/User');
   const users = await User.find({
+    appId, // ⭐ AJOUT
     $or: [
       { firstName: { $regex: search, $options: 'i' } },
       { lastName: { $regex: search, $options: 'i' } },
@@ -376,7 +418,9 @@ exports.searchCommissions = catchAsync(async (req, res, next) => {
 
   const userIds = users.map(u => u._id);
 
+  // ⭐ Filtrer par appId
   const commissions = await Commission.find({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     user: { $in: userIds }
   })
@@ -393,6 +437,7 @@ exports.searchCommissions = catchAsync(async (req, res, next) => {
     .limit(parseInt(limit));
 
   const total = await Commission.countDocuments({
+    appId, // ⭐ AJOUT
     affiliate: req.affiliate._id,
     user: { $in: userIds }
   });

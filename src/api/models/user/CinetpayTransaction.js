@@ -1,117 +1,86 @@
 // models/user/CinetpayTransaction.js
+
 const mongoose = require('mongoose');
 
 const cinetpayTransactionSchema = new mongoose.Schema({
-  transactionId: {
+  appId: {
     type: String,
     required: true,
-    unique: true
+    lowercase: true,
+    trim: true,
+    ref: 'App'
   },
+  
+  transactionId: {
+    type: String,
+    required: true
+  },
+  
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
+  
   package: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Package',
     required: true
   },
-  paymentToken: {
-    type: String
-  },
-  paymentUrl: {
-    type: String
-  },
+  
+  paymentToken: String,
+  paymentUrl: String,
+  
   amount: {
     type: Number,
     required: true
   },
+  
   currency: {
     type: String,
     default: 'XOF'
   },
+  
   status: {
     type: String,
     enum: ['PENDING', 'ACCEPTED', 'REFUSED', 'WAITING_FOR_CUSTOMER', 'CANCELED'],
     default: 'PENDING'
   },
+  
   phoneNumber: {
     type: String,
     required: true
   },
+  
   customerName: {
     type: String,
     required: true
   },
-  description: {
-    type: String
-  },
-  paymentMethod: {
-    type: String // OMCM, MOMO, CARD, etc.
-  },
-  operatorTransactionId: {
-    type: String // operator_id retourné par CinetPay
-  },
-  paymentDate: {
-    type: Date
-  },
-  fundAvailabilityDate: {
-    type: Date
-  },
   
-  // URLs
-  notifyUrl: {
-    type: String
-  },
-  returnUrl: {
-    type: String
-  },
+  description: String,
+  paymentMethod: String,
+  operatorTransactionId: String,
+  paymentDate: Date,
+  fundAvailabilityDate: Date,
   
-  // Réponse API
-  apiResponseId: {
-    type: String
-  },
+  notifyUrl: String,
+  returnUrl: String,
   
-  // Champs webhook CinetPay
-  cpmTransDate: {
-    type: Date
-  },
-  cpmErrorMessage: {
-    type: String // SUCCES, PAYMENT_FAILED, TRANSACTION_CANCEL
-  },
-  cpmPhonePrefix: {
-    type: String
-  },
-  cpmLanguage: {
-    type: String
-  },
-  cpmVersion: {
-    type: String
-  },
-  cpmPaymentConfig: {
-    type: String
-  },
-  cpmPageAction: {
-    type: String
-  },
-  cpmCustom: {
-    type: String
-  },
-  cpmDesignation: {
-    type: String
-  },
-  webhookSignature: {
-    type: String
-  },
+  apiResponseId: String,
   
-  // Erreurs
-  errorCode: {
-    type: String
-  },
-  errorMessage: {
-    type: String
-  },
+  cpmTransDate: Date,
+  cpmErrorMessage: String,
+  cpmPhonePrefix: String,
+  cpmLanguage: String,
+  cpmVersion: String,
+  cpmPaymentConfig: String,
+  cpmPageAction: String,
+  cpmCustom: String,
+  cpmDesignation: String,
+  webhookSignature: String,
+  
+  errorCode: String,
+  errorMessage: String,
   
   processed: {
     type: Boolean,
@@ -121,13 +90,17 @@ const cinetpayTransactionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour performance
+// Indexes
+cinetpayTransactionSchema.index({ appId: 1, transactionId: 1 }, { unique: true });
+cinetpayTransactionSchema.index({ appId: 1, user: 1, status: 1 });
+cinetpayTransactionSchema.index({ appId: 1, paymentToken: 1 });
+cinetpayTransactionSchema.index({ appId: 1, processed: 1 });
 cinetpayTransactionSchema.index({ transactionId: 1 });
 cinetpayTransactionSchema.index({ user: 1, status: 1 });
 cinetpayTransactionSchema.index({ paymentToken: 1 });
 cinetpayTransactionSchema.index({ processed: 1 });
 
-// Méthodes utiles
+// Methods
 cinetpayTransactionSchema.methods.isSuccessful = function() {
   return this.status === 'ACCEPTED';
 };

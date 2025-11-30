@@ -1,3 +1,5 @@
+// controllers/admin/packageController.js
+
 const Package = require('../../models/common/Package');
 const Formation = require('../../models/common/Formation');
 const Category = require('../../models/common/Category');
@@ -8,10 +10,13 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir tous les packages (admin)
  */
 exports.getAllPackages = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { lang = 'fr', currency } = req.query;
   
-  // Construire le filtre de base
-  const filter = {};
+  // ⭐ Construire le filtre de base AVEC APPID
+  const filter = { appId };
   
   // Filtrer par isActive UNIQUEMENT si currency est fourni
   if (currency) {
@@ -81,13 +86,18 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
 
   res.status(200).json(response);
 });
+
 /**
  * Obtenir un package par ID
  */
 exports.getPackage = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { lang = 'fr' } = req.query;
   
-  const package = await Package.findById(req.params.id)
+  // ⭐ Filtrer par appId
+  const package = await Package.findOne({ _id: req.params.id, appId })
     .populate('categories', 'name description isVip')
     .populate('formationId');
 
@@ -109,6 +119,9 @@ exports.getPackage = catchAsync(async (req, res, next) => {
  * Créer un nouveau package
  */
 exports.createPackage = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { name, description, pricing, duration, categories, badge, economy, formationId } = req.body;
 
   // Validation des champs obligatoires
@@ -116,23 +129,25 @@ exports.createPackage = catchAsync(async (req, res, next) => {
     return next(new AppError('Nom (FR/EN), prix en XAF et durée sont requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que les catégories existent
+  // ⭐ Vérifier que les catégories existent DANS CETTE APP
   if (categories && categories.length > 0) {
-    const existingCategories = await Category.find({ _id: { $in: categories } });
+    const existingCategories = await Category.find({ _id: { $in: categories }, appId });
     if (existingCategories.length !== categories.length) {
       return next(new AppError('Une ou plusieurs catégories sont invalides', 400, ErrorCodes.VALIDATION_ERROR));
     }
   }
 
-  // Vérifier que la formation existe si fournie
+  // ⭐ Vérifier que la formation existe DANS CETTE APP si fournie
   if (formationId) {
-    const existingFormation = await Formation.findById(formationId);
+    const existingFormation = await Formation.findOne({ _id: formationId, appId });
     if (!existingFormation) {
       return next(new AppError('Formation invalide', 400, ErrorCodes.VALIDATION_ERROR));
     }
   }
 
+  // ⭐ Créer AVEC APPID
   const package = await Package.create({
+    appId, // ⭐ AJOUT
     name,
     description,
     pricing,
@@ -160,25 +175,28 @@ exports.createPackage = catchAsync(async (req, res, next) => {
  * Modifier un package
  */
 exports.updatePackage = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { name, description, pricing, duration, categories, badge, economy, formationId, isActive } = req.body;
 
-  // Vérifier que le package existe
-  let package = await Package.findById(req.params.id);
+  // ⭐ Vérifier que le package existe DANS CETTE APP
+  let package = await Package.findOne({ _id: req.params.id, appId });
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Vérifier les catégories si fournies
+  // ⭐ Vérifier les catégories DANS CETTE APP si fournies
   if (categories && categories.length > 0) {
-    const existingCategories = await Category.find({ _id: { $in: categories } });
+    const existingCategories = await Category.find({ _id: { $in: categories }, appId });
     if (existingCategories.length !== categories.length) {
       return next(new AppError('Une ou plusieurs catégories sont invalides', 400, ErrorCodes.VALIDATION_ERROR));
     }
   }
 
-  // Vérifier la formation si fournie
+  // ⭐ Vérifier la formation DANS CETTE APP si fournie
   if (formationId) {
-    const existingFormation = await Formation.findById(formationId);
+    const existingFormation = await Formation.findOne({ _id: formationId, appId });
     if (!existingFormation) {
       return next(new AppError('Formation invalide', 400, ErrorCodes.VALIDATION_ERROR));
     }
@@ -196,8 +214,9 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
   if (formationId !== undefined) updateData.formationId = formationId;
   if (isActive !== undefined) updateData.isActive = isActive;
 
-  package = await Package.findByIdAndUpdate(
-    req.params.id,
+  // ⭐ Filtrer par appId
+  package = await Package.findOneAndUpdate(
+    { _id: req.params.id, appId }, // ⭐ AJOUT
     updateData,
     { new: true, runValidators: true }
   ).populate('categories', 'name isVip').populate('formationId');
@@ -215,13 +234,18 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
  * Supprimer un package
  */
 exports.deletePackage = catchAsync(async (req, res, next) => {
-  const package = await Package.findById(req.params.id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const package = await Package.findOne({ _id: req.params.id, appId });
 
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  await Package.findByIdAndDelete(req.params.id);
+  // ⭐ Filtrer par appId
+  await Package.findOneAndDelete({ _id: req.params.id, appId });
 
   res.status(200).json({
     success: true,
@@ -233,7 +257,11 @@ exports.deletePackage = catchAsync(async (req, res, next) => {
  * Activer/désactiver un package
  */
 exports.togglePackageStatus = catchAsync(async (req, res, next) => {
-  const package = await Package.findById(req.params.id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const package = await Package.findOne({ _id: req.params.id, appId });
 
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
@@ -255,7 +283,12 @@ exports.togglePackageStatus = catchAsync(async (req, res, next) => {
  * Obtenir les statistiques des packages
  */
 exports.getPackageStats = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Stats POUR CETTE APP
   const stats = await Package.aggregate([
+    { $match: { appId } }, // ⭐ AJOUT
     {
       $group: {
         _id: '$isActive',
@@ -265,7 +298,7 @@ exports.getPackageStats = catchAsync(async (req, res, next) => {
     }
   ]);
 
-  const totalPackages = await Package.countDocuments();
+  const totalPackages = await Package.countDocuments({ appId });
   
   res.status(200).json({
     success: true,

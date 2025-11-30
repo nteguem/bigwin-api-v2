@@ -1,3 +1,5 @@
+// services/user/formationService.js
+
 const Formation = require('../../models/common/Formation');
 const subscriptionService = require('./subscriptionService');
 
@@ -5,24 +7,26 @@ class UserFormationService {
 
   /**
    * Récupérer toutes les formations avec gestion d'accès selon l'utilisateur
+   * @param {String} appId - ID de l'application
    */
-  async getFormationsWithAccess(user = null, options = {}) {
+  async getFormationsWithAccess(appId, user = null, options = {}) {
     const { offset = 0, limit = 10, lang = 'fr' } = options;
 
-    // Récupérer toutes les formations actives
-    const formations = await Formation.find({ isActive: true })
+    // ⭐ Récupérer toutes les formations actives POUR CETTE APP
+    const formations = await Formation.find({ appId, isActive: true })
       .populate('requiredPackages', 'name description pricing duration badge economy')
       .skip(offset)
       .limit(limit)
       .sort({ order: 1, createdAt: -1 }); 
 
-
-    const total = await Formation.countDocuments({ isActive: true });
+    // ⭐ Compter les formations POUR CETTE APP
+    const total = await Formation.countDocuments({ appId, isActive: true });
 
     // Récupérer les packages actifs de l'utilisateur s'il est connecté
     let userPackages = [];
     if (user) {
-      const subscriptions = await subscriptionService.getActiveSubscriptions(user._id);
+      // ⭐ Passer appId au service
+      const subscriptions = await subscriptionService.getActiveSubscriptions(appId, user._id);
       userPackages = subscriptions.map(sub => sub.package._id.toString());
     }
 
@@ -44,9 +48,11 @@ class UserFormationService {
 
   /**
    * Récupérer une formation par ID avec gestion d'accès
+   * @param {String} appId - ID de l'application
    */
-  async getFormationByIdWithAccess(id, user = null, lang = 'fr') {
-    const formation = await Formation.findOne({ _id: id, isActive: true })
+  async getFormationByIdWithAccess(appId, id, user = null, lang = 'fr') {
+    // ⭐ Rechercher formation POUR CETTE APP
+    const formation = await Formation.findOne({ _id: id, appId, isActive: true })
       .populate('requiredPackages', 'name description pricing duration badge economy');
     
     if (!formation) {
@@ -56,7 +62,8 @@ class UserFormationService {
     // Récupérer les packages actifs de l'utilisateur
     let userPackages = [];
     if (user) {
-      const subscriptions = await subscriptionService.getActiveSubscriptions(user._id);
+      // ⭐ Passer appId au service
+      const subscriptions = await subscriptionService.getActiveSubscriptions(appId, user._id);
       userPackages = subscriptions.map(sub => sub.package._id.toString());
     }
 

@@ -1,10 +1,13 @@
+// src/api/middlewares/common/multiAuth.js
+
 const adminAuth = require('../admin/adminAuth');
 const affiliateAuth = require('../affiliate/affiliateAuth');
 const userAuth = require('../user/userAuth');
-const { AppError, ErrorCodes } = require('../../utils/AppError');
+const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 /**
  * Middleware permettant l'accès aux admins OU aux users
+ * ⚠️ Note: Admin n'a pas d'appId, User en a un
  */
 exports.adminOrUser = async (req, res, next) => {
   // Essayer admin d'abord
@@ -33,6 +36,7 @@ exports.adminOrUser = async (req, res, next) => {
 
 /**
  * Middleware permettant l'accès aux admins OU aux affiliés
+ * ⚠️ Note: Admin n'a pas d'appId, Affiliate en a un
  */
 exports.adminOrAffiliate = async (req, res, next) => {
   // Essayer admin d'abord

@@ -1,3 +1,5 @@
+// controllers/admin/affiliateController.js
+
 const Affiliate = require('../../models/affiliate/Affiliate');
 const User = require('../../models/user/User');
 const Commission = require('../../models/common/Commission');
@@ -10,10 +12,14 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir tous les affiliés
  */
 exports.getAllAffiliates = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { offset = 0, limit = 20, search, isActive, affiliateType } = req.query;
 
-  // Construire les filtres
-  const filters = {};
+  // ⭐ Construire les filtres AVEC APPID
+  const filters = { appId };
+  
   if (search) {
     filters.$or = [
       { firstName: { $regex: search, $options: 'i' } },
@@ -55,7 +61,11 @@ exports.getAllAffiliates = catchAsync(async (req, res, next) => {
  * Obtenir un affilié par ID
  */
 exports.getAffiliate = catchAsync(async (req, res, next) => {
-  const affiliate = await Affiliate.findById(req.params.id)
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const affiliate = await Affiliate.findOne({ _id: req.params.id, appId })
     .populate('affiliateType')
     .select('-password -refreshTokens');
 
@@ -63,9 +73,10 @@ exports.getAffiliate = catchAsync(async (req, res, next) => {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Obtenir statistiques de l'affilié
-  const referredUsers = await User.countDocuments({ referredBy: affiliate._id });
+  // ⭐ Obtenir statistiques POUR CETTE APP
+  const referredUsers = await User.countDocuments({ referredBy: affiliate._id, appId });
   const pendingCommissions = await Commission.countDocuments({ 
+    appId, // ⭐ AJOUT
     affiliate: affiliate._id, 
     status: 'pending' 
   });
@@ -86,6 +97,9 @@ exports.getAffiliate = catchAsync(async (req, res, next) => {
  * Créer un nouvel affilié
  */
 exports.createAffiliate = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { 
     phone, 
     password, 
@@ -104,28 +118,29 @@ exports.createAffiliate = catchAsync(async (req, res, next) => {
     return next(new AppError('Téléphone, mot de passe et code affilié sont requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier si le téléphone existe déjà
-  const existingPhone = await Affiliate.findOne({ phone });
+  // ⭐ Vérifier si le téléphone existe déjà DANS CETTE APP
+  const existingPhone = await Affiliate.findOne({ phone, appId });
   if (existingPhone) {
     return next(new AppError('Ce numéro de téléphone est déjà utilisé', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier si le code affilié existe déjà
-  const existingCode = await Affiliate.findOne({ affiliateCode: affiliateCode.toUpperCase() });
+  // ⭐ Vérifier si le code affilié existe déjà DANS CETTE APP
+  const existingCode = await Affiliate.findOne({ affiliateCode: affiliateCode.toUpperCase(), appId });
   if (existingCode) {
     return next(new AppError('Ce code affilié est déjà utilisé', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que le type d'affilié existe (si fourni)
+  // ⭐ Vérifier que le type d'affilié existe DANS CETTE APP (si fourni)
   if (affiliateType) {
-    const typeExists = await AffiliateType.findById(affiliateType);
+    const typeExists = await AffiliateType.findOne({ _id: affiliateType, appId });
     if (!typeExists) {
       return next(new AppError('Type d\'affilié invalide', 400, ErrorCodes.VALIDATION_ERROR));
     }
   }
 
-  // Créer l'affilié
+  // ⭐ Créer l'affilié AVEC APPID
   const affiliate = await Affiliate.create({
+    appId, // ⭐ AJOUT
     phone,
     password,
     firstName,
@@ -154,6 +169,9 @@ exports.createAffiliate = catchAsync(async (req, res, next) => {
  * Modifier un affilié
  */
 exports.updateAffiliate = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { 
     firstName, 
     lastName, 
@@ -166,14 +184,15 @@ exports.updateAffiliate = catchAsync(async (req, res, next) => {
     paymentInfo
   } = req.body;
 
-  const affiliate = await Affiliate.findById(req.params.id);
+  // ⭐ Filtrer par appId
+  const affiliate = await Affiliate.findOne({ _id: req.params.id, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Vérifier que le type d'affilié existe (si fourni)
+  // ⭐ Vérifier que le type d'affilié existe DANS CETTE APP (si fourni)
   if (affiliateType) {
-    const typeExists = await AffiliateType.findById(affiliateType);
+    const typeExists = await AffiliateType.findOne({ _id: affiliateType, appId });
     if (!typeExists) {
       return next(new AppError('Type d\'affilié invalide', 400, ErrorCodes.VALIDATION_ERROR));
     }
@@ -191,8 +210,9 @@ exports.updateAffiliate = catchAsync(async (req, res, next) => {
   if (isActive !== undefined) updateData.isActive = isActive;
   if (paymentInfo !== undefined) updateData.paymentInfo = paymentInfo;
 
-  const updatedAffiliate = await Affiliate.findByIdAndUpdate(
-    req.params.id,
+  // ⭐ Filtrer par appId
+  const updatedAffiliate = await Affiliate.findOneAndUpdate(
+    { _id: req.params.id, appId }, // ⭐ AJOUT
     updateData,
     { new: true, runValidators: true }
   )
@@ -212,13 +232,18 @@ exports.updateAffiliate = catchAsync(async (req, res, next) => {
  * Supprimer (désactiver) un affilié
  */
 exports.deleteAffiliate = catchAsync(async (req, res, next) => {
-  const affiliate = await Affiliate.findById(req.params.id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const affiliate = await Affiliate.findOne({ _id: req.params.id, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Vérifier s'il y a des commissions pending
+  // ⭐ Vérifier s'il y a des commissions pending POUR CETTE APP
   const pendingCommissions = await Commission.countDocuments({
+    appId, // ⭐ AJOUT
     affiliate: req.params.id,
     status: 'pending'
   });
@@ -241,13 +266,17 @@ exports.deleteAffiliate = catchAsync(async (req, res, next) => {
  * Réinitialiser le mot de passe d'un affilié
  */
 exports.resetPassword = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { newPassword } = req.body;
 
   if (!newPassword || newPassword.length < 6) {
     return next(new AppError('Nouveau mot de passe requis (minimum 6 caractères)', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  const affiliate = await Affiliate.findById(req.params.id);
+  // ⭐ Filtrer par appId
+  const affiliate = await Affiliate.findOne({ _id: req.params.id, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
@@ -266,11 +295,16 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
  * Obtenir les statistiques globales des affiliés
  */
 exports.getAffiliateStats = catchAsync(async (req, res, next) => {
-  const totalAffiliates = await Affiliate.countDocuments();
-  const activeAffiliates = await Affiliate.countDocuments({ isActive: true });
+  // ⭐ Récupérer appId
+  const appId = req.appId;
   
-  // Stats par type d'affilié
+  // ⭐ Stats POUR CETTE APP
+  const totalAffiliates = await Affiliate.countDocuments({ appId });
+  const activeAffiliates = await Affiliate.countDocuments({ appId, isActive: true });
+  
+  // ⭐ Stats par type d'affilié POUR CETTE APP
   const typeStats = await Affiliate.aggregate([
+    { $match: { appId } }, // ⭐ AJOUT
     {
       $lookup: {
         from: 'affiliatetypes',
@@ -296,7 +330,9 @@ exports.getAffiliateStats = catchAsync(async (req, res, next) => {
     }
   ]);
 
+  // ⭐ Commissions POUR CETTE APP
   const totalCommissions = await Commission.aggregate([
+    { $match: { appId } }, // ⭐ AJOUT
     {
       $group: {
         _id: '$status',
@@ -322,6 +358,9 @@ exports.getAffiliateStats = catchAsync(async (req, res, next) => {
  * Obtenir toutes les commissions d'un affilié
  */
 exports.getAffiliateCommissions = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { 
     offset = 0, 
     limit = 50, 
@@ -334,13 +373,14 @@ exports.getAffiliateCommissions = catchAsync(async (req, res, next) => {
 
   const affiliateId = req.params.id;
 
-  // Vérifier que l'affilié existe
-  const affiliate = await Affiliate.findById(affiliateId).populate('affiliateType');
+  // ⭐ Vérifier que l'affilié existe DANS CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: affiliateId, appId }).populate('affiliateType');
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  const filters = { affiliate: affiliateId };
+  // ⭐ Filtres AVEC APPID
+  const filters = { appId, affiliate: affiliateId };
 
   // Construire les filtres
   if (status) filters.status = status;
@@ -370,10 +410,10 @@ exports.getAffiliateCommissions = catchAsync(async (req, res, next) => {
 
   const total = await Commission.countDocuments(filters);
 
-  // Stats de cet affilié
+  // ⭐ Stats de cet affilié POUR CETTE APP
   const mongoose = require('mongoose');
   const stats = await Commission.aggregate([
-    { $match: { affiliate: new mongoose.Types.ObjectId(affiliateId) } },
+    { $match: { appId, affiliate: new mongoose.Types.ObjectId(affiliateId) } }, // ⭐ AJOUT
     {
       $group: {
         _id: '$status',
@@ -408,6 +448,9 @@ exports.getAffiliateCommissions = catchAsync(async (req, res, next) => {
  * Calculer (compter) les commissions pending d'un affilié spécifique
  */
 exports.calculateAffiliateCommissions = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { month, year } = req.body;
   const affiliateId = req.params.id;
 
@@ -415,13 +458,15 @@ exports.calculateAffiliateCommissions = catchAsync(async (req, res, next) => {
     return next(new AppError('Mois et année requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que l'affilié existe
-  const affiliate = await Affiliate.findById(affiliateId);
+  // ⭐ Vérifier que l'affilié existe DANS CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: affiliateId, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
+  // ⭐ Passer appId au service
   const report = await commissionService.calculateAffiliateCommissions(
+    appId, // ⭐ AJOUT
     affiliateId,
     parseInt(month),
     parseInt(year)
@@ -446,6 +491,9 @@ exports.calculateAffiliateCommissions = catchAsync(async (req, res, next) => {
  * Obtenir les commissions en attente d'un affilié
  */
 exports.getPendingAffiliateCommissions = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { month, year } = req.query;
   const affiliateId = req.params.id;
 
@@ -453,13 +501,15 @@ exports.getPendingAffiliateCommissions = catchAsync(async (req, res, next) => {
     return next(new AppError('Mois et année requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que l'affilié existe
-  const affiliate = await Affiliate.findById(affiliateId);
+  // ⭐ Vérifier que l'affilié existe DANS CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: affiliateId, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
+  // ⭐ Passer appId au service
   const result = await commissionService.getPendingAffiliateCommissions(
+    appId, // ⭐ AJOUT
     affiliateId,
     parseInt(month),
     parseInt(year)
@@ -483,6 +533,9 @@ exports.getPendingAffiliateCommissions = catchAsync(async (req, res, next) => {
  * Valider le paiement des commissions d'un affilié
  */
 exports.validateAffiliatePayment = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { month, year, paymentReference } = req.body;
   const affiliateId = req.params.id;
 
@@ -490,13 +543,15 @@ exports.validateAffiliatePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Mois, année et référence de paiement requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que l'affilié existe
-  const affiliate = await Affiliate.findById(affiliateId);
+  // ⭐ Vérifier que l'affilié existe DANS CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: affiliateId, appId });
   if (!affiliate) {
     return next(new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
+  // ⭐ Passer appId au service
   const report = await commissionService.validateAffiliatePayment(
+    appId, // ⭐ AJOUT
     affiliateId,
     parseInt(month),
     parseInt(year),

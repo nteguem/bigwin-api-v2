@@ -1,3 +1,5 @@
+// services/user/googleAuthService.js
+
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../../models/user/User');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -42,11 +44,12 @@ class GoogleAuthService {
   /**
    * Créer ou connecter un utilisateur Google
    * PAS de fusion avec comptes existants comme demandé
+   * @param {String} appId - ID de l'application
    */
-  async findOrCreateGoogleUser(googleData, additionalData = {}) {
+  async findOrCreateGoogleUser(appId, googleData, additionalData = {}) {
     try {
-      // 1. Chercher d'abord par googleId
-      let user = await User.findOne({ googleId: googleData.googleId });
+      // ⭐ 1. Chercher d'abord par googleId ET appId
+      let user = await User.findOne({ googleId: googleData.googleId, appId });
       
       if (user) {
         // User Google existant - mise à jour des infos si changées
@@ -69,8 +72,8 @@ class GoogleAuthService {
         return { user, isNewUser: false };
       }
       
-      // 2. Vérifier si l'email Google existe déjà (PAS de fusion)
-      const existingEmailUser = await User.findOne({ email: googleData.email });
+      // ⭐ 2. Vérifier si l'email Google existe déjà DANS CETTE APP (PAS de fusion)
+      const existingEmailUser = await User.findOne({ email: googleData.email, appId });
       if (existingEmailUser) {
         // Email déjà utilisé par un compte local - on refuse
         throw new AppError(
@@ -80,15 +83,16 @@ class GoogleAuthService {
         );
       }
       
-      // 3. Créer un nouveau compte Google
-      const pseudo = await this.generateUniquePseudo(googleData);
+      // ⭐ 3. Créer un nouveau compte Google POUR CETTE APP
+      const pseudo = await this.generateUniquePseudo(appId, googleData);
       
       // Valider le code affilié si fourni
       let referredBy = null;
       if (additionalData.affiliateCode) {
         const authService = require('./authService');
         try {
-          const affiliate = await authService.validateAffiliateCode(additionalData.affiliateCode);
+          // ⭐ Passer appId pour valider l'affilié
+          const affiliate = await authService.validateAffiliateCode(appId, additionalData.affiliateCode);
           referredBy = affiliate?._id;
         } catch (error) {
           console.log('Code affilié invalide:', additionalData.affiliateCode);
@@ -96,8 +100,11 @@ class GoogleAuthService {
         }
       }
       
-      // Créer le nouveau user
+      // ⭐ Créer le nouveau user AVEC APPID
       user = await User.create({
+        // ⭐ Multi-tenant
+        appId,
+        
         // Auth Google
         googleId: googleData.googleId,
         authProvider: 'google',
@@ -119,7 +126,7 @@ class GoogleAuthService {
         isActive: true
       });
       
-      console.log(`✅ Nouveau user Google créé: ${user.email} (${user.pseudo})`);
+      console.log(`✅ Nouveau user Google créé: ${user.email} (${user.pseudo}) - App: ${appId}`);
       return { user, isNewUser: true };
       
     } catch (error) {
@@ -130,8 +137,9 @@ class GoogleAuthService {
 
   /**
    * Générer un pseudo unique à partir des données Google
+   * @param {String} appId - ID de l'application
    */
-  async generateUniquePseudo(googleData) {
+  async generateUniquePseudo(appId, googleData) {
     // Stratégie de génération du pseudo :
     // 1. Essayer prénom
     // 2. Sinon partie avant @ de l'email
@@ -159,11 +167,11 @@ class GoogleAuthService {
       basePseudo = 'user';
     }
     
-    // Vérifier l'unicité et ajouter un nombre si nécessaire
+    // ⭐ Vérifier l'unicité DANS CETTE APP et ajouter un nombre si nécessaire
     let pseudo = basePseudo;
     let counter = 1;
     
-    while (await User.findOne({ pseudo })) {
+    while (await User.findOne({ pseudo, appId })) {
       pseudo = `${basePseudo}${counter}`;
       counter++;
       
@@ -179,11 +187,13 @@ class GoogleAuthService {
 
   /**
    * Vérifier si un utilisateur peut utiliser Google Auth
+   * @param {String} appId - ID de l'application
    */
-  async canUseGoogleAuth(email) {
-    // Vérifier si l'email est déjà utilisé par un compte local
+  async canUseGoogleAuth(appId, email) {
+    // ⭐ Vérifier si l'email est déjà utilisé par un compte local DANS CETTE APP
     const existingUser = await User.findOne({ 
-      email, 
+      email,
+      appId, // ⭐ AJOUT
       authProvider: 'local' 
     });
     

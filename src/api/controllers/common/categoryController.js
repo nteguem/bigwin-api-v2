@@ -1,4 +1,5 @@
-// controllers/categoryController.js
+// controllers/admin/categoryController.js
+
 const categoryService = require('../../services/common/categoryService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
@@ -7,9 +8,13 @@ class CategoryController {
   // GET /categories - Récupérer toutes les catégories
   async getCategories(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { offset = 0, limit = 10, isVip, isActive } = req.query;
-           
-      const result = await categoryService.getCategories({
+      
+      // ⭐ Passer appId au service
+      const result = await categoryService.getCategories(appId, {
         offset: parseInt(offset),
         limit: parseInt(limit),
         isVip: isVip !== undefined ? isVip === 'true' : null,
@@ -29,8 +34,13 @@ class CategoryController {
   // GET /categories/:id - Récupérer une catégorie par ID
   async getCategoryById(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
-      const category = await categoryService.getCategoryById(id);
+      
+      // ⭐ Passer appId au service
+      const category = await categoryService.getCategoryById(appId, id);
 
       if (!category) {
         return formatError(res, 'Category not found', 404);
@@ -48,6 +58,9 @@ class CategoryController {
   // POST /categories - Créer une nouvelle catégorie
   async createCategory(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { name, description, icon, successRate, isVip, isActive } = req.body;
 
       if (!name) {
@@ -68,7 +81,8 @@ class CategoryController {
         isVip: isVip
       };
 
-      const category = await categoryService.createCategory(categoryData);
+      // ⭐ Passer appId au service
+      const category = await categoryService.createCategory(appId, categoryData);
       
       res.status(201);
       formatSuccess(res, {
@@ -87,6 +101,9 @@ class CategoryController {
   // PUT /categories/:id - Mettre à jour une catégorie
   async updateCategory(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
       const updates = req.body;
 
@@ -95,7 +112,8 @@ class CategoryController {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
 
-      const category = await categoryService.updateCategory(id, updates);
+      // ⭐ Passer appId au service
+      const category = await categoryService.updateCategory(appId, id, updates);
 
       if (!category) {
         return formatError(res, 'Category not found', 404);
@@ -116,8 +134,13 @@ class CategoryController {
   // DELETE /categories/:id - Désactiver une catégorie
   async deleteCategory(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
-      const category = await categoryService.deactivateCategory(id);
+      
+      // ⭐ Passer appId au service
+      const category = await categoryService.deactivateCategory(appId, id);
 
       if (!category) {
         return formatError(res, 'Category not found', 404);

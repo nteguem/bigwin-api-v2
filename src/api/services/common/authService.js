@@ -1,3 +1,5 @@
+// services/common/authService.js
+
 const jwt = require('jsonwebtoken');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const Affiliate = require('../../models/affiliate/Affiliate');
@@ -64,12 +66,15 @@ class AuthService {
 
   /**
    * Valider un code d'affiliation
+   * @param {String} appId - ID de l'application
    */
-  async validateAffiliateCode(code) {
+  async validateAffiliateCode(appId, code) {
     if (!code) return null;
     
+    // ⭐ Filtrer par appId
     const affiliate = await Affiliate.findOne({ 
       affiliateCode: code.toUpperCase(),
+      appId, // ⭐ AJOUT
       isActive: true 
     });
     

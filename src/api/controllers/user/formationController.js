@@ -1,3 +1,5 @@
+// controllers/user/formationController.js
+
 const userFormationService = require('../../services/user/formationService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
@@ -8,10 +10,14 @@ class UserFormationController {
     try {
       const { offset = 0, limit = 10, lang = 'fr' } = req.query;
       
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       // req.user peut être undefined si l'utilisateur n'est pas connecté
       const user = req.user || null;
            
-      const result = await userFormationService.getFormationsWithAccess(user, {
+      // ⭐ Passer appId au service
+      const result = await userFormationService.getFormationsWithAccess(appId, user, {
         offset: parseInt(offset),
         limit: parseInt(limit),
         lang
@@ -33,10 +39,14 @@ class UserFormationController {
       const { id } = req.params;
       const { lang = 'fr' } = req.query;
       
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       // req.user peut être undefined si l'utilisateur n'est pas connecté
       const user = req.user || null;
       
-      const formation = await userFormationService.getFormationByIdWithAccess(id, user, lang);
+      // ⭐ Passer appId au service
+      const formation = await userFormationService.getFormationByIdWithAccess(appId, id, user, lang);
 
       if (!formation) {
         return formatError(res, 'Formation not found', 404);

@@ -1,3 +1,5 @@
+// src/api/services/user/subscriptionService.js
+
 const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
 const User = require('../../models/user/User');
@@ -9,11 +11,17 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 class SubscriptionService {
   /**
    * Créer un abonnement pour un utilisateur (Mobile Money)
+   * @param {String} appId - ID de l'application
    */
-  async createSubscription(userId, packageId, currency, paymentReference = null) {
-    // Vérifier que le package existe et est actif
-    const packageNew = await Package.findById(packageId);
-    if (!packageNew || !packageNew.isActive) {
+  async createSubscription(appId, userId, packageId, currency, paymentReference = null) {
+    // Vérifier que le package existe et est actif POUR CETTE APP
+    const packageNew = await Package.findOne({ 
+      _id: packageId, 
+      appId, 
+      isActive: true 
+    });
+    
+    if (!packageNew) {
       throw new AppError('Package non disponible', 404, ErrorCodes.NOT_FOUND);
     }
 
@@ -23,8 +31,8 @@ class SubscriptionService {
       throw new AppError(`Prix non disponible en ${currency}`, 400, ErrorCodes.VALIDATION_ERROR);
     }
     
-    // Récupérer l'utilisateur
-    const user = await User.findById(userId);
+    // Récupérer l'utilisateur DE CETTE APP
+    const user = await User.findOne({ _id: userId, appId });
     if (!user) {
       throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
@@ -33,8 +41,9 @@ class SubscriptionService {
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + packageNew.duration * 24 * 60 * 60 * 1000);
 
-    // Créer l'abonnement
+    // Créer l'abonnement AVEC appId
     const subscription = await Subscription.create({
+      appId,
       user: userId,
       package: packageId,
       startDate,
@@ -49,30 +58,37 @@ class SubscriptionService {
     
     // Créer commission si l'utilisateur a un parrain
     if (user.referredBy) {
-      await commissionService.createCommission(subscription._id);
+      await commissionService.createCommission(appId, subscription._id);
     }
 
     return subscription;
   }
 
   /**
-   * NOUVELLE : Créer un abonnement Google Play
+   * Créer un abonnement Google Play
+   * @param {String} appId - ID de l'application
    */
-  async createGooglePlaySubscription(userId, packageId, googleTransactionId, purchaseData) {
-    // Vérifier que le package existe
-    const packageNew = await Package.findById(packageId);
-    if (!packageNew || !packageNew.isActive) {
+  async createGooglePlaySubscription(appId, userId, packageId, googleTransactionId, purchaseData) {
+    // Vérifier que le package existe POUR CETTE APP
+    const packageNew = await Package.findOne({ 
+      _id: packageId, 
+      appId, 
+      isActive: true 
+    });
+    
+    if (!packageNew) {
       throw new AppError('Package non disponible', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Récupérer l'utilisateur
-    const user = await User.findById(userId);
+    // Récupérer l'utilisateur DE CETTE APP
+    const user = await User.findOne({ _id: userId, appId });
     if (!user) {
       throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Créer l'abonnement
+    // Créer l'abonnement AVEC appId
     const subscription = await Subscription.create({
+      appId,
       user: userId,
       package: packageId,
       startDate: purchaseData.startDate,
@@ -90,7 +106,7 @@ class SubscriptionService {
 
     // Créer commission si l'utilisateur a un parrain
     if (user.referredBy) {
-      await commissionService.createCommission(subscription._id);
+      await commissionService.createCommission(appId, subscription._id);
     }
 
     return subscription;
@@ -98,9 +114,10 @@ class SubscriptionService {
 
   /**
    * Obtenir les informations complètes d'abonnement d'un utilisateur
+   * @param {String} appId - ID de l'application
    */
-  async getUserSubscriptionInfo(userId) {
-    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+  async getUserSubscriptionInfo(appId, userId) {
+    const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
     
     const activePackages = activeSubscriptions.map(subscription => ({
       id: subscription.package._id,
@@ -129,14 +146,16 @@ class SubscriptionService {
   }
 
   /**
-   * MODIFIÉE : Obtenir les abonnements actifs d'un utilisateur (Mobile Money + Google Play)
+   * Obtenir les abonnements actifs d'un utilisateur
+   * @param {String} appId - ID de l'application
    */
-  async getActiveSubscriptions(userId) {
+  async getActiveSubscriptions(appId, userId) {
     return await Subscription.find({
+      appId, // ⭐ AJOUT DE APPID
       user: userId,
       status: 'active',
       $or: [
-        // Tous les abonnements qui ne sont PAS Google Play (inclut ceux sans paymentProvider)
+        // Tous les abonnements qui ne sont PAS Google Play
         {
           $or: [
             { paymentProvider: { $exists: false } },
@@ -154,17 +173,18 @@ class SubscriptionService {
 
   /**
    * Vérifier si un utilisateur a accès à une catégorie
-   * Note: Ne vérifie PLUS isActive - les utilisateurs gardent l'accès même si le package n'est plus achetable
+   * @param {String} appId - ID de l'application
    */
-  async hasAccessToCategory(userId, categoryId) {
-    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+  async hasAccessToCategory(appId, userId, categoryId) {
+    const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
     
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL avec ses catégories ACTUELLES
-      const currentPackage = await Package.findById(subscription.package._id);
+      // Récupérer le package ACTUEL avec ses catégories ACTUELLES POUR CETTE APP
+      const currentPackage = await Package.findOne({ 
+        _id: subscription.package._id, 
+        appId 
+      });
       
-      // Vérifie uniquement que le package existe et contient la catégorie
-      // Plus de vérification isActive - l'utilisateur garde l'accès qu'il a payé
       if (currentPackage && currentPackage.categories.includes(categoryId)) {
         return true;
       }
@@ -175,11 +195,11 @@ class SubscriptionService {
 
   /**
    * Vérifier si un utilisateur a accès à au moins une catégorie VIP
-   * Note: Ne vérifie PLUS isActive - les utilisateurs gardent l'accès même si le package n'est plus achetable
+   * @param {String} appId - ID de l'application
    */
-  async hasAnyVipAccess(userId) {
-    // Récupérer les abonnements actifs de l'utilisateur
-    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+  async hasAnyVipAccess(appId, userId) {
+    // Récupérer les abonnements actifs de l'utilisateur POUR CETTE APP
+    const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
     
     if (activeSubscriptions.length === 0) {
       return false;
@@ -188,10 +208,12 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL (pas celui stocké dans l'abonnement)
-      const currentPackage = await Package.findById(subscription.package._id);
+      // Récupérer le package ACTUEL POUR CETTE APP
+      const currentPackage = await Package.findOne({ 
+        _id: subscription.package._id, 
+        appId 
+      });
       
-      // Plus de vérification isActive - l'utilisateur garde l'accès qu'il a payé
       if (currentPackage) {
         categoryIds.push(...currentPackage.categories);
       }
@@ -204,8 +226,9 @@ class SubscriptionService {
       return false;
     }
 
-    // Vérifier si au moins une de ces catégories est VIP
+    // Vérifier si au moins une de ces catégories est VIP POUR CETTE APP
     const vipCategories = await Category.find({
+      appId, // ⭐ AJOUT DE APPID
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
@@ -216,10 +239,10 @@ class SubscriptionService {
 
   /**
    * Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès
-   * Note: Ne vérifie PLUS isActive - les utilisateurs gardent l'accès même si le package n'est plus achetable
+   * @param {String} appId - ID de l'application
    */
-  async getUserVipCategories(userId) {
-    const activeSubscriptions = await this.getActiveSubscriptions(userId);
+  async getUserVipCategories(appId, userId) {
+    const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
     
     if (activeSubscriptions.length === 0) {
       return [];
@@ -228,10 +251,12 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL (pas celui stocké dans l'abonnement)
-      const currentPackage = await Package.findById(subscription.package._id);
+      // Récupérer le package ACTUEL POUR CETTE APP
+      const currentPackage = await Package.findOne({ 
+        _id: subscription.package._id, 
+        appId 
+      });
       
-      // Plus de vérification isActive - l'utilisateur garde l'accès qu'il a payé
       if (currentPackage) {
         categoryIds.push(...currentPackage.categories);
       }
@@ -244,8 +269,9 @@ class SubscriptionService {
       return [];
     }
 
-    // Récupérer toutes les catégories VIP auxquelles l'utilisateur a accès
+    // Récupérer toutes les catégories VIP POUR CETTE APP
     return await Category.find({
+      appId, // ⭐ AJOUT DE APPID
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
@@ -254,18 +280,24 @@ class SubscriptionService {
 
   /**
    * Obtenir tous les abonnements d'un utilisateur
+   * @param {String} appId - ID de l'application
    */
-  async getUserSubscriptions(userId) {
-    return await Subscription.find({ user: userId })
+  async getUserSubscriptions(appId, userId) {
+    return await Subscription.find({ 
+      appId, // ⭐ AJOUT DE APPID
+      user: userId 
+    })
       .populate('package')
       .sort({ createdAt: -1 });
   }
 
   /**
-   * MODIFIÉE : Annuler un abonnement
+   * Annuler un abonnement
+   * @param {String} appId - ID de l'application
    */
-  async cancelSubscription(subscriptionId, userId) {
+  async cancelSubscription(appId, subscriptionId, userId) {
     const subscription = await Subscription.findOne({
+      appId, // ⭐ AJOUT DE APPID
       _id: subscriptionId,
       user: userId
     });
@@ -288,9 +320,13 @@ class SubscriptionService {
 
     // Annuler la commission associée via commissionService
     const Commission = require('../../models/common/Commission');
-    const commission = await Commission.findOne({ subscription: subscriptionId });
+    const commission = await Commission.findOne({ 
+      appId, // ⭐ AJOUT DE APPID
+      subscription: subscriptionId 
+    });
+    
     if (commission && commission.status === 'pending') {
-      await commissionService.cancelCommissions([commission._id], 'Abonnement annulé par utilisateur');
+      await commissionService.cancelCommissions(appId, [commission._id], 'Abonnement annulé par utilisateur');
     }
 
     return subscription;
@@ -298,9 +334,11 @@ class SubscriptionService {
 
   /**
    * Obtenir les statistiques des abonnements
+   * @param {String} appId - ID de l'application
    */
-  async getSubscriptionStats() {
+  async getSubscriptionStats(appId) {
     const stats = await Subscription.aggregate([
+      { $match: { appId } }, // ⭐ AJOUT DE APPID
       {
         $group: {
           _id: '$status',
@@ -314,10 +352,12 @@ class SubscriptionService {
   }
 
   /**
-   * NOUVELLE : Vérifier si un utilisateur peut souscrire
+   * Vérifier si un utilisateur peut souscrire
+   * @param {String} appId - ID de l'application
    */
-  async canSubscribe(userId) {
+  async canSubscribe(appId, userId) {
     const activeSubscription = await Subscription.findOne({
+      appId, // ⭐ AJOUT DE APPID
       user: userId,
       status: 'active',
       $or: [
@@ -335,10 +375,12 @@ class SubscriptionService {
   }
 
   /**
-   * NOUVELLE : Obtenir le type de provider d'un abonnement actif
+   * Obtenir le type de provider d'un abonnement actif
+   * @param {String} appId - ID de l'application
    */
-  async getActiveSubscriptionProvider(userId) {
+  async getActiveSubscriptionProvider(appId, userId) {
     const subscription = await Subscription.findOne({
+      appId, // ⭐ AJOUT DE APPID
       user: userId,
       status: 'active',
       $or: [

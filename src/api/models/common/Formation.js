@@ -1,6 +1,16 @@
+// src/api/models/common/Formation.js
+
 const mongoose = require('mongoose');
 
 const formationSchema = new mongoose.Schema({
+  appId: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+    ref: 'App'
+  },
+  
   title: {
     fr: {
       type: String,
@@ -11,6 +21,7 @@ const formationSchema = new mongoose.Schema({
       required: [true, 'Le titre en anglais est requis']
     }
   },
+  
   description: {
     fr: {
       type: String,
@@ -21,27 +32,27 @@ const formationSchema = new mongoose.Schema({
       required: [true, 'La description en anglais est requise']
     }
   },
+  
   htmlContent: {
-    fr: {
-      type: String,
-    },
-    en: {
-      type: String,
-    }
+    fr: String,
+    en: String
   },
+  
   isAccessible: {
     type: Boolean,
     default: true
   },
+  
   requiredPackages: [{
     type: mongoose.Schema.ObjectId,
     ref: 'Package'
   }],
+  
   order: {
     type: Number,
-    default: 0,
-    index: true
+    default: 0
   },
+  
   isActive: {
     type: Boolean,
     default: true
@@ -50,12 +61,14 @@ const formationSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour optimiser les requêtes
+// Indexes
+formationSchema.index({ appId: 1, order: 1, createdAt: -1 });
+formationSchema.index({ appId: 1, isActive: 1 });
+formationSchema.index({ appId: 1, isAccessible: 1 });
+formationSchema.index({ appId: 1, requiredPackages: 1 });
 formationSchema.index({ isActive: 1 });
 formationSchema.index({ isAccessible: 1 });
 formationSchema.index({ requiredPackages: 1 });
-formationSchema.index({ order: 1, createdAt: -1 }); // Index composé pour le tri
+formationSchema.index({ order: 1, createdAt: -1 });
 
-const Formation = mongoose.model('Formation', formationSchema);
-
-module.exports = Formation;
+module.exports = mongoose.model('Formation', formationSchema);

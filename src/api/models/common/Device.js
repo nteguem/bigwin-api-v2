@@ -1,16 +1,23 @@
+// src/api/models/common/Device.js
+
 const mongoose = require('mongoose');
 
 const deviceSchema = new mongoose.Schema({
-  deviceId: {
+  appId: {
     type: String,
     required: true,
-    unique: true
+    lowercase: true,
+    trim: true,
+    ref: 'App'
+  },
+  
+  deviceId: {
+    type: String,
+    required: true
   },
   
   playerId: {
     type: String,
-    required: true,
-    unique: true,
     sparse: true
   },
   
@@ -51,10 +58,16 @@ const deviceSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes
+deviceSchema.index({ appId: 1, deviceId: 1 }, { unique: true });
+deviceSchema.index({ appId: 1, playerId: 1 }, { sparse: true });
+deviceSchema.index({ appId: 1, userType: 1, isActive: 1 });
+deviceSchema.index({ appId: 1, user: 1, isActive: 1 });
 deviceSchema.index({ userType: 1, isActive: 1 });
 deviceSchema.index({ user: 1, isActive: 1 });
 deviceSchema.index({ playerId: 1, isActive: 1 });
 
+// Methods
 deviceSchema.methods.linkToUser = function(userId) {
   this.user = userId;
   this.userType = 'registered';
@@ -67,6 +80,7 @@ deviceSchema.methods.unlinkFromUser = function() {
   return this.save();
 };
 
+// Statics
 deviceSchema.statics.getByUserType = function(userType) {
   return this.find({ 
     userType, 
@@ -74,9 +88,5 @@ deviceSchema.statics.getByUserType = function(userType) {
     playerId: { $exists: true, $ne: null }
   });
 };
-
-deviceSchema.pre('save', function(next) {
-  next();
-});
 
 module.exports = mongoose.model('Device', deviceSchema);

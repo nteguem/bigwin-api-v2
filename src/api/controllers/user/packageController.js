@@ -1,3 +1,5 @@
+// controllers/user/packageController.js
+
 const Package = require('../../models/common/Package');
 const subscriptionService = require('../../services/user/subscriptionService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -7,8 +9,13 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir tous les packages disponibles (user)
  */
 exports.getAvailablePackages = catchAsync(async (req, res, next) => {
-  const { currency, lang = 'fr' } = req.query;  
-  const packages = await Package.find({ isActive: true })
+  const { currency, lang = 'fr' } = req.query;
+  
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const packages = await Package.find({ appId, isActive: true })
     .populate('categories', 'name description isVip')
     .populate('formationId');
 
@@ -52,8 +59,13 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
 exports.getPackage = catchAsync(async (req, res, next) => {
   const { currency, lang = 'fr' } = req.query;
   
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
   const package = await Package.findOne({ 
-    _id: req.params.id, 
+    _id: req.params.id,
+    appId, // ⭐ AJOUT
     isActive: true 
   }).populate('categories', 'name description isVip')
     .populate('formationId');
@@ -65,7 +77,8 @@ exports.getPackage = catchAsync(async (req, res, next) => {
   // Vérifier si l'utilisateur a déjà ce package (optionnel)
   let userHasPackage = false;
   if (req.user) {
-    const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+    // ⭐ Passer appId au service
+    const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
     userHasPackage = activeSubscriptions.some(sub => 
       sub.package._id.toString() === package._id.toString()
     );
@@ -101,7 +114,12 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   const { categoryId } = req.params;
   const { currency, lang = 'fr' } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Filtrer par appId
   const packages = await Package.find({ 
+    appId, // ⭐ AJOUT
     isActive: true,
     categories: categoryId
   }).populate('categories', 'name description isVip')

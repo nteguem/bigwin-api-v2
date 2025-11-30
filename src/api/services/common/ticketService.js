@@ -1,76 +1,93 @@
+// services/common/ticketService.js
+
 const Ticket = require('../../models/common/Ticket');
-const Prediction = require("../../models/common/Prediction")
+const Prediction = require("../../models/common/Prediction");
 const predictionService = require('./predictionService');
 
 class TicketService {
   
-  // Créer un nouveau ticket
-  async createTicket(data) {
-    const ticket = new Ticket(data);
+  /**
+   * Créer un nouveau ticket
+   * @param {String} appId - ID de l'application
+   */
+  async createTicket(appId, data) {
+    // ⭐ Ajouter appId aux données
+    const ticket = new Ticket({ ...data, appId });
     return await ticket.save();
   }
 
-  // Récupérer tous les tickets avec pagination et leurs prédictions
-async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
-  const filter = {};
-        
-  // Seulement ajouter isVisible au filtre s'il est explicitement défini
-  if (isVisible !== null) {
-    filter.isVisible = isVisible;
-  }
-  
-  if (category) {
-    filter.category = category;
-  }
+  /**
+   * Récupérer tous les tickets avec pagination et leurs prédictions
+   * @param {String} appId - ID de l'application
+   */
+  async getTickets(appId, { offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
+    // ⭐ Filtrer par appId
+    const filter = { appId };
+    
+    // Seulement ajouter isVisible au filtre s'il est explicitement défini
+    if (isVisible !== null) {
+      filter.isVisible = isVisible;
+    }
+    
+    if (category) {
+      filter.category = category;
+    }
 
-  if (date) {
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
-            
-    filter.date = {
-      $gte: startOfDay,
-      $lte: endOfDay
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      filter.date = {
+        $gte: startOfDay,
+        $lte: endOfDay
+      };
+    }
+
+    const tickets = await Ticket.find(filter)
+      .populate('category')
+      .skip(offset)
+      .limit(limit)
+      .sort({ date: -1 });
+
+    // Récupérer les prédictions pour chaque ticket
+    const ticketsWithPredictions = await Promise.all(
+      tickets.map(async (ticket) => {
+        // ⭐ Passer appId
+        const predictions = await predictionService.getPredictionsByTicket(appId, ticket._id);
+        return {
+          ...ticket.toObject(),
+          predictions
+        };
+      })
+    );
+
+    // ⭐ Compter avec appId
+    const total = await Ticket.countDocuments(filter);
+
+    return {
+      data: ticketsWithPredictions,
+      pagination: {
+        offset,
+        limit,
+        total,
+        hasNext: (offset + limit) < total
+      }
     };
   }
 
-  const tickets = await Ticket.find(filter)
-    .populate('category')
-    .skip(offset)
-    .limit(limit)
-    .sort({ date: -1 });
-
-  // Récupérer les prédictions pour chaque ticket
-  const ticketsWithPredictions = await Promise.all(
-    tickets.map(async (ticket) => {
-      const predictions = await predictionService.getPredictionsByTicket(ticket._id);
-      return {
-        ...ticket.toObject(),
-        predictions
-      };
-    })
-  );
-
-  const total = await Ticket.countDocuments(filter);
-
-  return {
-    data: ticketsWithPredictions,
-    pagination: {
-      offset,
-      limit,
-      total,
-      hasNext: (offset + limit) < total
-    }
-  };
-}
-
-  // Récupérer un ticket par ID avec ses prédictions
-  async getTicketById(id) {
-    const ticket = await Ticket.findById(id).populate('category');
+  /**
+   * Récupérer un ticket par ID avec ses prédictions
+   * @param {String} appId - ID de l'application
+   */
+  async getTicketById(appId, id) {
+    // ⭐ Filtrer par appId
+    const ticket = await Ticket.findOne({ _id: id, appId }).populate('category');
     if (!ticket) return null;
 
-    const predictions = await predictionService.getPredictionsByTicket(id);
+    // ⭐ Passer appId
+    const predictions = await predictionService.getPredictionsByTicket(appId, id);
     
     return {
       ...ticket.toObject(),
@@ -78,21 +95,32 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     };
   }
 
-  // Mettre à jour un ticket
-  async updateTicket(id, data) {
-    return await Ticket.findByIdAndUpdate(id, data, { new: true });
+  /**
+   * Mettre à jour un ticket
+   * @param {String} appId - ID de l'application
+   */
+  async updateTicket(appId, id, data) {
+    // ⭐ Filtrer par appId
+    return await Ticket.findOneAndUpdate(
+      { _id: id, appId }, // ⭐ AJOUT
+      data, 
+      { new: true }
+    );
   }
 
-  // NOUVEAU : Supprimer un ticket et toutes ses prédictions
-  async deleteTicket(id) {
-    // Vérifier que le ticket existe
-    const ticket = await Ticket.findById(id);
+  /**
+   * Supprimer un ticket et toutes ses prédictions
+   * @param {String} appId - ID de l'application
+   */
+  async deleteTicket(appId, id) {
+    // ⭐ Vérifier que le ticket existe POUR CETTE APP
+    const ticket = await Ticket.findOne({ _id: id, appId });
     if (!ticket) {
       return null;
     }
 
-    // Supprimer toutes les prédictions associées au ticket
-    await Prediction.deleteMany({ ticket: id });
+    // ⭐ Supprimer toutes les prédictions associées au ticket POUR CETTE APP
+    await Prediction.deleteMany({ ticket: id, appId });
 
     // Supprimer le ticket
     await Ticket.findByIdAndDelete(id);
@@ -103,9 +131,13 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     };
   }
 
-  // Calculer et mettre à jour le closingAt d'un ticket
-  async updateClosingTime(ticketId) {
-    const predictions = await predictionService.getPredictionsByTicket(ticketId);
+  /**
+   * Calculer et mettre à jour le closingAt d'un ticket
+   * @param {String} appId - ID de l'application
+   */
+  async updateClosingTime(appId, ticketId) {
+    // ⭐ Passer appId
+    const predictions = await predictionService.getPredictionsByTicket(appId, ticketId);
     
     if (predictions.length === 0) {
       return null;
@@ -120,41 +152,53 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     // Ajouter 3 heures
     const closingAt = new Date(latestMatchDate.getTime() + (3 * 60 * 60 * 1000));
 
-    return await this.updateTicket(ticketId, { closingAt });
+    // ⭐ Passer appId
+    return await this.updateTicket(appId, ticketId, { closingAt });
   }
 
-  // Rendre un ticket visible
-  async publishTicket(id) {
-    return await this.updateTicket(id, { isVisible: true });
+  /**
+   * Rendre un ticket visible
+   * @param {String} appId - ID de l'application
+   */
+  async publishTicket(appId, id) {
+    return await this.updateTicket(appId, id, { isVisible: true });
   }
 
-  // Cacher un ticket
-  async hideTicket(id) {
-    return await this.updateTicket(id, { isVisible: false });
+  /**
+   * Cacher un ticket
+   * @param {String} appId - ID de l'application
+   */
+  async hideTicket(appId, id) {
+    return await this.updateTicket(appId, id, { isVisible: false });
   }
 
-  // Fermer un ticket
-  async closeTicket(id) {
-    return await this.updateTicket(id, { status: 'closed' });
+  /**
+   * Fermer un ticket
+   * @param {String} appId - ID de l'application
+   */
+  async closeTicket(appId, id) {
+    return await this.updateTicket(appId, id, { status: 'closed' });
   }
 
-  // Vérifier si un ticket existe
-  async ticketExists(id) {
-    const ticket = await Ticket.findById(id);
+  /**
+   * Vérifier si un ticket existe
+   * @param {String} appId - ID de l'application
+   */
+  async ticketExists(appId, id) {
+    // ⭐ Filtrer par appId
+    const ticket = await Ticket.findOne({ _id: id, appId });
     return !!ticket;
   }
 
-  
   /**
-   * NOUVELLE MÉTHODE OPTIMISÉE
-   * Récupère toutes les prédictions pour plusieurs tickets en une seule requête
-   * @param {Array} ticketIds - Array d'IDs de tickets
-   * @returns {Array} Toutes les prédictions pour ces tickets
+   * Récupérer toutes les prédictions pour plusieurs tickets en une seule requête
+   * @param {String} appId - ID de l'application
    */
-  async getPredictionsByTicketIds(ticketIds) {
+  async getPredictionsByTicketIds(appId, ticketIds) {
     try {
-      // Une seule requête pour récupérer toutes les prédictions
+      // ⭐ Une seule requête pour récupérer toutes les prédictions POUR CETTE APP
       const predictions = await Prediction.find({
+        appId, // ⭐ AJOUT
         ticket: { $in: ticketIds }
       })
       .populate('event')
@@ -168,12 +212,18 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
     }
   }
 
-  // Version alternative avec aggregation pipeline pour encore plus de performance
-  async getPredictionsByTicketIdsOptimized(ticketIds) {
+  /**
+   * Version alternative avec aggregation pipeline pour encore plus de performance
+   * @param {String} appId - ID de l'application
+   */
+  async getPredictionsByTicketIdsOptimized(appId, ticketIds) {
     try {
+      const mongoose = require('mongoose');
+      
       const predictions = await Prediction.aggregate([
         {
           $match: {
+            appId, // ⭐ AJOUT
             ticket: { $in: ticketIds.map(id => mongoose.Types.ObjectId(id)) }
           }
         },
@@ -234,7 +284,6 @@ async getTickets({ offset = 0, limit = 10, category = null, date = null, isVisib
       return [];
     }
   }
-
 }
 
 module.exports = new TicketService();

@@ -1,3 +1,4 @@
+// controllers/user/smobilpayController.js
 const smobilpayService = require('../../services/user/SmobilpayService');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -22,13 +23,14 @@ exports.getServices = catchAsync(async (req, res, next) => {
   });
 });
 
-
-
 /**
  * Initier un paiement 
  */
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, serviceId, phoneNumber } = req.body;
+  
+  // ⭐ Récupérer appId
+  const appId = req.appId;
   
   // Validation - seulement 3 champs requis
   if (!packageId || !serviceId || !phoneNumber) {
@@ -39,9 +41,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     ));
   }
   
-  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package
+  // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
     sub.package._id.toString() === packageId
   );
@@ -61,7 +63,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     email: req.user.email || ''
   };
     
+  // ⭐ Passer appId au service
   const transaction = await smobilpayService.initiatePayment(
+    appId,
     req.user._id,
     packageId,
     serviceId,
@@ -92,7 +96,10 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { paymentId } = req.params;
   
-  const transaction = await smobilpayService.checkTransactionStatus(paymentId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  const transaction = await smobilpayService.checkTransactionStatus(appId, paymentId);
   
   // Vérifier que la transaction appartient à l'utilisateur
   if (transaction.user._id.toString() !== req.user._id.toString()) {
@@ -102,10 +109,10 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   // Traiter la transaction si le statut a changé
   let subscription = null;
   try {
-    subscription = await paymentMiddleware.processTransactionUpdate(transaction);
+    // ⭐ Passer appId au middleware
+    subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
-    // Ne pas bloquer la réponse en cas d'erreur de traitement
   }
   
   res.status(200).json({
@@ -138,6 +145,9 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 exports.webhook = catchAsync(async (req, res, next) => {
   const { errorCode, status, trid: paymentId } = req.body;
   
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   console.log('Smobilpay webhook received:', req.body);
 
   if (!paymentId) {
@@ -147,7 +157,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
   try {
     // Chercher la transaction
     const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
-    const query = { paymentId };
+    
+    // ⭐ Filtrer par appId
+    const query = { appId, paymentId };
     const transaction = await SmobilpayTransaction.findOne(query)
       .populate(['package', 'user']);
     
@@ -161,8 +173,8 @@ exports.webhook = catchAsync(async (req, res, next) => {
       transaction.errorCode = errorCode || null;
       await transaction.save();
       
-      // Traiter la transaction mise à jour
-      await paymentMiddleware.processTransactionUpdate(transaction);
+      // ⭐ Traiter la transaction mise à jour avec appId
+      await paymentMiddleware.processTransactionUpdate(appId, transaction);
     }
     
     res.status(200).json({
@@ -180,3 +192,10 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
   }
 });
+
+module.exports = {
+  getServices: exports.getServices,
+  initiatePayment: exports.initiatePayment,
+  checkStatus: exports.checkStatus,
+  webhook: exports.webhook
+};

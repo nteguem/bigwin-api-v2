@@ -135,13 +135,10 @@ function verifyHmacToken(receivedToken, data, currency) {
 /**
  * Initier un paiement CinetPay
  */
-/**
- * Initier un paiement CinetPay
- */
-async function initiatePayment(userId, packageId, phoneNumber, customerName, email) {
+async function initiatePayment(appId, userId, packageId, phoneNumber, customerName, email) {
   try {
     // 1. Récupérer le package
-    const packageDoc = await Package.findById(packageId);
+    const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
@@ -164,6 +161,7 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
     const { notify_url, return_url } = generateUrls();
     // 7. Créer la transaction en base
     const cinetpayTransaction = new CinetpayTransaction({
+      appId,
       transactionId,
       user: userId,
       package: packageId,
@@ -248,10 +246,10 @@ async function initiatePayment(userId, packageId, phoneNumber, customerName, ema
 /**
  * Vérifier le statut d'une transaction
  */
-async function checkTransactionStatus(transactionId) {
+async function checkTransactionStatus(appId,transactionId) {
   try {
     // 1. Trouver la transaction
-    const transaction = await CinetpayTransaction.findOne({ transactionId })
+    const transaction = await CinetpayTransaction.findOne({appId, transactionId })
       .populate(['package', 'user']);
 
     if (!transaction) {

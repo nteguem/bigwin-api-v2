@@ -1,13 +1,19 @@
+// services/common/formationService.js
+
 const Formation = require('../../models/common/Formation');
 
 class FormationService {
 
-  // Récupérer toutes les formations avec pagination
-  async getFormations(options = {}) {
+  /**
+   * Récupérer toutes les formations avec pagination
+   * @param {String} appId - ID de l'application
+   */
+  async getFormations(appId, options = {}) {
     const { offset = 0, limit = 10, isActive = null, lang = 'fr' } = options;
 
     // Construire le filtre
-    const filter = {};
+    const filter = { appId }; // ⭐ AJOUT
+    
     if (isActive !== null) {
       filter.isActive = isActive;
     }
@@ -19,7 +25,7 @@ class FormationService {
       .limit(limit)
       .sort({ order: 1, createdAt: -1 });
 
-    // Compter le total pour la pagination
+    // ⭐ Compter le total POUR CETTE APP
     const total = await Formation.countDocuments(filter);
 
     // Formater selon la langue
@@ -36,9 +42,13 @@ class FormationService {
     };
   }
 
-  // Récupérer une formation par ID
-  async getFormationById(id, lang = 'fr') {
-    const formation = await Formation.findById(id)
+  /**
+   * Récupérer une formation par ID
+   * @param {String} appId - ID de l'application
+   */
+  async getFormationById(appId, id, lang = 'fr') {
+    // ⭐ Filtrer par appId
+    const formation = await Formation.findOne({ _id: id, appId })
       .populate('requiredPackages', 'name description pricing duration badge economy');
     
     if (!formation) {
@@ -48,28 +58,45 @@ class FormationService {
     return this.formatFormation(formation, lang);
   }
 
-  // Créer une nouvelle formation
-  async createFormation(formationData) {
-    const formation = await Formation.create(formationData);
+  /**
+   * Créer une nouvelle formation
+   * @param {String} appId - ID de l'application
+   */
+  async createFormation(appId, formationData) {
+    // ⭐ Ajouter appId aux données
+    const formation = await Formation.create({ ...formationData, appId });
+    
     // Populate après création pour retourner les données complètes
     return await Formation.findById(formation._id)
       .populate('requiredPackages', 'name description pricing duration badge economy');
   }
 
-  // Mettre à jour une formation
-  async updateFormation(id, updates) {
-    const formation = await Formation.findByIdAndUpdate(id, updates, {
-      new: true,
-      runValidators: true
-    }).populate('requiredPackages', 'name description pricing duration badge economy');
+  /**
+   * Mettre à jour une formation
+   * @param {String} appId - ID de l'application
+   */
+  async updateFormation(appId, id, updates) {
+    // ⭐ Filtrer par appId
+    const formation = await Formation.findOneAndUpdate(
+      { _id: id, appId }, // ⭐ AJOUT
+      updates, 
+      {
+        new: true,
+        runValidators: true
+      }
+    ).populate('requiredPackages', 'name description pricing duration badge economy');
 
     return formation;
   }
 
-  // Désactiver une formation
-  async deactivateFormation(id) {
-    const formation = await Formation.findByIdAndUpdate(
-      id, 
+  /**
+   * Désactiver une formation
+   * @param {String} appId - ID de l'application
+   */
+  async deactivateFormation(appId, id) {
+    // ⭐ Filtrer par appId
+    const formation = await Formation.findOneAndUpdate(
+      { _id: id, appId }, // ⭐ AJOUT
       { isActive: false }, 
       { new: true }
     ).populate('requiredPackages', 'name description pricing duration badge economy');
@@ -77,10 +104,14 @@ class FormationService {
     return formation;
   }
 
-  // Activer une formation
-  async activateFormation(id) {
-    const formation = await Formation.findByIdAndUpdate(
-      id, 
+  /**
+   * Activer une formation
+   * @param {String} appId - ID de l'application
+   */
+  async activateFormation(appId, id) {
+    // ⭐ Filtrer par appId
+    const formation = await Formation.findOneAndUpdate(
+      { _id: id, appId }, // ⭐ AJOUT
       { isActive: true }, 
       { new: true }
     ).populate('requiredPackages', 'name description pricing duration badge economy');
@@ -88,7 +119,9 @@ class FormationService {
     return formation;
   }
 
-  // Méthode utilitaire pour formater une formation selon la langue
+  /**
+   * Méthode utilitaire pour formater une formation selon la langue
+   */
   formatFormation(formation, lang = 'fr') {
     return {
       _id: formation._id,
@@ -111,10 +144,15 @@ class FormationService {
     };
   }
 
-  // Récupérer toutes les formations actives (pour les packages)
-  async getActiveFormations(lang = 'fr') {
-    const formations = await Formation.find({ isActive: true })
+  /**
+   * Récupérer toutes les formations actives (pour les packages)
+   * @param {String} appId - ID de l'application
+   */
+  async getActiveFormations(appId, lang = 'fr') {
+    // ⭐ Filtrer par appId
+    const formations = await Formation.find({ appId, isActive: true })
       .populate('requiredPackages', 'name description pricing duration badge economy');
+    
     return formations.map(formation => this.formatFormation(formation, lang));
   }
 }

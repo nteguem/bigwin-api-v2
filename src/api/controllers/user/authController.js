@@ -1,3 +1,5 @@
+// src/api/controllers/user/authController.js
+
 const User = require('../../models/user/User');
 const authService = require('../../services/common/authService');
 const googleAuthService = require('../../services/common/googleAuthService');
@@ -12,13 +14,16 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.register = catchAsync(async (req, res, next) => {
   const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId } = req.body;
 
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
+
   // Validation des champs obligatoires
   if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
-  // Vérifier si le numéro existe déjà
-  const existingUser = await User.findOne({ phoneNumber });
+  // Vérifier si le numéro existe déjà POUR CETTE APP
+  const existingUser = await User.findOne({ appId, phoneNumber });
   if (existingUser) {
     return next(new AppError('Ce numéro de téléphone est déjà utilisé', 400, ErrorCodes.VALIDATION_ERROR));
   }
@@ -27,17 +32,18 @@ exports.register = catchAsync(async (req, res, next) => {
   let affiliate = null;
   if (affiliateCode) {
     try {
-      affiliate = await authService.validateAffiliateCode(affiliateCode);
+      affiliate = await authService.validateAffiliateCode(appId, affiliateCode);
     } catch (error) {
       return next(error);
     }
   }
   
-  // Générer l'email automatiquement avec vérification d'unicité
-  const generatedEmail = await generateUniqueUserEmail(phoneNumber, pseudo, countryCode);
+  // Générer l'email automatiquement avec vérification d'unicité POUR CETTE APP
+  const generatedEmail = await generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode);
   
-  // Créer l'utilisateur
+  // Créer l'utilisateur AVEC APPID
   const user = await User.create({
+    appId, // ⭐ AJOUT DE APPID
     phoneNumber,
     email: generatedEmail,
     password,
@@ -45,8 +51,8 @@ exports.register = catchAsync(async (req, res, next) => {
     dialCode,
     countryCode,
     city,
-    authProvider: 'local', // Nouveau champ
-    emailVerified: false,   // Nouveau champ
+    authProvider: 'local',
+    emailVerified: false,
     referredBy: affiliate?._id
   });
   
@@ -61,14 +67,14 @@ exports.register = catchAsync(async (req, res, next) => {
   let device = null;
   if (deviceId) {
     try {
-      device = await deviceService.linkDeviceToUser(deviceId, user._id);
+      device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
     } catch (error) {
       console.error('Erreur linkage device:', error);
     }
   }
   
   // Vérifier s'il a un abonnement actif (normalement false pour un nouveau user)
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
   
   // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Inscription réussie');
@@ -80,15 +86,15 @@ exports.register = catchAsync(async (req, res, next) => {
 });
 
 // Fonction pour générer automatiquement un email utilisateur avec vérification d'unicité
-async function generateUniqueUserEmail(phoneNumber, pseudo, countryCode) {
+async function generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode) {
   const cleanPhone = phoneNumber.replace(/[^\d]/g, '');
   const domain = "bigwinpronos.com";
   let baseEmail = `user${cleanPhone}@${domain}`;
   let finalEmail = baseEmail;
   let counter = 1;
   
-  // Vérifier l'unicité
-  while (await User.findOne({ email: finalEmail })) {
+  // Vérifier l'unicité POUR CETTE APP
+  while (await User.findOne({ appId, email: finalEmail })) {
     finalEmail = `user${cleanPhone}${counter}@${domain}`;
     counter++;
   }
@@ -98,18 +104,20 @@ async function generateUniqueUserEmail(phoneNumber, pseudo, countryCode) {
 
 /**
  * Connexion utilisateur classique (téléphone + mot de passe)
- * Pour Google Auth, utiliser /google
  */
 exports.login = catchAsync(async (req, res, next) => {
   const { phoneNumber, password, deviceId } = req.body;
+  
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
   
   // Validation des champs
   if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
-  // Trouver l'utilisateur avec le mot de passe
-  const user = await User.findOne({ phoneNumber }).select('+password +refreshTokens');
+  // Trouver l'utilisateur avec le mot de passe POUR CETTE APP
+  const user = await User.findOne({ appId, phoneNumber }).select('+password +refreshTokens');
   if (!user || !(await user.comparePassword(password))) {
     return next(new AppError('Téléphone ou mot de passe incorrect', 401, ErrorCodes.AUTH_INVALID_CREDENTIALS));
   }
@@ -130,14 +138,14 @@ exports.login = catchAsync(async (req, res, next) => {
   let device = null;
   if (deviceId) {
     try {
-      device = await deviceService.linkDeviceToUser(deviceId, user._id);
+      device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
     } catch (error) {
       console.error('Erreur linkage device:', error);
     }
   }
   
   // Vérifier s'il a un abonnement actif
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
   
   // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
@@ -157,6 +165,9 @@ exports.login = catchAsync(async (req, res, next) => {
 exports.googleAuth = catchAsync(async (req, res, next) => {
   const { idToken, affiliateCode, city, countryCode, deviceId } = req.body;
   
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
+  
   // Validation
   if (!idToken) {
     return next(new AppError('Token Google requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -168,8 +179,8 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     const googleData = await googleAuthService.verifyGoogleToken(idToken);
     console.log(`✅ Token valide pour: ${googleData.email}`);
     
-    // 2. Créer ou récupérer l'utilisateur
-    const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(googleData, {
+    // 2. Créer ou récupérer l'utilisateur POUR CETTE APP
+    const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(appId, googleData, {
       affiliateCode,
       city,
       countryCode
@@ -194,15 +205,14 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     let device = null;
     if (deviceId) {
       try {
-        device = await deviceService.linkDeviceToUser(deviceId, user._id);
+        device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
       } catch (error) {
         console.error('Erreur linkage device:', error);
-        // On continue sans device
       }
     }
     
     // 7. Vérifier l'abonnement
-    const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(user._id);
+    const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
     
     // 8. Préparer la réponse
     const message = isNewUser 
@@ -240,17 +250,14 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
   } catch (error) {
     console.error('❌ Erreur Google Auth:', error);
     
-    // Gestion d'erreurs spécifiques
     if (error.message && error.message.includes('Token used too late')) {
       return next(new AppError('Token Google expiré, veuillez vous reconnecter', 401, ErrorCodes.AUTH_INVALID_TOKEN));
     }
     
-    // Renvoyer l'erreur telle quelle si c'est déjà une AppError
     if (error instanceof AppError) {
       return next(error);
     }
     
-    // Erreur générique
     return next(new AppError('Erreur lors de l\'authentification Google', 500, ErrorCodes.INTERNAL_ERROR));
   }
 });
@@ -262,7 +269,6 @@ exports.logout = catchAsync(async (req, res, next) => {
   const { refreshToken } = req.body;
   
   if (refreshToken && req.user) {
-    // Supprimer le refresh token spécifique
     req.user.refreshTokens = req.user.refreshTokens.filter(token => token !== refreshToken);
     await req.user.save();
   }
@@ -277,7 +283,6 @@ exports.logout = catchAsync(async (req, res, next) => {
  * Déconnexion globale (tous les appareils)
  */
 exports.logoutAll = catchAsync(async (req, res, next) => {
-  // Supprimer tous les refresh tokens
   req.user.refreshTokens = [];
   await req.user.save();
   
@@ -291,7 +296,8 @@ exports.logoutAll = catchAsync(async (req, res, next) => {
  * Renouveler le token d'accès
  */
 exports.refresh = catchAsync(async (req, res, next) => {
-  // req.user et req.refreshToken sont définis par le middleware verifyRefreshToken
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
   
   // Générer un nouveau token d'accès
   const tokens = authService.generateTokens(req.user._id, 'user');
@@ -302,7 +308,7 @@ exports.refresh = catchAsync(async (req, res, next) => {
   await req.user.save();
   
   // Vérifier s'il a un abonnement actif lors du refresh
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(req.user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id);
   
   res.status(200).json({
     success: true,
@@ -320,11 +326,14 @@ exports.refresh = catchAsync(async (req, res, next) => {
  * Obtenir les informations de l'utilisateur connecté
  */
 exports.getMe = catchAsync(async (req, res, next) => {
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
+  
   // Populer les infos de l'affilié parrain si existant
   const user = await User.findById(req.user._id).populate('referredBy', 'firstName lastName affiliateCode');
   
   // Vérifier s'il a un abonnement actif
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(req.user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id);
   
   res.status(200).json({
     success: true,
@@ -392,6 +401,9 @@ exports.changePassword = catchAsync(async (req, res, next) => {
 exports.resetPassword = catchAsync(async (req, res, next) => {
   const { phoneNumber, pseudo, newPassword } = req.body;
 
+  // ⭐ RÉCUPÉRER APPID depuis req
+  const appId = req.appId;
+
   // Validation des champs obligatoires
   if (!phoneNumber || !pseudo || !newPassword) {
     return next(new AppError('Téléphone, pseudo et nouveau mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -402,8 +414,9 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
     return next(new AppError('Le mot de passe doit contenir au moins 6 caractères', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Trouver l'utilisateur avec phoneNumber ET pseudo
+  // Trouver l'utilisateur avec phoneNumber ET pseudo POUR CETTE APP
   const user = await User.findOne({ 
+    appId, // ⭐ AJOUT DE APPID
     phoneNumber, 
     pseudo 
   });

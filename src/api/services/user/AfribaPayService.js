@@ -150,12 +150,13 @@ function verifyHmacToken(receivedSignature, payload) {
   }
 }
 
-async function initiatePayment(userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
+async function initiatePayment(appId, userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
   try {
     console.log(`[AfribaPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, phone=${phoneNumber}`);
 
     // 1. Récupérer le package
-    const packageDoc = await Package.findById(packageId);
+    const packageDoc = await Package.findOne({ _id: packageId, appId });
+
     console.log(`[AfribaPay-1] Package trouvé:`, packageDoc ? packageDoc.name.fr : 'NON TROUVÉ');
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
@@ -241,6 +242,7 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
     console.log(`[AfribaPay-8] Création transaction avec ID:`, responseData.transaction_id);
     
     const afribaPayTransaction = new AfribaPayTransaction({
+      appId, 
       transactionId: responseData.transaction_id,
       orderId,
       user: userId,
@@ -314,9 +316,10 @@ async function initiatePayment(userId, packageId, phoneNumber, operator, country
 /**
  * Vérifier le statut d'une transaction
  */
-async function checkTransactionStatus(orderId) {
+async function checkTransactionStatus(appId,orderId) {
   try {
     const transaction = await AfribaPayTransaction.findOne({ 
+      appId, 
       $or: [{ orderId }, { transactionId: orderId }] 
     }).populate(['package', 'user']);
 

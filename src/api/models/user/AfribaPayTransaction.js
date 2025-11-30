@@ -1,68 +1,77 @@
 // models/user/AfribaPayTransaction.js
+
 const mongoose = require('mongoose');
 
 const afribaPayTransactionSchema = new mongoose.Schema({
+  appId: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+    ref: 'App'
+  },
+  
   transactionId: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
+  
   orderId: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
+  
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
+  
   package: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Package',
     required: true
   },
+  
   operator: {
     type: String,
-    required: true // mtn, orange, moov, etc.
+    required: true
   },
+  
   country: {
     type: String,
-    required: true // CM, CI, SN, etc.
+    required: true
   },
+  
   phoneNumber: {
     type: String,
     required: true
   },
-  otpCode: {
-    type: String // Optionnel selon l'opérateur
-  },
+  
+  otpCode: String,
+  
   amount: {
     type: Number,
     required: true
   },
+  
   currency: {
     type: String,
-    required: true // XAF, XOF, GMD, CDF, GNF
-  },
-  status: {
-    type: String,
-    // enum: ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'],
-    default: 'PENDING'
-  },
-  merchantKey: {
-    type: String
-  },
-  referenceId: {
-    type: String
+    required: true
   },
   
-  // URLs
+  status: {
+    type: String,
+    default: 'PENDING'
+  },
+  
+  merchantKey: String,
+  referenceId: String,
+  
   notifyUrl: String,
   returnUrl: String,
   cancelUrl: String,
   
-  // Réponse API AfribaPay
   providerId: String,
   providerLink: String,
   taxes: Number,
@@ -74,11 +83,9 @@ const afribaPayTransactionSchema = new mongoose.Schema({
   apiRequestTime: String,
   apiRequestIp: String,
   
-  // Statut et opérateur
   operatorId: String,
   statusDate: Date,
   
-  // Webhook
   webhookReceived: {
     type: Boolean,
     default: false
@@ -90,7 +97,6 @@ const afribaPayTransactionSchema = new mongoose.Schema({
     default: false
   },
   
-  // Client info
   lang: {
     type: String,
     default: 'fr'
@@ -98,7 +104,6 @@ const afribaPayTransactionSchema = new mongoose.Schema({
   clientIp: String,
   userAgent: String,
   
-  // Processing
   processed: {
     type: Boolean,
     default: false
@@ -111,13 +116,17 @@ const afribaPayTransactionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour performance
+// Indexes
+afribaPayTransactionSchema.index({ appId: 1, transactionId: 1 }, { unique: true });
+afribaPayTransactionSchema.index({ appId: 1, orderId: 1 }, { unique: true });
+afribaPayTransactionSchema.index({ appId: 1, user: 1, status: 1 });
+afribaPayTransactionSchema.index({ appId: 1, processed: 1 });
 afribaPayTransactionSchema.index({ transactionId: 1 });
 afribaPayTransactionSchema.index({ orderId: 1 });
 afribaPayTransactionSchema.index({ user: 1, status: 1 });
 afribaPayTransactionSchema.index({ processed: 1 });
 
-// Méthodes utiles
+// Methods
 afribaPayTransactionSchema.methods.isSuccessful = function() {
   return this.status === 'SUCCESS';
 };

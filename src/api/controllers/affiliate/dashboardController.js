@@ -1,3 +1,5 @@
+// controllers/affiliate/affiliateDashboardController.js
+
 const dashboardService = require('../../services/affiliate/dashboardService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
@@ -6,7 +8,11 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir les statistiques générales du dashboard affilié
  */
 exports.getDashboardStats = catchAsync(async (req, res, next) => {
-  const stats = await dashboardService.getAffiliateStats(req.affiliate._id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Passer appId au service
+  const stats = await dashboardService.getAffiliateStats(appId, req.affiliate._id);
 
   res.status(200).json({
     success: true,
@@ -22,7 +28,12 @@ exports.getDashboardStats = catchAsync(async (req, res, next) => {
 exports.getReferrals = catchAsync(async (req, res, next) => {
   const { offset = 0, limit = 20 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Passer appId au service
   const result = await dashboardService.getReferrals(
+    appId,
     req.affiliate._id,
     offset,
     limit
@@ -48,6 +59,9 @@ exports.getMyCommissions = catchAsync(async (req, res, next) => {
     endDate 
   } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   const filters = {};
   if (status) filters.status = status;
   if (month && year) {
@@ -59,7 +73,9 @@ exports.getMyCommissions = catchAsync(async (req, res, next) => {
     filters.endDate = endDate;
   }
 
+  // ⭐ Passer appId au service
   const result = await dashboardService.getCommissions(
+    appId,
     req.affiliate._id,
     offset,
     limit,
@@ -78,7 +94,12 @@ exports.getMyCommissions = catchAsync(async (req, res, next) => {
 exports.getEarningsEvolution = catchAsync(async (req, res, next) => {
   const { months = 6 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Passer appId au service
   const evolution = await dashboardService.getEarningsEvolution(
+    appId,
     req.affiliate._id,
     parseInt(months)
   );
@@ -98,7 +119,12 @@ exports.getEarningsEvolution = catchAsync(async (req, res, next) => {
 exports.getTopPackages = catchAsync(async (req, res, next) => {
   const { limit = 5 } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Passer appId au service
   const topPackages = await dashboardService.getTopPackages(
+    appId,
     req.affiliate._id,
     parseInt(limit)
   );
@@ -115,7 +141,11 @@ exports.getTopPackages = catchAsync(async (req, res, next) => {
  * Obtenir le résumé du mois en cours
  */
 exports.getCurrentMonthSummary = catchAsync(async (req, res, next) => {
-  const summary = await dashboardService.getCurrentMonthSummary(req.affiliate._id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Passer appId au service
+  const summary = await dashboardService.getCurrentMonthSummary(appId, req.affiliate._id);
 
   res.status(200).json({
     success: true,
@@ -160,6 +190,9 @@ exports.getAffiliateInfo = catchAsync(async (req, res, next) => {
 exports.getPeriodStats = catchAsync(async (req, res, next) => {
   const { startDate, endDate } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   if (!startDate || !endDate) {
     return next(new AppError('Dates de début et fin requises', 400, ErrorCodes.VALIDATION_ERROR));
   }
@@ -176,8 +209,11 @@ exports.getPeriodStats = catchAsync(async (req, res, next) => {
     return next(new AppError('La date de début doit être antérieure à la date de fin', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  const affiliateManagementService = require('../../services/admin/affiliateManagementService');
+  const affiliateManagementService = require('../../services/affiliate/affiliateManagementService');
+  
+  // ⭐ Passer appId au service
   const stats = await affiliateManagementService.calculateAffiliateMetrics(
+    appId,
     req.affiliate._id,
     startDate,
     endDate
@@ -202,15 +238,19 @@ exports.searchReferrals = catchAsync(async (req, res, next) => {
     hasActiveSubscription 
   } = req.query;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   if (!search || search.trim().length < 2) {
     return next(new AppError('Terme de recherche requis (minimum 2 caractères)', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   const User = require('../../models/user/User');
-  const Subscription = require('../../models/user/Subscription');
+  const Subscription = require('../../models/common/Subscription');
 
-  // Construire le filtre de recherche
+  // ⭐ Construire le filtre de recherche POUR CETTE APP
   const searchFilter = {
+    appId, // ⭐ AJOUT
     referredBy: req.affiliate._id,
     $or: [
       { firstName: { $regex: search, $options: 'i' } },
@@ -225,10 +265,11 @@ exports.searchReferrals = catchAsync(async (req, res, next) => {
     .skip(parseInt(offset))
     .limit(parseInt(limit));
 
-  // Filtrer par abonnement actif si demandé
+  // ⭐ Filtrer par abonnement actif si demandé POUR CETTE APP
   if (hasActiveSubscription === 'true') {
     const userIds = users.map(u => u._id);
     const usersWithActiveSubscriptions = await Subscription.distinct('user', {
+      appId, // ⭐ AJOUT
       user: { $in: userIds },
       status: 'active',
       endDate: { $gt: new Date() }

@@ -1,6 +1,16 @@
+// src/api/models/common/Prediction.js
+
 const mongoose = require("mongoose");
 
 const PredictionSchema = new mongoose.Schema({
+  appId: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+    ref: 'App'
+  },
+  
   ticket: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Ticket",
@@ -12,10 +22,8 @@ const PredictionSchema = new mongoose.Schema({
     default: 0 
   },
   
-  // pour gérer la flexibilité des différents sports
   matchData: mongoose.Schema.Types.Mixed,
   
-  // pour gérer les événements hippiques et autres
   event: mongoose.Schema.Types.Mixed,
   
   odds: {
@@ -38,9 +46,15 @@ const PredictionSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes
 PredictionSchema.index(
-  { ticket: 1, 'matchData.id': 1, 'event.id': 1 },
+  { appId: 1, ticket: 1, 'matchData.id': 1, 'event.id': 1 },
   { unique: true }
 );
+PredictionSchema.index({ appId: 1, ticket: 1 });
+PredictionSchema.index({ appId: 1, status: 1 });
+PredictionSchema.index({ appId: 1, 'sport.id': 1 });
+PredictionSchema.index({ ticket: 1 });
+PredictionSchema.index({ status: 1 });
 
 module.exports = mongoose.model("Prediction", PredictionSchema);

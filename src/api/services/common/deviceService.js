@@ -1,12 +1,19 @@
+// services/common/deviceService.js
+
 const Device = require('../../models/common/Device');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 class DeviceService {
   
-  async registerDevice(deviceData) {
+  /**
+   * Enregistrer un device
+   * @param {String} appId - ID de l'application
+   */
+  async registerDevice(appId, deviceData) {
     const { deviceId, playerId, platform, deviceInfo, user = null } = deviceData;
     
-    let device = await Device.findOne({ deviceId });
+    // ⭐ Chercher device POUR CETTE APP
+    let device = await Device.findOne({ deviceId, appId });
     
     if (device) {
       device.playerId = playerId;
@@ -23,7 +30,9 @@ class DeviceService {
       return await device.save();
     }
     
+    // ⭐ Créer nouveau device AVEC APPID
     device = new Device({
+      appId, // ⭐ AJOUT
       deviceId,
       playerId,
       platform,
@@ -35,8 +44,13 @@ class DeviceService {
     return await device.save();
   }
   
-  async linkDeviceToUser(deviceId, userId) {
-    const device = await Device.findOne({ deviceId, isActive: true });
+  /**
+   * Lier un device à un utilisateur
+   * @param {String} appId - ID de l'application
+   */
+  async linkDeviceToUser(appId, deviceId, userId) {
+    // ⭐ Filtrer par appId
+    const device = await Device.findOne({ deviceId, appId, isActive: true });
     
     if (!device) {
       throw new AppError('Device non trouvé', 404, ErrorCodes.NOT_FOUND);
@@ -45,8 +59,13 @@ class DeviceService {
     return await device.linkToUser(userId);
   }
   
-  async unlinkDeviceFromUser(deviceId) {
-    const device = await Device.findOne({ deviceId, isActive: true });
+  /**
+   * Délier un device d'un utilisateur
+   * @param {String} appId - ID de l'application
+   */
+  async unlinkDeviceFromUser(appId, deviceId) {
+    // ⭐ Filtrer par appId
+    const device = await Device.findOne({ deviceId, appId, isActive: true });
     
     if (device) {
       return await device.unlinkFromUser();
@@ -55,21 +74,36 @@ class DeviceService {
     return null;
   }
   
-  async getDevicesByUserType(userType) {
-    return await Device.getByUserType(userType);
+  /**
+   * Récupérer les devices par type d'utilisateur
+   * @param {String} appId - ID de l'application
+   */
+  async getDevicesByUserType(appId, userType) {
+    // ⭐ Filtrer par appId
+    return await Device.find({ appId, userType, isActive: true });
   }
   
-  async deactivateDevice(deviceId) {
+  /**
+   * Désactiver un device
+   * @param {String} appId - ID de l'application
+   */
+  async deactivateDevice(appId, deviceId) {
+    // ⭐ Filtrer par appId
     return await Device.findOneAndUpdate(
-      { deviceId },
+      { deviceId, appId }, // ⭐ AJOUT
       { isActive: false, lastActiveAt: new Date() },
       { new: true }
     );
   }
   
-  async updateDevice(deviceId, updateData) {
+  /**
+   * Mettre à jour un device
+   * @param {String} appId - ID de l'application
+   */
+  async updateDevice(appId, deviceId, updateData) {
+    // ⭐ Filtrer par appId
     return await Device.findOneAndUpdate(
-      { deviceId, isActive: true },
+      { deviceId, appId, isActive: true }, // ⭐ AJOUT
       { ...updateData, lastActiveAt: new Date() },
       { new: true }
     );

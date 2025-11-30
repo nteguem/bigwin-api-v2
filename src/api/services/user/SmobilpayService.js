@@ -302,7 +302,7 @@ async function verifyTransaction(identifier, isPaymentId = false) {
 /**
  * Initier un paiement complet (VERSION CORRIGÉE POUR MAP)
  */
-async function initiatePayment(userId, packageId, serviceId, customerData) {
+async function initiatePayment(appId,userId, packageId, serviceId, customerData) {
   try {
     // 1. Récupérer le service
     const services = await getServices();
@@ -313,7 +313,7 @@ async function initiatePayment(userId, packageId, serviceId, customerData) {
     }
     
     // 2. Récupérer le package
-    const packageDoc = await Package.findById(packageId);
+    const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
@@ -337,6 +337,7 @@ async function initiatePayment(userId, packageId, serviceId, customerData) {
     const paymentId = uuidv4();
     
     const transaction = new SmobilpayTransaction({
+      appId,
       paymentId,
       user: userId,
       package: packageId,
@@ -379,11 +380,12 @@ async function initiatePayment(userId, packageId, serviceId, customerData) {
 /**
  * Vérifier le statut d'une transaction
  */
-async function checkTransactionStatus(paymentId) {
+async function checkTransactionStatus(appId,paymentId) {
   try {
     // Trouver la transaction
-    const transaction = await SmobilpayTransaction.findOne({ paymentId })
-      .populate(['package', 'user']);
+  
+      const transaction = await SmobilpayTransaction.findOne({ appId, paymentId })
+  .populate(['package', 'user']);
     
     if (!transaction) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);

@@ -1,3 +1,5 @@
+// controllers/admin/adminAuthController.js
+
 const Admin = require('../../models/admin/Admin');
 const authService = require('../../services/common/authService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');

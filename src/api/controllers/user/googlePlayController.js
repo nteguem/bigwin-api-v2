@@ -1,3 +1,5 @@
+// controllers/user/googlePlayController.js
+
 const catchAsync = require('../../../utils/catchAsync');
 const AppError = require('../../../utils/AppError');
 const googlePlayService = require('../../services/user/GooglePlayService');
@@ -8,13 +10,16 @@ exports.validatePurchase = catchAsync(async (req, res, next) => {
   const { purchaseToken, productId, packageId } = req.body;
   const userId = req.user._id;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   // Validation des données
   if (!purchaseToken || !productId || !packageId) {
     return next(new AppError('Données de validation manquantes', 400));
   }
 
-  // Vérifier que le package existe
-  const packageItem = await Package.findById(packageId);
+  // ⭐ Vérifier que le package existe POUR CETTE APP
+  const packageItem = await Package.findOne({ _id: packageId, appId });
   if (!packageItem) {
     return next(new AppError('Package introuvable', 404));
   }
@@ -24,8 +29,9 @@ exports.validatePurchase = catchAsync(async (req, res, next) => {
     return next(new AppError('Ce package n\'est pas disponible sur Google Play', 400));
   }
 
-  // Valider l'achat
+  // ⭐ Valider l'achat avec appId
   const result = await googlePlayService.validatePurchase(
+    appId,
     purchaseToken,
     productId,
     userId,
@@ -50,13 +56,16 @@ exports.validateOneTimePurchase = catchAsync(async (req, res, next) => {
   const { purchaseToken, productId, packageId } = req.body;
   const userId = req.user._id;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   // Validation des données
   if (!purchaseToken || !productId || !packageId) {
     return next(new AppError('Données de validation manquantes', 400));
   }
 
-  // Vérifier que le package existe
-  const packageItem = await Package.findById(packageId);
+  // ⭐ Vérifier que le package existe POUR CETTE APP
+  const packageItem = await Package.findOne({ _id: packageId, appId });
   if (!packageItem) {
     return next(new AppError('Package introuvable', 404));
   }
@@ -66,8 +75,9 @@ exports.validateOneTimePurchase = catchAsync(async (req, res, next) => {
     return next(new AppError('Ce package n\'est pas un produit ponctuel Google Play', 400));
   }
 
-  // Valider l'achat
+  // ⭐ Valider l'achat avec appId
   const result = await googlePlayService.validateOneTimePurchase(
+    appId,
     purchaseToken,
     productId,
     userId,
@@ -91,7 +101,10 @@ exports.validateOneTimePurchase = catchAsync(async (req, res, next) => {
 exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
   const userId = req.user._id;
 
-  const status = await googlePlayService.checkSubscriptionStatus(userId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  const status = await googlePlayService.checkSubscriptionStatus(appId, userId);
 
   res.status(200).json({
     status: 'success',
@@ -104,6 +117,9 @@ exports.handleRTDN = catchAsync(async (req, res, next) => {
   console.log('=== WEBHOOK REÇU ===');
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Body complet:', JSON.stringify(req.body, null, 2));
+  
+  // ⭐ Récupérer appId
+  const appId = req.appId;
   
   // Vérifier si c'est un test manuel ou Google
   if (!req.body || !req.body.message) {
@@ -149,13 +165,15 @@ exports.handleRTDN = catchAsync(async (req, res, next) => {
     // ===== EXISTANT : Traiter la notification d'abonnement =====
     if (notification.subscriptionNotification) {
       console.log('📱 Notification d\'abonnement reçue');
-      await googlePlayService.processNotification(notification);
+      // ⭐ Passer appId au service
+      await googlePlayService.processNotification(appId, notification);
     }
 
     // ===== NOUVEAU : Traiter la notification de produit ponctuel =====
     if (notification.oneTimeProductNotification) {
       console.log('🛒 Notification de produit ponctuel reçue');
-      await googlePlayService.processNotification(notification);
+      // ⭐ Passer appId au service
+      await googlePlayService.processNotification(appId, notification);
     }
 
     console.log('===================');
@@ -175,9 +193,13 @@ exports.acknowledgePurchase = catchAsync(async (req, res, next) => {
   const { purchaseToken } = req.params;
   const userId = req.user._id;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   // Vérifier que l'achat appartient à l'utilisateur
   const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
   const transaction = await GooglePlayTransaction.findOne({
+    appId, // ⭐ Filtrer par appId
     purchaseToken,
     user: userId
   });
@@ -209,7 +231,11 @@ exports.acknowledgePurchase = catchAsync(async (req, res, next) => {
 exports.getGoogleProductInfo = catchAsync(async (req, res, next) => {
   const { packageId } = req.params;
 
-  const packageItem = await Package.findById(packageId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Rechercher package pour cette app
+  const packageItem = await Package.findOne({ _id: packageId, appId });
   
   if (!packageItem) {
     return next(new AppError('Package introuvable', 404));
@@ -235,9 +261,13 @@ exports.getGoogleProductInfo = catchAsync(async (req, res, next) => {
 exports.syncSubscription = catchAsync(async (req, res, next) => {
   const userId = req.user._id;
 
-  // Récupérer la transaction active de l'utilisateur
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  // ⭐ Récupérer la transaction active de l'utilisateur POUR CETTE APP
   const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
   const transaction = await GooglePlayTransaction.findOne({
+    appId, // ⭐ Filtrer par appId
     user: userId,
     status: { $ne: 'EXPIRED' }
   }).sort({ createdAt: -1 });

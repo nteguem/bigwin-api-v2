@@ -1,3 +1,5 @@
+// controllers/affiliate/affiliateAuthController.js
+
 const Affiliate = require('../../models/affiliate/Affiliate');
 const authService = require('../../services/common/authService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -9,13 +11,16 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.login = catchAsync(async (req, res, next) => {
   const { phone, password } = req.body;
   
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   // Validation des champs
   if (!phone || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
-  // Trouver l'affilié avec le mot de passe
-  const affiliate = await Affiliate.findOne({ phone }).select('+password +refreshTokens');
+  // ⭐ Trouver l'affilié avec le mot de passe POUR CETTE APP
+  const affiliate = await Affiliate.findOne({ phone, appId }).select('+password +refreshTokens');
   
   if (!affiliate || !(await affiliate.comparePassword(password))) {
     return next(new AppError('Téléphone ou mot de passe incorrect', 401, ErrorCodes.AUTH_INVALID_CREDENTIALS));
@@ -111,9 +116,12 @@ exports.getMe = catchAsync(async (req, res, next) => {
 exports.updateMe = catchAsync(async (req, res, next) => {
   const { firstName, lastName, email, paymentInfo } = req.body;
   
-  // Mettre à jour uniquement les champs autorisés
-  const updatedAffiliate = await Affiliate.findByIdAndUpdate(
-    req.affiliate._id,
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Mettre à jour uniquement les champs autorisés POUR CETTE APP
+  const updatedAffiliate = await Affiliate.findOneAndUpdate(
+    { _id: req.affiliate._id, appId }, // ⭐ AJOUT
     { firstName, lastName, email, paymentInfo },
     { new: true, runValidators: true }
   );
@@ -133,12 +141,15 @@ exports.updateMe = catchAsync(async (req, res, next) => {
 exports.changePassword = catchAsync(async (req, res, next) => {
   const { currentPassword, newPassword } = req.body;
   
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   if (!currentPassword || !newPassword) {
     return next(new AppError('Mot de passe actuel et nouveau mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
-  // Récupérer l'affilié avec le mot de passe
-  const affiliate = await Affiliate.findById(req.affiliate._id).select('+password');
+  // ⭐ Récupérer l'affilié avec le mot de passe POUR CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: req.affiliate._id, appId }).select('+password');
   
   // Vérifier le mot de passe actuel
   if (!(await affiliate.comparePassword(currentPassword))) {

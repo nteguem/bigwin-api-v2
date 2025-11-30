@@ -1,3 +1,5 @@
+// src/api/middlewares/admin/adminAuth.js
+
 const Admin = require('../../models/admin/Admin');
 const authService = require('../../services/common/authService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -5,6 +7,7 @@ const catchAsync = require('../../../utils/catchAsync');
 
 /**
  * Middleware de protection des routes admin
+ * Note: Admin N'A PAS d'appId car un admin gère toutes les apps
  */
 exports.protect = catchAsync(async (req, res, next) => {
   // 1. Extraire le token
@@ -23,7 +26,9 @@ exports.protect = catchAsync(async (req, res, next) => {
   const decoded = authService.verifyToken(token, 'admin');
   
   // 3. Vérifier si l'admin existe encore
+  // ⚠️ PAS DE FILTRE PAR appId - Admin est global
   const admin = await Admin.findById(decoded.id);
+  
   if (!admin) {
     return next(new AppError('L\'administrateur n\'existe plus', 401, ErrorCodes.AUTH_USER_NOT_FOUND));
   }
@@ -35,6 +40,10 @@ exports.protect = catchAsync(async (req, res, next) => {
   
   // 5. Attacher l'admin à la requête
   req.admin = admin;
+  
+  // ⭐ NOTE: req.appId existe déjà (défini par identifyApp middleware)
+  // L'admin peut travailler sur n'importe quelle app en changeant X-App-Id
+  
   next();
 });
 
@@ -56,6 +65,7 @@ exports.verifyRefreshToken = catchAsync(async (req, res, next) => {
   }
   
   // Vérifier si l'admin existe et possède ce refresh token
+  // ⚠️ PAS DE FILTRE PAR appId - Admin est global
   const admin = await Admin.findById(decoded.id).select('+refreshTokens');
   
   if (!admin || !admin.refreshTokens.includes(refreshToken)) {

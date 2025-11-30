@@ -1,4 +1,5 @@
-// controllers/predictionController.js
+// controllers/admin/predictionController.js
+
 const predictionService = require('../../services/common/predictionService');
 const ticketService = require('../../services/common/ticketService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
@@ -6,12 +7,15 @@ const { formatSuccess, formatError } = require('../../../utils/responseFormatter
 class PredictionController {
 
   // GET /predictions - Récupérer toutes les prédictions
-  // Query params: ?offset=0&limit=10&ticket=ticketId&sport=football&status=pending
   async getPredictions(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { offset = 0, limit = 10, ticket, sport, status } = req.query;
       
-      const result = await predictionService.getPredictions({
+      // ⭐ Passer appId au service
+      const result = await predictionService.getPredictions(appId, {
         offset: parseInt(offset),
         limit: parseInt(limit),
         ticket,
@@ -32,8 +36,13 @@ class PredictionController {
   // GET /predictions/:id - Récupérer une prédiction par ID
   async getPredictionById(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
-      const prediction = await predictionService.getPredictionById(id);
+      
+      // ⭐ Passer appId au service
+      const prediction = await predictionService.getPredictionById(appId, id);
 
       if (!prediction) {
         return formatError(res, 'Prediction not found', 404);
@@ -49,67 +58,68 @@ class PredictionController {
   }
 
   // POST /predictions - Créer une nouvelle prédiction
-  // Payload: { ticket: "ticketId", matchData: {...}, event: {...}, odds: 2.50, sport: "football" }
+  async createPrediction(req, res) {
+    try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
+      const { ticket, matchData, event, odds, sport } = req.body;
 
-async createPrediction(req, res) {
-  try {
-    const { ticket, matchData, event, odds, sport } = req.body;
+      if (!ticket || !matchData || !event || !odds || !sport) {
+        return formatError(res, {
+          message: 'Ticket, matchData, event, odds and sport are required',
+          statusCode: 400,
+          errors: {
+            ticket: !!ticket,
+            matchData: !!matchData,
+            event: !!event,
+            odds: !!odds,
+            sport: !!sport
+          }
+        });
+      }
 
-    if (!ticket || !matchData || !event || !odds || !sport) {
+      // ⭐ Passer appId au service
+      const ticketExists = await ticketService.ticketExists(appId, ticket);
+      if (!ticketExists) {
+        return formatError(res, {
+          message: 'Ticket not found',
+          statusCode: 404
+        });
+      }
+
+      const predictionData = {
+        ticket,
+        matchData,
+        event,
+        odds: parseFloat(odds),
+        sport
+      };
+
+      // ⭐ Passer appId au service
+      const prediction = await predictionService.createPrediction(appId, predictionData);
+
+      return formatSuccess(res, {
+        data: prediction,
+        message: 'Prediction created successfully',
+        statusCode: 201
+      });
+
+    } catch (error) {
       return formatError(res, {
-        message: 'Ticket, matchData, event, odds and sport are required',
-        statusCode: 400,
-        errors: {
-          ticket: !!ticket,
-          matchData: !!matchData,
-          event: !!event,
-          odds: !!odds,
-          sport: !!sport
-        }
+        message: error.message,
+        statusCode: 500,
+        stack: error.stack
       });
     }
-
-    const ticketExists = await ticketService.ticketExists(ticket);
-    if (!ticketExists) {
-      return formatError(res, {
-        message: 'Ticket not found',
-        statusCode: 404
-      });
-    }
-
-    const predictionData = {
-      ticket,
-      matchData,
-      event,
-      odds: parseFloat(odds),
-      sport
-    };
-
-    const prediction = await predictionService.createPrediction(predictionData);
-
-    return formatSuccess(res, {
-      data: prediction,
-      message: 'Prediction created successfully',
-      statusCode: 201
-    });
-
-  } catch (error) {
-    return formatError(res, {
-      message: error.message,
-      statusCode: 500,
-      stack: error.stack
-    });
   }
-}
+
   // PUT /predictions/:id - Mettre à jour une prédiction
-  // Payloads possibles:
-  // { odds: 3.50 } - Modifier la cote
-  // { status: "won" } - Marquer comme gagnée
-  // { status: "lost" } - Marquer comme perdue
-  // { status: "void" } - Annuler la prédiction
-  // { matchData: {...} } - Mettre à jour les données du match
   async updatePrediction(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
       const updates = req.body;
 
@@ -118,7 +128,8 @@ async createPrediction(req, res) {
         updates.odds = parseFloat(updates.odds);
       }
 
-      const prediction = await predictionService.updatePrediction(id, updates);
+      // ⭐ Passer appId au service
+      const prediction = await predictionService.updatePrediction(appId, id, updates);
 
       if (!prediction) {
         return formatError(res, 'Prediction not found', 404);
@@ -136,8 +147,13 @@ async createPrediction(req, res) {
   // DELETE /predictions/:id - Supprimer une prédiction
   async deletePrediction(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
-      const result = await predictionService.deletePrediction(id);
+      
+      // ⭐ Passer appId au service
+      const result = await predictionService.deletePrediction(appId, id);
 
       if (!result) {
         return formatError(res, 'Prediction not found', 404);
@@ -153,22 +169,25 @@ async createPrediction(req, res) {
   }
 
   // POST /predictions/bulk - Ajouter plusieurs prédictions à un ticket
-  // Payload: { ticketId: "ticketId", predictions: [{ matchData: {...}, event: {...}, odds: 2.50, sport: "football" }] }
   async addPredictionsToTicket(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { ticketId, predictions } = req.body;
 
       if (!ticketId || !predictions || !Array.isArray(predictions)) {
         return formatError(res, 'TicketId and predictions array are required', 400);
       }
 
-      // Vérifier que le ticket existe
-      const ticketExists = await ticketService.ticketExists(ticketId);
+      // ⭐ Vérifier que le ticket existe POUR CETTE APP
+      const ticketExists = await ticketService.ticketExists(appId, ticketId);
       if (!ticketExists) {
         return formatError(res, 'Ticket not found', 404);
       }
 
-      const createdPredictions = await predictionService.addPredictionsToTicket(ticketId, predictions);
+      // ⭐ Passer appId au service
+      const createdPredictions = await predictionService.addPredictionsToTicket(appId, ticketId, predictions);
       
       res.status(201);
       formatSuccess(res, {

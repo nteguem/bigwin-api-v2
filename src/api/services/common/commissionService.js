@@ -1,3 +1,5 @@
+// services/common/commissionService.js
+
 const Subscription = require('../../models/common/Subscription');
 const Commission = require('../../models/common/Commission');
 const Affiliate = require('../../models/affiliate/Affiliate');
@@ -6,32 +8,39 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 class CommissionService {
   /**
    * Créer une commission pour un abonnement
+   * @param {String} appId - ID de l'application
    */
-  async createCommission(subscriptionId) {
-    const subscription = await Subscription.findById(subscriptionId)
+  async createCommission(appId, subscriptionId) {
+    // ⭐ Filtrer par appId
+    const subscription = await Subscription.findOne({ _id: subscriptionId, appId })
       .populate('user')
       .populate('package');
 
     // Vérifier si l'user a un parrain
     if (!subscription.user.referredBy) return null;
 
-    const affiliate = await Affiliate.findById(subscription.user.referredBy)
-      .populate('affiliateType');
+    // ⭐ Filtrer par appId
+    const affiliate = await Affiliate.findOne({ 
+      _id: subscription.user.referredBy, 
+      appId 
+    }).populate('affiliateType');
+    
     if (!affiliate || !affiliate.isActive) return null;
 
     // Vérifier que l'affilié a un type avec un taux de commission
     if (!affiliate.affiliateType) return null;
 
-    // Vérifier si commission existe déjà
-    const existingCommission = await Commission.findOne({ subscription: subscriptionId });
+    // ⭐ Vérifier si commission existe déjà POUR CETTE APP
+    const existingCommission = await Commission.findOne({ appId, subscription: subscriptionId });
     if (existingCommission) return existingCommission;
 
     // Calculer la commission avec le taux du type
     const commissionRate = affiliate.affiliateType.commissionRate;
     const commissionAmount = (subscription.pricing.amount * commissionRate) / 100;
 
-    // Créer l'enregistrement
+    // ⭐ Créer l'enregistrement AVEC APPID
     const commission = await Commission.create({
+      appId, // ⭐ AJOUT
       affiliate: affiliate._id,
       user: subscription.user._id,
       subscription: subscription._id,
@@ -51,75 +60,81 @@ class CommissionService {
     return commission;
   }
 
-/**
- * Calculer (compter) les commissions pending d'un affilié pour un mois donné - groupées par devise
- */
-async calculateAffiliateCommissions(affiliateId, month, year) {
-  const pendingCommissions = await Commission.find({
-    affiliate: affiliateId,
-    month,
-    year,
-    status: 'pending'
-  }).sort({ createdAt: -1 });
+  /**
+   * Calculer les commissions pending d'un affilié pour un mois donné
+   * @param {String} appId - ID de l'application
+   */
+  async calculateAffiliateCommissions(appId, affiliateId, month, year) {
+    // ⭐ Filtrer par appId
+    const pendingCommissions = await Commission.find({
+      appId, // ⭐ AJOUT
+      affiliate: affiliateId,
+      month,
+      year,
+      status: 'pending'
+    }).sort({ createdAt: -1 });
 
-  // Grouper par devise directement
-  const commissionsByCurrency = {};
-  let totalCommissions = 0;
+    // Grouper par devise directement
+    const commissionsByCurrency = {};
+    let totalCommissions = 0;
 
-  pendingCommissions.forEach(commission => {
-    const currency = commission.currency;
-    
-    if (!commissionsByCurrency[currency]) {
-      commissionsByCurrency[currency] = {
-        currency,
-        totalAmount: 0,
-        count: 0,
-        commissions: []
-      };
-    }
+    pendingCommissions.forEach(commission => {
+      const currency = commission.currency;
+      
+      if (!commissionsByCurrency[currency]) {
+        commissionsByCurrency[currency] = {
+          currency,
+          totalAmount: 0,
+          count: 0,
+          commissions: []
+        };
+      }
 
-    commissionsByCurrency[currency].totalAmount += commission.commissionAmount;
-    commissionsByCurrency[currency].count += 1;
-    commissionsByCurrency[currency].commissions.push({
-      id: commission._id,
-      subscriptionId: commission.subscription, // ID brut, sans populate
-      userId: commission.user, // ID brut, sans populate
-      amount: commission.amount,
-      currency: commission.currency,
-      commissionRate: commission.commissionRate,
-      commissionAmount: commission.commissionAmount,
-      createdAt: commission.createdAt
+      commissionsByCurrency[currency].totalAmount += commission.commissionAmount;
+      commissionsByCurrency[currency].count += 1;
+      commissionsByCurrency[currency].commissions.push({
+        id: commission._id,
+        subscriptionId: commission.subscription,
+        userId: commission.user,
+        amount: commission.amount,
+        currency: commission.currency,
+        commissionRate: commission.commissionRate,
+        commissionAmount: commission.commissionAmount,
+        createdAt: commission.createdAt
+      });
+
+      totalCommissions++;
     });
 
-    totalCommissions++;
-  });
+    const report = {
+      period: { month, year },
+      affiliateId,
+      totalPending: totalCommissions,
+      currencyBreakdown: Object.values(commissionsByCurrency),
+      allCommissions: pendingCommissions.map(commission => ({
+        id: commission._id,
+        subscriptionId: commission.subscription,
+        userId: commission.user,
+        amount: commission.amount,
+        currency: commission.currency,
+        commissionRate: commission.commissionRate,
+        commissionAmount: commission.commissionAmount,
+        createdAt: commission.createdAt
+      }))
+    };
 
-  const report = {
-    period: { month, year },
-    affiliateId,
-    totalPending: totalCommissions,
-    currencyBreakdown: Object.values(commissionsByCurrency),
-    allCommissions: pendingCommissions.map(commission => ({
-      id: commission._id,
-      subscriptionId: commission.subscription, // ID brut
-      userId: commission.user, // ID brut
-      amount: commission.amount,
-      currency: commission.currency,
-      commissionRate: commission.commissionRate,
-      commissionAmount: commission.commissionAmount,
-      createdAt: commission.createdAt
-    }))
-  };
-
-  console.log(`✅ Traitement réussi: ${totalCommissions} commissions pending`);
-  return report;
-}
+    console.log(`✅ Traitement réussi: ${totalCommissions} commissions pending`);
+    return report;
+  }
 
   /**
-   * Obtenir les commissions en attente pour un affilié et un mois - groupées par devise
+   * Obtenir les commissions en attente pour un affilié et un mois
+   * @param {String} appId - ID de l'application
    */
-  async getPendingAffiliateCommissions(affiliateId, month, year) {
+  async getPendingAffiliateCommissions(appId, affiliateId, month, year) {
+    // ⭐ Filtrer par appId
     const commissions = await Commission.find({
+      appId, // ⭐ AJOUT
       affiliate: affiliateId,
       month,
       year,
@@ -155,9 +170,12 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
   /**
    * Valider le paiement des commissions pending d'un affilié
+   * @param {String} appId - ID de l'application
    */
-  async validateAffiliatePayment(affiliateId, month, year, paymentReference) {
+  async validateAffiliatePayment(appId, affiliateId, month, year, paymentReference) {
+    // ⭐ Filtrer par appId
     const pendingCommissions = await Commission.find({
+      appId, // ⭐ AJOUT
       affiliate: affiliateId,
       month,
       year,
@@ -193,8 +211,8 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
       totalPaid += commission.commissionAmount;
     }
 
-    // Mettre à jour les balances de l'affilié
-    const affiliate = await Affiliate.findById(affiliateId);
+    // ⭐ Mettre à jour les balances de l'affilié (filtré par appId)
+    const affiliate = await Affiliate.findOne({ _id: affiliateId, appId });
     if (affiliate) {
       affiliate.pendingBalance -= totalPaid;
       affiliate.paidBalance += totalPaid;
@@ -215,9 +233,12 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
   /**
    * Annuler des commissions
+   * @param {String} appId - ID de l'application
    */
-  async cancelCommissions(commissionIds, reason = '') {
+  async cancelCommissions(appId, commissionIds, reason = '') {
+    // ⭐ Filtrer par appId
     const commissions = await Commission.find({
+      appId, // ⭐ AJOUT
       _id: { $in: commissionIds },
       status: 'pending'
     });
@@ -238,8 +259,8 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
       report.totalAmount += commission.commissionAmount;
 
-      // Mettre à jour les balances de l'affilié
-      const affiliate = await Affiliate.findById(commission.affiliate);
+      // ⭐ Mettre à jour les balances de l'affilié (filtré par appId)
+      const affiliate = await Affiliate.findOne({ _id: commission.affiliate, appId });
       if (affiliate) {
         affiliate.pendingBalance -= commission.commissionAmount;
         affiliate.totalEarnings -= commission.commissionAmount;
@@ -252,9 +273,12 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
   /**
    * Obtenir les statistiques globales des commissions
+   * @param {String} appId - ID de l'application
    */
-  async getCommissionStats() {
+  async getCommissionStats(appId) {
+    // ⭐ Filtrer par appId
     const stats = await Commission.aggregate([
+      { $match: { appId } }, // ⭐ AJOUT
       {
         $group: {
           _id: '$status',
@@ -264,8 +288,9 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
       }
     ]);
 
-    // Stats par devise
+    // ⭐ Stats par devise POUR CETTE APP
     const currencyStats = await Commission.aggregate([
+      { $match: { appId } }, // ⭐ AJOUT
       {
         $group: {
           _id: {
@@ -281,7 +306,9 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
       }
     ]);
 
+    // ⭐ Stats mensuelles POUR CETTE APP
     const monthlyStats = await Commission.aggregate([
+      { $match: { appId } }, // ⭐ AJOUT
       {
         $group: {
           _id: {
@@ -307,9 +334,11 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
   /**
    * Obtenir le rapport détaillé d'une période
+   * @param {String} appId - ID de l'application
    */
-  async getDetailedReport(month, year) {
-    const commissions = await Commission.find({ month, year })
+  async getDetailedReport(appId, month, year) {
+    // ⭐ Filtrer par appId
+    const commissions = await Commission.find({ appId, month, year })
       .populate({
         path: 'affiliate',
         select: 'affiliateCode firstName lastName',
@@ -328,8 +357,9 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
       })
       .sort({ createdAt: -1 });
 
+    // ⭐ Summary POUR CETTE APP
     const summary = await Commission.aggregate([
-      { $match: { month, year } },
+      { $match: { appId, month, year } }, // ⭐ AJOUT
       {
         $group: {
           _id: '$status',
@@ -339,9 +369,9 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
       }
     ]);
 
-    // Summary par devise
+    // ⭐ Summary par devise POUR CETTE APP
     const currencySummary = await Commission.aggregate([
-      { $match: { month, year } },
+      { $match: { appId, month, year } }, // ⭐ AJOUT
       {
         $group: {
           _id: {
@@ -368,14 +398,17 @@ async calculateAffiliateCommissions(affiliateId, month, year) {
 
   /**
    * Recalculer les balances des affiliés
+   * @param {String} appId - ID de l'application
    */
-  async recalculateAffiliateBalances() {
-    const affiliates = await Affiliate.find({ isActive: true });
+  async recalculateAffiliateBalances(appId) {
+    // ⭐ Filtrer par appId
+    const affiliates = await Affiliate.find({ appId, isActive: true });
     const report = [];
 
     for (const affiliate of affiliates) {
+      // ⭐ Filtrer par appId
       const commissionStats = await Commission.aggregate([
-        { $match: { affiliate: affiliate._id } },
+        { $match: { appId, affiliate: affiliate._id } }, // ⭐ AJOUT
         {
           $group: {
             _id: '$status',

@@ -1,3 +1,5 @@
+// controllers/admin/affiliateTypeController.js
+
 const AffiliateType = require('../../models/affiliate/AffiliateType');
 const Affiliate = require('../../models/affiliate/Affiliate');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -7,10 +9,14 @@ const catchAsync = require('../../../utils/catchAsync');
  * Obtenir tous les types d'affiliés
  */
 exports.getAllAffiliateTypes = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { offset = 0, limit = 20, search } = req.query;
 
-  // Construire les filtres
-  const filters = {};
+  // ⭐ Construire les filtres AVEC APPID
+  const filters = { appId };
+  
   if (search) {
     filters.$or = [
       { name: { $regex: search, $options: 'i' } },
@@ -19,7 +25,7 @@ exports.getAllAffiliateTypes = catchAsync(async (req, res, next) => {
   }
 
   const affiliateTypes = await AffiliateType.find(filters)
-    .sort({ minAccounts: 1 }) // Trier par nombre minimum de comptes croissant
+    .sort({ minAccounts: 1 })
     .skip(parseInt(offset))
     .limit(parseInt(limit));
 
@@ -42,15 +48,20 @@ exports.getAllAffiliateTypes = catchAsync(async (req, res, next) => {
  * Obtenir un type d'affilié par ID
  */
 exports.getAffiliateType = catchAsync(async (req, res, next) => {
-  const affiliateType = await AffiliateType.findById(req.params.id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const affiliateType = await AffiliateType.findOne({ _id: req.params.id, appId });
 
   if (!affiliateType) {
     return next(new AppError('Type d\'affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Compter le nombre d'affiliés de ce type
+  // ⭐ Compter le nombre d'affiliés de ce type POUR CETTE APP
   const affiliatesCount = await Affiliate.countDocuments({ 
-    affiliateType: affiliateType._id 
+    affiliateType: affiliateType._id,
+    appId // ⭐ AJOUT
   });
 
   res.status(200).json({
@@ -68,6 +79,9 @@ exports.getAffiliateType = catchAsync(async (req, res, next) => {
  * Créer un nouveau type d'affilié
  */
 exports.createAffiliateType = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { name, description, minAccounts, commissionRate } = req.body;
 
   // Validation des champs obligatoires
@@ -75,14 +89,15 @@ exports.createAffiliateType = catchAsync(async (req, res, next) => {
     return next(new AppError('Nom, description, nombre minimum de comptes et taux de commission sont requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier si le nom existe déjà
-  const existingType = await AffiliateType.findOne({ name: name.toUpperCase() });
+  // ⭐ Vérifier si le nom existe déjà DANS CETTE APP
+  const existingType = await AffiliateType.findOne({ name: name.toUpperCase(), appId });
   if (existingType) {
     return next(new AppError('Ce nom de type d\'affilié existe déjà', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Créer le type d'affilié
+  // ⭐ Créer le type d'affilié AVEC APPID
   const affiliateType = await AffiliateType.create({
+    appId, // ⭐ AJOUT
     name: name.toUpperCase(),
     description,
     minAccounts,
@@ -102,17 +117,22 @@ exports.createAffiliateType = catchAsync(async (req, res, next) => {
  * Modifier un type d'affilié
  */
 exports.updateAffiliateType = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { name, description, minAccounts, commissionRate } = req.body;
 
-  const affiliateType = await AffiliateType.findById(req.params.id);
+  // ⭐ Filtrer par appId
+  const affiliateType = await AffiliateType.findOne({ _id: req.params.id, appId });
   if (!affiliateType) {
     return next(new AppError('Type d\'affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Vérifier si le nouveau nom existe déjà (si changé)
+  // ⭐ Vérifier si le nouveau nom existe déjà DANS CETTE APP (si changé)
   if (name && name.toUpperCase() !== affiliateType.name) {
     const existingType = await AffiliateType.findOne({ 
       name: name.toUpperCase(),
+      appId, // ⭐ AJOUT
       _id: { $ne: req.params.id }
     });
     if (existingType) {
@@ -127,8 +147,9 @@ exports.updateAffiliateType = catchAsync(async (req, res, next) => {
   if (minAccounts !== undefined) updateData.minAccounts = minAccounts;
   if (commissionRate !== undefined) updateData.commissionRate = commissionRate;
 
-  const updatedAffiliateType = await AffiliateType.findByIdAndUpdate(
-    req.params.id,
+  // ⭐ Filtrer par appId
+  const updatedAffiliateType = await AffiliateType.findOneAndUpdate(
+    { _id: req.params.id, appId }, // ⭐ AJOUT
     updateData,
     { new: true, runValidators: true }
   );
@@ -146,21 +167,27 @@ exports.updateAffiliateType = catchAsync(async (req, res, next) => {
  * Supprimer un type d'affilié
  */
 exports.deleteAffiliateType = catchAsync(async (req, res, next) => {
-  const affiliateType = await AffiliateType.findById(req.params.id);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
+  // ⭐ Filtrer par appId
+  const affiliateType = await AffiliateType.findOne({ _id: req.params.id, appId });
   if (!affiliateType) {
     return next(new AppError('Type d\'affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 
-  // Vérifier s'il y a des affiliés utilisant ce type
+  // ⭐ Vérifier s'il y a des affiliés utilisant ce type DANS CETTE APP
   const affiliatesCount = await Affiliate.countDocuments({
-    affiliateType: req.params.id
+    affiliateType: req.params.id,
+    appId // ⭐ AJOUT
   });
 
   if (affiliatesCount > 0) {
     return next(new AppError(`Impossible de supprimer ce type. ${affiliatesCount} affilié(s) l'utilisent encore`, 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  await AffiliateType.findByIdAndDelete(req.params.id);
+  // ⭐ Filtrer par appId
+  await AffiliateType.findOneAndDelete({ _id: req.params.id, appId });
 
   res.status(200).json({
     success: true,
@@ -172,10 +199,15 @@ exports.deleteAffiliateType = catchAsync(async (req, res, next) => {
  * Obtenir les statistiques des types d'affiliés
  */
 exports.getAffiliateTypeStats = catchAsync(async (req, res, next) => {
-  const totalTypes = await AffiliateType.countDocuments();
+  // ⭐ Récupérer appId
+  const appId = req.appId;
   
-  // Statistiques par type
+  // ⭐ Stats POUR CETTE APP
+  const totalTypes = await AffiliateType.countDocuments({ appId });
+  
+  // ⭐ Statistiques par type POUR CETTE APP
   const typeStats = await AffiliateType.aggregate([
+    { $match: { appId } }, // ⭐ AJOUT
     {
       $lookup: {
         from: 'affiliates',
@@ -219,13 +251,20 @@ exports.getAffiliateTypeStats = catchAsync(async (req, res, next) => {
  * Obtenir le type approprié pour un nombre de comptes donné
  */
 exports.getTypeByAccountCount = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { accountCount } = req.params;
 
   if (!accountCount || accountCount < 0) {
     return next(new AppError('Nombre de comptes invalide', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  const appropriateType = await AffiliateType.getTypeByAccountCount(parseInt(accountCount));
+  // ⭐ Chercher le type approprié DANS CETTE APP
+  const appropriateType = await AffiliateType.findOne({
+    appId, // ⭐ AJOUT
+    minAccounts: { $lte: parseInt(accountCount) }
+  }).sort({ minAccounts: -1 });
 
   if (!appropriateType) {
     return next(new AppError('Aucun type d\'affilié approprié trouvé pour ce nombre de comptes', 404, ErrorCodes.NOT_FOUND));
@@ -244,6 +283,9 @@ exports.getTypeByAccountCount = catchAsync(async (req, res, next) => {
  * Calculer la commission pour un montant donné et un type
  */
 exports.calculateCommission = catchAsync(async (req, res, next) => {
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   const { amount } = req.body;
   const typeId = req.params.id;
 
@@ -251,7 +293,8 @@ exports.calculateCommission = catchAsync(async (req, res, next) => {
     return next(new AppError('Montant invalide', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  const affiliateType = await AffiliateType.findById(typeId);
+  // ⭐ Filtrer par appId
+  const affiliateType = await AffiliateType.findOne({ _id: typeId, appId });
   if (!affiliateType) {
     return next(new AppError('Type d\'affilié non trouvé', 404, ErrorCodes.NOT_FOUND));
   }

@@ -10,6 +10,9 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, phoneNumber } = req.body;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   // Validation
   if (!packageId || !phoneNumber) {
     return next(new AppError(
@@ -19,9 +22,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     ));
   }
 
-  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package
+  // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
     sub.package._id.toString() === packageId
   );
@@ -38,7 +41,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
   const email = req.user.email || '';
 
+  // ⭐ Passer appId au service
   const result = await cinetpayService.initiatePayment(
+    appId,
     req.user._id,
     packageId,
     phoneNumber,
@@ -70,7 +75,10 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { transactionId } = req.params;
 
-  const transaction = await cinetpayService.checkTransactionStatus(transactionId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  const transaction = await cinetpayService.checkTransactionStatus(appId, transactionId);
 
   // Vérifier que la transaction appartient à l'utilisateur
   if (transaction.user._id.toString() !== req.user._id.toString()) {
@@ -80,7 +88,8 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   // Traiter la transaction si le statut a changé
   let subscription = null;
   try {
-    subscription = await paymentMiddleware.processTransactionUpdate(transaction);
+    // ⭐ Passer appId au middleware
+    subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
   }
@@ -115,6 +124,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
   const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   console.log('CinetPay webhook received:', req.body);
 
   if (!transactionId) {
@@ -124,7 +136,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
   try {
     // Chercher la transaction
     const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
-    const transaction = await CinetpayTransaction.findOne({ transactionId })
+    
+    // ⭐ Filtrer par appId
+    const transaction = await CinetpayTransaction.findOne({ appId, transactionId })
       .populate(['package', 'user']);
 
     if (!transaction) {
@@ -158,8 +172,8 @@ exports.webhook = catchAsync(async (req, res, next) => {
     await transaction.save();
     console.log(`Transaction ${transactionId} updated to status: ${transaction.status}`);
 
-    // Traiter la transaction mise à jour (la transaction est déjà populée)
-    await paymentMiddleware.processTransactionUpdate(transaction);
+    // ⭐ Traiter la transaction mise à jour avec appId
+    await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
       success: true,
@@ -180,10 +194,13 @@ exports.webhook = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Page de retour après paiement (return_url) - Version complète comme l'ancien
+ * Page de retour après paiement (return_url)
  */
 exports.paymentSuccess = catchAsync(async (req, res, next) => {
   const { token, transaction_id } = req.method === 'GET' ? req.query : req.body;
+
+  // ⭐ Récupérer appId
+  const appId = req.appId;
 
   if (!transaction_id) {
     const errorContent = `
@@ -199,10 +216,11 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
   let errorOccurred = false;
 
   try {
-    transactionStatus = await cinetpayService.checkTransactionStatus(transaction_id);
+    // ⭐ Passer appId au service
+    transactionStatus = await cinetpayService.checkTransactionStatus(appId, transaction_id);
     
-    // Traiter la transaction
-    await paymentMiddleware.processTransactionUpdate(transactionStatus);
+    // ⭐ Traiter la transaction avec appId
+    await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
   } catch (error) {
     console.error('CinetPay - Erreur lors de la vérification:', error.message);
     errorOccurred = true;
@@ -281,7 +299,7 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
   return res.send(getHtmlTemplate(`CinetPay - ${transactionStatus?.status || 'Statut'}`, content));
 });
 
-// CSS et HTML template helpers (même que votre ancien)
+// CSS et HTML template helpers (inchangés)
 const getMobileOptimizedCSS = () => `
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }

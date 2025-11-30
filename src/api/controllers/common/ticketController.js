@@ -1,4 +1,5 @@
-// controllers/ticketController.js
+// controllers/admin/ticketController.js
+
 const ticketService = require('../../services/common/ticketService');
 const categoryService = require('../../services/common/categoryService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
@@ -8,14 +9,18 @@ class TicketController {
   // GET /tickets - Récupérer tous les tickets
   async getTickets(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { offset = 0, limit = 10, category, date, isVisible } = req.query;
       
-      const result = await ticketService.getTickets({
+      // ⭐ Passer appId au service
+      const result = await ticketService.getTickets(appId, {
         offset: parseInt(offset),
         limit: parseInt(limit),
         category,
         date: date ? new Date(date) : null,
-        isVisible: isVisible !== undefined ? isVisible === 'true' : null // null = pas de filtre
+        isVisible: isVisible !== undefined ? isVisible === 'true' : null
       });
 
       formatSuccess(res, {
@@ -31,8 +36,13 @@ class TicketController {
   // GET /tickets/:id - Récupérer un ticket par ID
   async getTicketById(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
-      const ticket = await ticketService.getTicketById(id);
+      
+      // ⭐ Passer appId au service
+      const ticket = await ticketService.getTicketById(appId, id);
 
       if (!ticket) {
         return formatError(res, 'Ticket not found', 404);
@@ -50,14 +60,17 @@ class TicketController {
   // POST /tickets - Créer un nouveau ticket
   async createTicket(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { title, date, category, closingAt } = req.body;
 
       if (!title || !date || !category) {
         return formatError(res, 'Title, date and category are required', 400);
       }
 
-      // Vérifier que la catégorie existe
-      const categoryExists = await categoryService.categoryExists(category);
+      // ⭐ Vérifier que la catégorie existe POUR CETTE APP
+      const categoryExists = await categoryService.categoryExists(appId, category);
       if (!categoryExists) {
         return formatError(res, 'Category not found', 404);
       }
@@ -69,7 +82,8 @@ class TicketController {
         closingAt: closingAt ? new Date(closingAt) : new Date(date)
       };
 
-      const ticket = await ticketService.createTicket(ticketData);
+      // ⭐ Passer appId au service
+      const ticket = await ticketService.createTicket(appId, ticketData);
       
       res.status(201);
       formatSuccess(res, {
@@ -82,20 +96,17 @@ class TicketController {
   }
 
   // PUT /tickets/:id - Mettre à jour un ticket
-  // Payloads possibles:
-  // { title: "string", date: "2025-07-15", category: "categoryId" } - Modification basique
-  // { isVisible: true } - Publier le ticket
-  // { isVisible: false } - Cacher le ticket  
-  // { status: "closed" } - Fermer le ticket
-  // { closingAt: "2025-07-15T16:00:00Z" } - Modifier heure de fermeture
   async updateTicket(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
       const updates = req.body;
 
-      // Si on change la catégorie, vérifier qu'elle existe
+      // ⭐ Si on change la catégorie, vérifier qu'elle existe POUR CETTE APP
       if (updates.category) {
-        const categoryExists = await categoryService.categoryExists(updates.category);
+        const categoryExists = await categoryService.categoryExists(appId, updates.category);
         if (!categoryExists) {
           return formatError(res, 'Category not found', 404);
         }
@@ -109,7 +120,8 @@ class TicketController {
         updates.closingAt = new Date(updates.closingAt);
       }
 
-      const ticket = await ticketService.updateTicket(id, updates);
+      // ⭐ Passer appId au service
+      const ticket = await ticketService.updateTicket(appId, id, updates);
 
       if (!ticket) {
         return formatError(res, 'Ticket not found', 404);
@@ -127,9 +139,13 @@ class TicketController {
   // DELETE /tickets/:id - Supprimer un ticket et ses prédictions
   async deleteTicket(req, res) {
     try {
+      // ⭐ Récupérer appId
+      const appId = req.appId;
+      
       const { id } = req.params;
       
-      const result = await ticketService.deleteTicket(id);
+      // ⭐ Passer appId au service
+      const result = await ticketService.deleteTicket(appId, id);
 
       if (!result) {
         return formatError(res, 'Ticket not found', 404);

@@ -57,6 +57,9 @@ exports.checkOtpRequirement = catchAsync(async (req, res, next) => {
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, phoneNumber, operator, country, currency, otpCode } = req.body;
 
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
   // Validation de base
   if (!packageId || !phoneNumber || !operator || !country || !currency) {
     return next(new AppError(
@@ -66,9 +69,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     ));
   }
 
-  // Vérifier abonnement actif
+  // ⭐ Vérifier abonnement actif POUR CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(req.user._id);
+  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
     sub.package._id.toString() === packageId
   );
@@ -82,7 +85,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   }
 
   try {
+    // ⭐ Passer appId au service
     const result = await afribaPayService.initiatePayment(
+      appId,
       req.user._id,
       packageId,
       phoneNumber,
@@ -152,7 +157,10 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { orderId } = req.params;
 
-  const transaction = await afribaPayService.checkTransactionStatus(orderId);
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+
+  const transaction = await afribaPayService.checkTransactionStatus(appId, orderId);
 
   if (transaction.user._id.toString() !== req.user._id.toString()) {
     return next(new AppError('Transaction non autorisée', 403, ErrorCodes.UNAUTHORIZED));
@@ -160,7 +168,8 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 
   let subscription = null;
   try {
-    subscription = await paymentMiddleware.processTransactionUpdate(transaction);
+    // ⭐ Passer appId au middleware
+    subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
   }
@@ -198,13 +207,19 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedSignature = req.headers['x-signature'];
   const { order_id: orderId, status } = req.body;
   const rawPayload = JSON.stringify(req.body);
+  
+  // ⭐ Récupérer appId
+  const appId = req.appId;
+  
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   try {
     const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
-    const transaction = await AfribaPayTransaction.findOne({ orderId })
+    
+    // ⭐ Filtrer par appId
+    const transaction = await AfribaPayTransaction.findOne({ appId, orderId })
       .populate(['package', 'user']);
 
     if (!transaction) {
@@ -230,7 +245,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
     if (req.body.amount_total) transaction.amountTotal = req.body.amount_total;
 
     await transaction.save();
-    await paymentMiddleware.processTransactionUpdate(transaction);
+    
+    // ⭐ Passer appId au middleware
+    await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
       success: true,

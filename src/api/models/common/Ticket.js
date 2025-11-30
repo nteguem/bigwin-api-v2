@@ -1,27 +1,42 @@
+// src/api/models/common/Ticket.js
+
 const mongoose = require("mongoose");
 
 const TicketSchema = new mongoose.Schema({
+  appId: {
+    type: String,
+    required: true,
+    lowercase: true,
+    trim: true,
+    ref: 'App'
+  },
+  
   title: {
     type: String,
     required: true
   },
+  
   date: {
     type: Date,
     required: true
   },
+  
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Category",
     required: true
   },
+  
   isVisible: {
     type: Boolean,
     default: false
   },
+  
   closingAt: {
     type: Date,
     required: true
   },
+  
   status: {
     type: String,
     enum: ['active', 'closed', 'draft'],
@@ -31,35 +46,18 @@ const TicketSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index composé pour les requêtes principales
-TicketSchema.index({
-  date: -1,
-  category: 1,
-  isVisible: 1
-});
+// Indexes
+TicketSchema.index({ appId: 1, date: -1, category: 1, isVisible: 1 });
+TicketSchema.index({ appId: 1, date: -1 });
+TicketSchema.index({ appId: 1, category: 1 });
+TicketSchema.index({ appId: 1, status: 1 });
+TicketSchema.index({ appId: 1, isVisible: 1, date: -1 });
+TicketSchema.index({ date: -1 });
+TicketSchema.index({ category: 1 });
+TicketSchema.index({ status: 1 });
+TicketSchema.index({ isVisible: 1, date: -1 });
 
-// Index simple sur la date pour les requêtes par plage de dates
-TicketSchema.index({
-  date: -1
-});
-
-// Index sur la catégorie pour les filtres par catégorie
-TicketSchema.index({
-  category: 1
-});
-
-// Index sur le status pour les requêtes filtrées par status
-TicketSchema.index({
-  status: 1
-});
-
-// Index composé pour les requêtes fréquentes de tickets visibles par date
-TicketSchema.index({
-  isVisible: 1,
-  date: -1
-});
-
-// Hook pour findByIdAndUpdate / findOneAndUpdate
+// Hooks
 TicketSchema.post('findOneAndUpdate', async function (doc) {
   if (doc) {
     const update = this.getUpdate();
@@ -67,27 +65,23 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
     
     if (wasVisibilityChanged && doc.isVisible) {
       try {
-        // Récupérer le nom de la catégorie
         const Category = mongoose.model('Category');
         const category = await Category.findById(doc.category);
         const categoryName = category ? category.description : 'Catégorie inconnue';
         
-        // Vérifier le type de catégorie
         const isLive = categoryName.toUpperCase().includes('LIVE');
         const isDailyCoupon = categoryName.toUpperCase().includes('COUPON DU JOUR') || 
                              category?.name === 'CDJ';
                 
-        // Import du service de notification
         const notificationService = require("../../services/common/notificationService");
         
         let notification;
         
         if (isDailyCoupon) {
-          // Notification pour Coupon du Jour (CDJ)
           notification = {
             headings: {
-              en: "💎 Daily Sure Bet - BigWin!",
-              fr: "💎 Coup Sûr du Jour - BigWin!"
+              en: "💎 Daily Sure Bet!",
+              fr: "💎 Coup Sûr du Jour!"
             },
             contents: {
               en: `🎯 Today's guaranteed @2.00 odds is here! Grab it now!`,
@@ -102,18 +96,17 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
               success_rate: "99%"
             },
             options: {
-              android_accent_color: "FFD700", // Or/Gold pour le coup sûr
+              android_accent_color: "FFD700",
               small_icon: "ic_notification",
               large_icon: "ic_launcher",
-              priority: 10 // Haute priorité
+              priority: 10
             }
           };
         } else if (isLive) {
-          // Notification pour les LIVE - Messages optimisés
           notification = {
             headings: {
-              en: "🔴 LIVE NOW - BigWin!",
-              fr: "🔴 EN DIRECT - BigWin!"
+              en: "🔴 LIVE NOW!",
+              fr: "🔴 EN DIRECT!"
             },
             contents: {
               en: `⚡ Live coupon available! Don't miss out - ${categoryName}`,
@@ -126,17 +119,16 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
               action: "view_live"
             },
             options: {
-              android_accent_color: "FF0000", // Rouge pour LIVE
+              android_accent_color: "FF0000",
               small_icon: "ic_notification",
               large_icon: "ic_launcher"
             }
           };
         } else {
-          // Notification normale - Messages optimisés
           notification = {
             headings: {
-              en: "💰 New BigWin Coupon!",
-              fr: "💰 Nouveau Coupon BigWin!"
+              en: "💰 New Coupon!",
+              fr: "💰 Nouveau Coupon!"
             },
             contents: {
               en: `🎯 Fresh coupon just dropped in ${categoryName} - Check it now!`,
@@ -156,11 +148,11 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
           };
         }
 
-        // Envoyer la notification à tous les utilisateurs
-        const result = await notificationService.sendToAll(notification);
+        const result = await notificationService.sendToAll(doc.appId, notification);
         
-        console.log("✅ Notification envoyée avec succès");
+        console.log(`✅ [${doc.appId}] Notification envoyée avec succès`);
         console.log("📊 Statistiques:", {
+          appId: doc.appId,
           notificationId: result.id,
           recipients: result.recipients,
           type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
@@ -168,11 +160,10 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         });
         
       } catch (error) {
-        console.error('❌ Erreur envoi notification:', error.message);
-        
-        // Log détaillé pour le debug en cas d'erreur
+        console.error(`❌ [${doc.appId}] Erreur envoi notification:`, error.message);
         console.error('Détails erreur:', {
           ticketId: doc._id,
+          appId: doc.appId,
           categoryId: doc.category,
           error: error.stack
         });

@@ -1,3 +1,5 @@
+// services/affiliate/affiliateManagementService.js
+
 const Affiliate = require('../../models/affiliate/Affiliate');
 const User = require('../../models/user/User');
 const Commission = require('../../models/common/Commission');
@@ -7,22 +9,24 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 class AffiliateManagementService {
   /**
    * Obtenir les détails complets d'un affilié avec ses statistiques
+   * @param {String} appId - ID de l'application
    */
-  async getAffiliateDetails(affiliateId) {
-    const affiliate = await Affiliate.findById(affiliateId)
+  async getAffiliateDetails(appId, affiliateId) {
+    // ⭐ Filtrer par appId
+    const affiliate = await Affiliate.findOne({ _id: affiliateId, appId })
       .select('-password -refreshTokens');
 
     if (!affiliate) {
       throw new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // Statistiques de base
-    const referredUsers = await User.find({ referredBy: affiliateId });
+    // ⭐ Statistiques de base POUR CETTE APP
+    const referredUsers = await User.find({ referredBy: affiliateId, appId });
     const totalReferrals = referredUsers.length;
 
-    // Commissions
+    // ⭐ Commissions POUR CETTE APP
     const commissionStats = await Commission.aggregate([
-      { $match: { affiliate: affiliateId } },
+      { $match: { appId, affiliate: affiliateId } }, // ⭐ AJOUT
       {
         $group: {
           _id: '$status',
@@ -32,10 +36,11 @@ class AffiliateManagementService {
       }
     ]);
 
-    // Abonnements des filleuls
+    // ⭐ Abonnements des filleuls POUR CETTE APP
     const referralSubscriptions = await Subscription.aggregate([
       { 
         $match: { 
+          appId, // ⭐ AJOUT
           user: { $in: referredUsers.map(u => u._id) },
           status: 'active'
         }
@@ -69,8 +74,9 @@ class AffiliateManagementService {
 
   /**
    * Générer un code affilié unique
+   * @param {String} appId - ID de l'application
    */
-  async generateUniqueAffiliateCode(baseName = '') {
+  async generateUniqueAffiliateCode(appId, baseName = '') {
     let code;
     let isUnique = false;
     let attempts = 0;
@@ -86,8 +92,8 @@ class AffiliateManagementService {
         code = Math.random().toString(36).substring(2, 8).toUpperCase();
       }
 
-      // Vérifier unicité
-      const existing = await Affiliate.findOne({ affiliateCode: code });
+      // ⭐ Vérifier unicité DANS CETTE APP
+      const existing = await Affiliate.findOne({ affiliateCode: code, appId });
       if (!existing) {
         isUnique = true;
       }
@@ -103,8 +109,9 @@ class AffiliateManagementService {
 
   /**
    * Valider les données d'un affilié
+   * @param {String} appId - ID de l'application
    */
-  async validateAffiliateData(data, isUpdate = false, currentAffiliateId = null) {
+  async validateAffiliateData(appId, data, isUpdate = false, currentAffiliateId = null) {
     const errors = [];
 
     // Validation téléphone
@@ -114,8 +121,8 @@ class AffiliateManagementService {
         errors.push('Format de téléphone invalide');
       }
 
-      // Vérifier unicité du téléphone
-      const phoneQuery = { phone: data.phone };
+      // ⭐ Vérifier unicité du téléphone DANS CETTE APP
+      const phoneQuery = { phone: data.phone, appId }; // ⭐ AJOUT
       if (isUpdate && currentAffiliateId) {
         phoneQuery._id = { $ne: currentAffiliateId };
       }
@@ -132,8 +139,8 @@ class AffiliateManagementService {
         errors.push('Le code affilié doit contenir entre 3 et 10 caractères');
       }
 
-      // Vérifier unicité du code
-      const codeQuery = { affiliateCode: data.affiliateCode.toUpperCase() };
+      // ⭐ Vérifier unicité du code DANS CETTE APP
+      const codeQuery = { affiliateCode: data.affiliateCode.toUpperCase(), appId }; // ⭐ AJOUT
       if (isUpdate && currentAffiliateId) {
         codeQuery._id = { $ne: currentAffiliateId };
       }
@@ -168,8 +175,9 @@ class AffiliateManagementService {
 
   /**
    * Obtenir le classement des affiliés par performance
+   * @param {String} appId - ID de l'application
    */
-  async getAffiliateRanking(period = 'month') {
+  async getAffiliateRanking(appId, period = 'month') {
     let dateFilter = {};
     
     if (period === 'month') {
@@ -179,8 +187,9 @@ class AffiliateManagementService {
       dateFilter = { createdAt: { $gte: startOfMonth } };
     }
 
+    // ⭐ Filtrer par appId
     const ranking = await Commission.aggregate([
-      { $match: { status: { $in: ['pending', 'paid'] }, ...dateFilter } },
+      { $match: { appId, status: { $in: ['pending', 'paid'] }, ...dateFilter } }, // ⭐ AJOUT
       {
         $group: {
           _id: '$affiliate',
@@ -217,8 +226,9 @@ class AffiliateManagementService {
 
   /**
    * Calculer les métriques d'un affilié pour une période
+   * @param {String} appId - ID de l'application
    */
-  async calculateAffiliateMetrics(affiliateId, startDate, endDate) {
+  async calculateAffiliateMetrics(appId, affiliateId, startDate, endDate) {
     const dateFilter = {
       createdAt: {
         $gte: new Date(startDate),
@@ -226,16 +236,18 @@ class AffiliateManagementService {
       }
     };
 
-    // Nouvelles inscriptions dans la période
+    // ⭐ Nouvelles inscriptions dans la période POUR CETTE APP
     const newReferrals = await User.countDocuments({
+      appId, // ⭐ AJOUT
       referredBy: affiliateId,
       ...dateFilter
     });
 
-    // Commissions dans la période
+    // ⭐ Commissions dans la période POUR CETTE APP
     const commissions = await Commission.aggregate([
       {
         $match: {
+          appId, // ⭐ AJOUT
           affiliate: affiliateId,
           ...dateFilter
         }
@@ -249,11 +261,11 @@ class AffiliateManagementService {
       }
     ]);
 
-    // Abonnements actifs des filleuls
+    // ⭐ Abonnements actifs des filleuls POUR CETTE APP
+    const userIds = await User.find({ referredBy: affiliateId, appId }).distinct('_id');
     const activeSubscriptions = await Subscription.countDocuments({
-      user: { 
-        $in: await User.find({ referredBy: affiliateId }).distinct('_id')
-      },
+      appId, // ⭐ AJOUT
+      user: { $in: userIds },
       status: 'active',
       endDate: { $gt: new Date() }
     });

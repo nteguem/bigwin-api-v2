@@ -1,3 +1,5 @@
+// services/user/GooglePlayService.js
+
 const { google } = require('googleapis');
 const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
 const Subscription = require('../../models/common/Subscription');
@@ -22,208 +24,209 @@ class GooglePlayService {
     });
   }
 
-// ===== NOUVEAU : Valider un PRODUIT PONCTUEL depuis Flutter =====
-async validateOneTimePurchase(purchaseToken, productId, userId, packageId) {
-  try {
-    console.log('[GooglePlay ONE-TIME] Début validation:', { purchaseToken, productId, packageId });
-    
-   // 1. Vérifier avec l'API Google (API products v1, pas v2)
-const { data } = await this.androidPublisher.purchases.products.get({
-  packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
-  productId: productId,
-  token: purchaseToken
-});
-
-if (!data) {
-  throw new Error('Réponse invalide de Google Play');
-}
-
-// 2. Vérifier si déjà traité
-const existingTx = await GooglePlayTransaction.findOne({ purchaseToken });
-if (existingTx) {
-  console.log('[GooglePlay ONE-TIME] Transaction déjà traitée:', existingTx._id);
-  const subscription = await Subscription.findById(existingTx.subscription)
-    .populate('package');
-  
-  return { 
-    success: true, 
-    message: 'Achat déjà traité',
-    data: {
-      subscription,
-      message: 'Produit déjà actif'
-    }
-  };
-}
-
-// 3. Vérifier l'état de l'achat
-const purchaseState = data.purchaseState;
-
-console.log('[GooglePlay ONE-TIME] Purchase state AVANT vérification:', purchaseState, typeof purchaseState);
-
-// ===== TEMPORAIRE : Accepter si purchaseState est undefined =====
-// On va d'abord voir ce que Google renvoie vraiment
-if (purchaseState === undefined) {
-  console.log('[GooglePlay ONE-TIME] ⚠️ purchaseState undefined, on continue quand même pour debug');
-  // On ne throw pas, on continue
-} else {
-  // Vérifications normales
-  if (purchaseState === 2) {
-    throw new Error('Paiement en attente. Veuillez patienter.');
-  }
-  
-  if (purchaseState === 1) {
-    throw new Error('Achat annulé.');
-  }
-  
-  if (purchaseState !== 0) {
-    throw new Error(`État d'achat invalide: ${purchaseState}`);
-  }
-}
-    // 4. Récupérer le package
-    const packageItem = await Package.findById(packageId);
-    if (!packageItem) {
-      throw new Error('Package non trouvé: ' + packageId);
-    }
-
-    // 5. Parser les dates
-    let startDate = new Date();
-    let purchaseTime = data.purchaseTimeMillis 
-      ? new Date(parseInt(data.purchaseTimeMillis)) 
-      : startDate;
-    
-    // Date d'expiration = startDate + durée du package
-    let endDate = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
-
-    console.log('[GooglePlay ONE-TIME] Dates calculées:', { 
-      startDate: startDate.toISOString(), 
-      endDate: endDate.toISOString(),
-      purchaseTime: purchaseTime.toISOString()
-    });
-
-    // 6. Extraire quantité et état de consommation
-    let quantity = 1;
-    let consumptionState = 'YET_TO_BE_CONSUMED';
-    
-    // consumptionState from API v1:
-    // 0 = Yet to be consumed
-    // 1 = Consumed
-    if (data.consumptionState === 1) {
-      consumptionState = 'CONSUMED';
-    }
-
-    console.log('[GooglePlay ONE-TIME] Quantity:', quantity, 'Consumption:', consumptionState);
-
-    // 7. Prix depuis le package (Google API v1 products ne renvoie pas toujours le prix)
-    let packagePrice = null;
-    let currency = null;
-    
-    const currencyPreference = ['EUR', 'USD', 'XAF', 'XOF', 'GMD', 'CDF', 'GNF'];
-    
-    for (const curr of currencyPreference) {
-      if (packageItem.pricing.has(curr)) {
-        packagePrice = packageItem.pricing.get(curr);
-        currency = curr;
-        break;
-      }
-    }
-    
-    if (!packagePrice && packageItem.pricing.size > 0) {
-      const firstCurrency = Array.from(packageItem.pricing.keys())[0];
-      packagePrice = packageItem.pricing.get(firstCurrency);
-      currency = firstCurrency;
-    }
-    
-    if (!packagePrice) {
-      packagePrice = 10;
-      currency = 'EUR';
-    }
-
-    console.log('[GooglePlay ONE-TIME] Prix final:', { 
-      priceAmountMicros: packagePrice, 
-      priceCurrencyCode: currency,
-      quantity
-    });
-
-    // 8. Créer la transaction Google Play
-    const googleTx = await GooglePlayTransaction.create({
-      purchaseToken,
-      orderId: data.orderId || `GP_OT_${Date.now()}`,
-      productId,
-      user: userId,
-      package: packageId,
-      status: 'ACTIVE',
-      startTime: startDate,
-      expiryTime: endDate,
-      purchaseTime: purchaseTime,
-      priceAmountMicros: packagePrice,
-      priceCurrencyCode: currency,
-      autoRenewing: false,
-      acknowledged: data.acknowledgementState === 1, // 0 = pending, 1 = acknowledged
-      purchaseType: 'ONE_TIME_PRODUCT',
-      consumptionState,
-      quantity,
-      refundableQuantity: quantity
-    });
-
-    console.log('[GooglePlay ONE-TIME] Transaction créée:', googleTx._id);
-
-    // 9. Créer la subscription
-    const subscription = await Subscription.create({
-      user: userId,
-      package: packageId,
-      startDate,
-      endDate,
-      pricing: {
-        amount: packagePrice,
-        currency: currency
-      },
-      status: 'active',
-      paymentProvider: 'GOOGLE_PLAY',
-      paymentReference: googleTx.orderId,
-      googlePlayTransaction: googleTx._id,
-      autoRenewing: false
-    });
-
-    console.log('[GooglePlay ONE-TIME] Subscription créée:', subscription._id);
-
-    // 10. Mettre à jour la transaction avec l'ID de subscription
-    googleTx.subscription = subscription._id;
-    await googleTx.save();
-
-    // 11. Acknowledge l'achat si pas déjà fait
-    if (data.acknowledgementState !== 1) {
-      this.acknowledgeOneTimePurchase(purchaseToken, productId).catch(error => {
-        console.error('[GooglePlay ONE-TIME] Erreur acknowledge (non bloquant):', error.message);
+  // ===== NOUVEAU : Valider un PRODUIT PONCTUEL depuis Flutter =====
+  async validateOneTimePurchase(appId, purchaseToken, productId, userId, packageId) {
+    try {
+      console.log('[GooglePlay ONE-TIME] Début validation:', { purchaseToken, productId, packageId });
+      
+      // 1. Vérifier avec l'API Google (API products v1, pas v2)
+      const { data } = await this.androidPublisher.purchases.products.get({
+        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+        productId: productId,
+        token: purchaseToken
       });
-    }
 
-    // 12. Retourner le résultat avec populate
-    const populatedSubscription = await Subscription.findById(subscription._id)
-      .populate('package');
-
-    return {
-      success: true,
-      data: {
-        subscription: populatedSubscription,
-        message: 'Produit activé avec succès'
+      if (!data) {
+        throw new Error('Réponse invalide de Google Play');
       }
-    };
 
-  } catch (error) {
-    console.error('[GooglePlay ONE-TIME] Erreur validation complète:', error);
-    
-    let errorMessage = 'Erreur de validation du produit: ';
-    if (error.response && error.response.data) {
-      errorMessage += JSON.stringify(error.response.data);
-    } else if (error.message) {
-      errorMessage += error.message;
-    } else {
-      errorMessage += 'Erreur inconnue';
+      // ⭐ 2. Vérifier si déjà traité POUR CETTE APP
+      const existingTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
+      if (existingTx) {
+        console.log('[GooglePlay ONE-TIME] Transaction déjà traitée:', existingTx._id);
+        const subscription = await Subscription.findById(existingTx.subscription)
+          .populate('package');
+        
+        return { 
+          success: true, 
+          message: 'Achat déjà traité',
+          data: {
+            subscription,
+            message: 'Produit déjà actif'
+          }
+        };
+      }
+
+      // 3. Vérifier l'état de l'achat
+      const purchaseState = data.purchaseState;
+
+      console.log('[GooglePlay ONE-TIME] Purchase state AVANT vérification:', purchaseState, typeof purchaseState);
+
+      // ===== TEMPORAIRE : Accepter si purchaseState est undefined =====
+      if (purchaseState === undefined) {
+        console.log('[GooglePlay ONE-TIME] ⚠️ purchaseState undefined, on continue quand même pour debug');
+      } else {
+        // Vérifications normales
+        if (purchaseState === 2) {
+          throw new Error('Paiement en attente. Veuillez patienter.');
+        }
+        
+        if (purchaseState === 1) {
+          throw new Error('Achat annulé.');
+        }
+        
+        if (purchaseState !== 0) {
+          throw new Error(`État d'achat invalide: ${purchaseState}`);
+        }
+      }
+
+      // ⭐ 4. Récupérer le package POUR CETTE APP
+      const packageItem = await Package.findOne({ _id: packageId, appId });
+      if (!packageItem) {
+        throw new Error('Package non trouvé: ' + packageId);
+      }
+
+      // 5. Parser les dates
+      let startDate = new Date();
+      let purchaseTime = data.purchaseTimeMillis 
+        ? new Date(parseInt(data.purchaseTimeMillis)) 
+        : startDate;
+      
+      // Date d'expiration = startDate + durée du package
+      let endDate = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
+
+      console.log('[GooglePlay ONE-TIME] Dates calculées:', { 
+        startDate: startDate.toISOString(), 
+        endDate: endDate.toISOString(),
+        purchaseTime: purchaseTime.toISOString()
+      });
+
+      // 6. Extraire quantité et état de consommation
+      let quantity = 1;
+      let consumptionState = 'YET_TO_BE_CONSUMED';
+      
+      // consumptionState from API v1:
+      // 0 = Yet to be consumed
+      // 1 = Consumed
+      if (data.consumptionState === 1) {
+        consumptionState = 'CONSUMED';
+      }
+
+      console.log('[GooglePlay ONE-TIME] Quantity:', quantity, 'Consumption:', consumptionState);
+
+      // 7. Prix depuis le package
+      let packagePrice = null;
+      let currency = null;
+      
+      const currencyPreference = ['EUR', 'USD', 'XAF', 'XOF', 'GMD', 'CDF', 'GNF'];
+      
+      for (const curr of currencyPreference) {
+        if (packageItem.pricing.has(curr)) {
+          packagePrice = packageItem.pricing.get(curr);
+          currency = curr;
+          break;
+        }
+      }
+      
+      if (!packagePrice && packageItem.pricing.size > 0) {
+        const firstCurrency = Array.from(packageItem.pricing.keys())[0];
+        packagePrice = packageItem.pricing.get(firstCurrency);
+        currency = firstCurrency;
+      }
+      
+      if (!packagePrice) {
+        packagePrice = 10;
+        currency = 'EUR';
+      }
+
+      console.log('[GooglePlay ONE-TIME] Prix final:', { 
+        priceAmountMicros: packagePrice, 
+        priceCurrencyCode: currency,
+        quantity
+      });
+
+      // ⭐ 8. Créer la transaction Google Play AVEC APPID
+      const googleTx = await GooglePlayTransaction.create({
+        appId, // ⭐ AJOUT
+        purchaseToken,
+        orderId: data.orderId || `GP_OT_${Date.now()}`,
+        productId,
+        user: userId,
+        package: packageId,
+        status: 'ACTIVE',
+        startTime: startDate,
+        expiryTime: endDate,
+        purchaseTime: purchaseTime,
+        priceAmountMicros: packagePrice,
+        priceCurrencyCode: currency,
+        autoRenewing: false,
+        acknowledged: data.acknowledgementState === 1,
+        purchaseType: 'ONE_TIME_PRODUCT',
+        consumptionState,
+        quantity,
+        refundableQuantity: quantity
+      });
+
+      console.log('[GooglePlay ONE-TIME] Transaction créée:', googleTx._id);
+
+      // ⭐ 9. Créer la subscription AVEC APPID
+      const subscription = await Subscription.create({
+        appId, // ⭐ AJOUT
+        user: userId,
+        package: packageId,
+        startDate,
+        endDate,
+        pricing: {
+          amount: packagePrice,
+          currency: currency
+        },
+        status: 'active',
+        paymentProvider: 'GOOGLE_PLAY',
+        paymentReference: googleTx.orderId,
+        googlePlayTransaction: googleTx._id,
+        autoRenewing: false
+      });
+
+      console.log('[GooglePlay ONE-TIME] Subscription créée:', subscription._id);
+
+      // 10. Mettre à jour la transaction avec l'ID de subscription
+      googleTx.subscription = subscription._id;
+      await googleTx.save();
+
+      // 11. Acknowledge l'achat si pas déjà fait
+      if (data.acknowledgementState !== 1) {
+        this.acknowledgeOneTimePurchase(purchaseToken, productId).catch(error => {
+          console.error('[GooglePlay ONE-TIME] Erreur acknowledge (non bloquant):', error.message);
+        });
+      }
+
+      // 12. Retourner le résultat avec populate
+      const populatedSubscription = await Subscription.findById(subscription._id)
+        .populate('package');
+
+      return {
+        success: true,
+        data: {
+          subscription: populatedSubscription,
+          message: 'Produit activé avec succès'
+        }
+      };
+
+    } catch (error) {
+      console.error('[GooglePlay ONE-TIME] Erreur validation complète:', error);
+      
+      let errorMessage = 'Erreur de validation du produit: ';
+      if (error.response && error.response.data) {
+        errorMessage += JSON.stringify(error.response.data);
+      } else if (error.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Erreur inconnue';
+      }
+      
+      throw new Error(errorMessage);
     }
-    
-    throw new Error(errorMessage);
   }
-}
 
   // ===== EXISTANT : Acknowledge un abonnement =====
   async acknowledgePurchase(purchaseToken) {
@@ -247,29 +250,29 @@ if (purchaseState === undefined) {
   }
 
   // ===== NOUVEAU : Acknowledge un produit ponctuel =====
-// ===== NOUVEAU : Acknowledge un produit ponctuel =====
-async acknowledgeOneTimePurchase(purchaseToken, productId) {
-  try {
-    await this.androidPublisher.purchases.products.acknowledge({
-      packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
-      productId: productId,
-      token: purchaseToken
-    });
+  async acknowledgeOneTimePurchase(purchaseToken, productId) {
+    try {
+      await this.androidPublisher.purchases.products.acknowledge({
+        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
+        productId: productId,
+        token: purchaseToken
+      });
 
-    await GooglePlayTransaction.findOneAndUpdate(
-      { purchaseToken },
-      { acknowledged: true }
-    );
+      await GooglePlayTransaction.findOneAndUpdate(
+        { purchaseToken },
+        { acknowledged: true }
+      );
 
-    console.log('[GooglePlay ONE-TIME] Acknowledge réussi:', purchaseToken);
-    return true;
-  } catch (error) {
-    console.error('[GooglePlay ONE-TIME] Erreur acknowledge:', error);
-    return false;
+      console.log('[GooglePlay ONE-TIME] Acknowledge réussi:', purchaseToken);
+      return true;
+    } catch (error) {
+      console.error('[GooglePlay ONE-TIME] Erreur acknowledge:', error);
+      return false;
+    }
   }
-}
-  // ===== MODIFIÉ : Traiter une notification RTDN =====
-  async processNotification(notification) {
+
+  // ⭐ MODIFIÉ : Traiter une notification RTDN
+  async processNotification(appId, notification) {
     try {
       // EXISTANT : Gérer les notifications d'abonnement
       if (notification.subscriptionNotification) {
@@ -278,7 +281,8 @@ async acknowledgeOneTimePurchase(purchaseToken, productId) {
 
         console.log(`[NOTIFICATION SUB] Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
-        const googleTx = await GooglePlayTransaction.findOne({ purchaseToken });
+        // ⭐ Filtrer par appId
+        const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
         if (!googleTx) {
           console.log('Transaction non trouvée:', purchaseToken);
           return;
@@ -322,26 +326,26 @@ async acknowledgeOneTimePurchase(purchaseToken, productId) {
         await googleTx.save();
       }
 
-      // ===== NOUVEAU : Gérer les notifications de produits ponctuels =====
+      // ⭐ NOUVEAU : Gérer les notifications de produits ponctuels
       if (notification.oneTimeProductNotification) {
-        await this.handleOneTimeProductNotification(notification);
+        await this.handleOneTimeProductNotification(appId, notification);
       }
-      // ==================================================================
 
     } catch (error) {
       console.error('Erreur traitement notification:', error);
     }
   }
 
-  // ===== NOUVEAU : Gérer les notifications de produits ponctuels =====
-  async handleOneTimeProductNotification(notification) {
+  // ⭐ NOUVEAU : Gérer les notifications de produits ponctuels
+  async handleOneTimeProductNotification(appId, notification) {
     try {
       const { purchaseToken } = notification.oneTimeProductNotification;
       const notificationType = notification.oneTimeProductNotification.notificationType;
 
       console.log(`[NOTIFICATION ONE-TIME] Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
-      const googleTx = await GooglePlayTransaction.findOne({ purchaseToken });
+      // ⭐ Filtrer par appId
+      const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
       if (!googleTx) {
         console.log('[NOTIFICATION ONE-TIME] Transaction non trouvée:', purchaseToken);
         return;
@@ -559,9 +563,12 @@ async acknowledgeOneTimePurchase(purchaseToken, productId) {
     }
   }
 
-  async checkSubscriptionStatus(userId) {
+  // ⭐ MODIFIÉ : Vérifier le statut avec appId
+  async checkSubscriptionStatus(appId, userId) {
     try {
+      // ⭐ Filtrer par appId
       const googleTx = await GooglePlayTransaction.findOne({
+        appId,
         user: userId,
         status: { $in: ['ACTIVE', 'CANCELED'] },
         expiryTime: { $gt: new Date() }

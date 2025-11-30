@@ -1,3 +1,5 @@
+// src/api/middlewares/affiliate/affiliateAuth.js
+
 const Affiliate = require('../../models/affiliate/Affiliate');
 const authService = require('../../services/common/authService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -22,18 +24,26 @@ exports.protect = catchAsync(async (req, res, next) => {
   // 2. Vérifier le token
   const decoded = authService.verifyToken(token, 'affiliate');
   
-  // 3. Vérifier si l'affilié existe encore
-  const affiliate = await Affiliate.findById(decoded.id);
-  if (!affiliate) {
-    return next(new AppError('L\'affilié n\'existe plus', 401, ErrorCodes.AUTH_USER_NOT_FOUND));
+  // ⭐ 3. Récupérer l'appId de la requête (défini par identifyApp middleware)
+  const appId = req.appId;
+  
+  if (!appId) {
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   
-  // 4. Vérifier si l'affilié est actif
+  // ⭐ 4. Vérifier si l'affilié existe POUR CETTE APP
+  const affiliate = await Affiliate.findOne({ _id: decoded.id, appId });
+  
+  if (!affiliate) {
+    return next(new AppError('L\'affilié n\'existe plus ou n\'appartient pas à cette application', 401, ErrorCodes.AUTH_USER_NOT_FOUND));
+  }
+  
+  // 5. Vérifier si l'affilié est actif
   if (!affiliate.isActive) {
     return next(new AppError('Compte affilié désactivé', 401, ErrorCodes.AUTH_ACCOUNT_DISABLED));
   }
   
-  // 5. Attacher l'affilié à la requête
+  // 6. Attacher l'affilié à la requête
   req.affiliate = affiliate;
   next();
 });
@@ -55,8 +65,15 @@ exports.verifyRefreshToken = catchAsync(async (req, res, next) => {
     return next(new AppError('Type de token invalide', 401, ErrorCodes.AUTH_INVALID_TOKEN));
   }
   
-  // Vérifier si l'affilié existe et possède ce refresh token
-  const affiliate = await Affiliate.findById(decoded.id).select('+refreshTokens');
+  // ⭐ Récupérer l'appId de la requête
+  const appId = req.appId;
+  
+  if (!appId) {
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+  
+  // ⭐ Vérifier si l'affilié existe POUR CETTE APP et possède ce refresh token
+  const affiliate = await Affiliate.findOne({ _id: decoded.id, appId }).select('+refreshTokens');
   
   if (!affiliate || !affiliate.refreshTokens.includes(refreshToken)) {
     return next(new AppError('Refresh token invalide', 401, ErrorCodes.AUTH_INVALID_TOKEN));
