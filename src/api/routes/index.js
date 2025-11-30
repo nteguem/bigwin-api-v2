@@ -22,6 +22,7 @@ router.use('/affiliate/auth', identifyApp, affiliateAuthRoutes);
 router.use('/user/auth', identifyApp, userAuthRoutes);
 
 // ===== ROUTES ADMIN =====
+const adminAppRoutes = require('./admin/appRoutes'); // ⭐ NOUVEAU
 const adminPackageRoutes = require('./admin/packageRoutes');
 const adminCategoryRoutes = require('./admin/categoryRoutes');
 const adminTicketRoutes = require('./admin/ticketRoutes');
@@ -32,6 +33,9 @@ const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminCommissionRoutes = require('./admin/commissionRoutes');
 const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes'); 
+
+// ⭐ NOUVEAU : Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
+router.use('/admin/apps', adminAppRoutes);
 
 // Admin routes: identifyApp pour savoir sur quelle app il travaille
 router.use('/admin/packages', identifyApp, adminPackageRoutes);
@@ -96,6 +100,23 @@ router.get('/', (req, res) => {
     info: {
       appId: req.appId || 'non spécifié',
       note: 'Ajoutez le header X-App-Id pour identifier votre application'
+    },
+    endpoints: {
+      admin: {
+        apps: 'GET /admin/apps - Liste des applications',
+        packages: 'GET /admin/packages - Gestion des packages',
+        categories: 'GET /admin/categories - Gestion des catégories',
+        tickets: 'GET /admin/tickets - Gestion des tickets',
+        affiliates: 'GET /admin/affiliates - Gestion des affiliés'
+      },
+      user: {
+        coupons: 'GET /user/coupons - Coupons disponibles',
+        subscriptions: 'GET /user/subscriptions - Abonnements',
+        googlePlay: 'POST /user/google-play/validate - Paiements Google Play'
+      },
+      affiliate: {
+        dashboard: 'GET /affiliate/dashboard - Tableau de bord affilié'
+      }
     }
   });
 });
