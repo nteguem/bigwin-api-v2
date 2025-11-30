@@ -1,9 +1,9 @@
-// src/api/routes/webhooks.routes.js
+// src/api/routes/user/googlePlayWebhook.js
 
 const express = require('express');
 const router = express.Router();
 const googlePlayController = require('../../controllers/user/googlePlayController');
-const appMiddleware = require('../../middlewares/common/appIdentifier');
+const { identifyApp } = require('../../middlewares/common/appIdentifier'); // ✅ CORRIGÉ
 
 /**
  * Webhook RTDN Google Play
@@ -22,7 +22,7 @@ const appMiddleware = require('../../middlewares/common/appIdentifier');
 // Méthode 1 : Une seule URL avec header X-App-Id
 router.post(
   '/google-play',
-  appMiddleware,  // ✅ Extrait X-App-Id du header
+  identifyApp,  // ✅ CORRIGÉ : Extrait X-App-Id du header
   googlePlayController.handleRTDN
 );
 
