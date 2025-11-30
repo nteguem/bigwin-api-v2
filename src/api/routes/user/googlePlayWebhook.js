@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const googlePlayController = require('../../controllers/user/googlePlayController');
-const appMiddleware = require('../../middlewares/common/appMiddleware');
+const appMiddleware = require('../../middlewares/common/appIdentifier');
 
 /**
  * Webhook RTDN Google Play
