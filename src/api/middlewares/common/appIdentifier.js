@@ -1,5 +1,9 @@
 // src/api/middlewares/common/appIdentifier.js
 
+const App = require('../../models/common/App');
+const { AppError, ErrorCodes } = require('../../../utils/AppError');
+// src/api/middlewares/common/appIdentifier.js
+
 const identifyApp = async (req, res, next) => {
   try {
     const appId = req.headers['x-app-id'];
