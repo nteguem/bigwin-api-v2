@@ -10,6 +10,8 @@ const catchAsync = require('../../../utils/catchAsync');
  * Note: Admin N'A PAS d'appId car un admin gère toutes les apps
  */
 exports.protect = catchAsync(async (req, res, next) => {
+  console.log('[adminAuth] ENTRÉE - req.query:', req.query); // ⭐ DEBUG
+  
   // 1. Extraire le token
   const authHeader = req.headers.authorization;
   let token;
@@ -26,7 +28,6 @@ exports.protect = catchAsync(async (req, res, next) => {
   const decoded = authService.verifyToken(token, 'admin');
   
   // 3. Vérifier si l'admin existe encore
-  // ⚠️ PAS DE FILTRE PAR appId - Admin est global
   const admin = await Admin.findById(decoded.id);
   
   if (!admin) {
@@ -41,8 +42,7 @@ exports.protect = catchAsync(async (req, res, next) => {
   // 5. Attacher l'admin à la requête
   req.admin = admin;
   
-  // ⭐ NOTE: req.appId existe déjà (défini par identifyApp middleware)
-  // L'admin peut travailler sur n'importe quelle app en changeant X-App-Id
+  console.log('[adminAuth] AVANT next() - req.query:', req.query); // ⭐ DEBUG
   
   next();
 });
@@ -65,7 +65,6 @@ exports.verifyRefreshToken = catchAsync(async (req, res, next) => {
   }
   
   // Vérifier si l'admin existe et possède ce refresh token
-  // ⚠️ PAS DE FILTRE PAR appId - Admin est global
   const admin = await Admin.findById(decoded.id).select('+refreshTokens');
   
   if (!admin || !admin.refreshTokens.includes(refreshToken)) {
