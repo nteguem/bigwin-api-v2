@@ -1,6 +1,5 @@
 // services/user/AfribaPayService.js
 const axios = require('axios');
-const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -8,17 +7,7 @@ const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
-// Configuration
-const API_URL = process.env.AFRIBAPAY_API_URL;
-const API_USER = process.env.AFRIBAPAY_API_USER;
-const API_KEY = process.env.AFRIBAPAY_API_KEY;
-const MERCHANT_KEY = process.env.AFRIBAPAY_MERCHANT_KEY;
-
-if (!API_USER || !API_KEY || !MERCHANT_KEY) {
-  throw new Error('Variables d\'environnement AfribaPay manquantes: AFRIBAPAY_API_USER, AFRIBAPAY_API_KEY, AFRIBAPAY_MERCHANT_KEY');
-}
-
-// Cache pour le token
+// Cache pour le token (global car même compte AfribaPay pour toutes les apps)
 let cachedToken = null;
 let tokenExpiry = null;
 
@@ -36,6 +25,54 @@ class AfribaPayError extends Error {
 }
 
 /**
+ * Récupérer la configuration AfribaPay
+ * Priorité : Base de données > Variables d'environnement
+ * @param {Object} app - Document App depuis req.currentApp
+ * @returns {Object} Configuration AfribaPay
+ */
+function getConfig(app) {
+  const dbConfig = app?.payments?.afribapay;
+  
+  // Si config en base et activée, l'utiliser
+  if (dbConfig?.enabled) {
+    return {
+      apiUrl: dbConfig.apiUrl || process.env.AFRIBAPAY_API_URL,
+      apiUser: dbConfig.apiUser || process.env.AFRIBAPAY_API_USER,
+      apiKey: dbConfig.apiKey || process.env.AFRIBAPAY_API_KEY,
+      merchantKey: dbConfig.merchantKey || process.env.AFRIBAPAY_MERCHANT_KEY,
+      enabled: true
+    };
+  }
+  
+  // Fallback sur les variables d'environnement
+  return {
+    apiUrl: process.env.AFRIBAPAY_API_URL,
+    apiUser: process.env.AFRIBAPAY_API_USER,
+    apiKey: process.env.AFRIBAPAY_API_KEY,
+    merchantKey: process.env.AFRIBAPAY_MERCHANT_KEY,
+    enabled: !!(process.env.AFRIBAPAY_API_USER && process.env.AFRIBAPAY_API_KEY && process.env.AFRIBAPAY_MERCHANT_KEY)
+  };
+}
+
+/**
+ * Valider la configuration AfribaPay
+ * @param {Object} config - Configuration à valider
+ * @throws {AfribaPayError} Si configuration invalide
+ */
+function validateConfig(config) {
+  if (!config.enabled) {
+    throw new AfribaPayError('AfribaPay n\'est pas configuré pour cette application', 400);
+  }
+  
+  if (!config.apiUrl || !config.apiUser || !config.apiKey || !config.merchantKey) {
+    throw new AfribaPayError(
+      'Configuration AfribaPay incomplète. Vérifiez apiUrl, apiUser, apiKey et merchantKey',
+      500
+    );
+  }
+}
+
+/**
  * Générer les URLs de notification
  */
 function generateUrls() {
@@ -49,16 +86,18 @@ function generateUrls() {
 
 /**
  * Obtenir le token d'accès
+ * @param {Object} config - Configuration AfribaPay
  */
-async function getAccessToken() {
+async function getAccessToken(config) {
   try {
+    // Vérifier le cache
     if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
       return cachedToken;
     }
 
-    const credentials = Buffer.from(`${API_USER}:${API_KEY}`).toString('base64');
+    const credentials = Buffer.from(`${config.apiUser}:${config.apiKey}`).toString('base64');
     
-    const response = await axios.post(`${API_URL}/v1/token`, {}, {
+    const response = await axios.post(`${config.apiUrl}/v1/token`, {}, {
       headers: {
         'Authorization': `Basic ${credentials}`,
         'Content-Type': 'application/json'
@@ -75,6 +114,9 @@ async function getAccessToken() {
       throw new AfribaPayError('Failed to get access token', 401, response.data);
     }
   } catch (error) {
+    if (error instanceof AfribaPayError) {
+      throw error;
+    }
     if (error.response) {
       throw new AfribaPayError(
         error.response.data?.message || error.message,
@@ -136,12 +178,15 @@ function isOtpRequired(operator, country) {
 
 /**
  * Vérifier la signature HMAC
+ * @param {String} receivedSignature - Signature reçue
+ * @param {String} payload - Payload JSON
+ * @param {String} apiKey - Clé API pour HMAC
  */
-function verifyHmacToken(receivedSignature, payload) {
+function verifyHmacToken(receivedSignature, payload, apiKey) {
   try {
-    if (!API_KEY || !receivedSignature) return false;
+    if (!apiKey || !receivedSignature) return false;
     const calculatedSignature = crypto
-      .createHmac('sha256', API_KEY)
+      .createHmac('sha256', apiKey)
       .update(payload)
       .digest('hex');
     return calculatedSignature === receivedSignature;
@@ -150,28 +195,45 @@ function verifyHmacToken(receivedSignature, payload) {
   }
 }
 
-async function initiatePayment(appId, userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
+/**
+ * Initier un paiement AfribaPay
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} userId - ID de l'utilisateur
+ * @param {String} packageId - ID du package
+ * @param {String} phoneNumber - Numéro de téléphone
+ * @param {String} operator - Code opérateur
+ * @param {String} country - Code pays
+ * @param {String} currency - Devise
+ * @param {String} otpCode - Code OTP (optionnel)
+ */
+async function initiatePayment(appId, app, userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
   try {
     console.log(`[AfribaPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, phone=${phoneNumber}`);
 
-    // 1. Récupérer le package
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    validateConfig(config);
+    console.log(`[AfribaPay-1] Config validée pour app=${appId}`);
+
+    // 2. Récupérer le package
     const packageDoc = await Package.findOne({ _id: packageId, appId });
 
-    console.log(`[AfribaPay-1] Package trouvé:`, packageDoc ? packageDoc.name.fr : 'NON TROUVÉ');
+    console.log(`[AfribaPay-2] Package trouvé:`, packageDoc ? packageDoc.name.fr : 'NON TROUVÉ');
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // 2. Récupérer le prix selon la devise fournie
+    // 3. Récupérer le prix selon la devise fournie
     const amount = packageDoc.pricing.get(currency);
-    console.log(`[AfribaPay-2] Prix récupéré: ${amount} ${currency}`);
+    console.log(`[AfribaPay-3] Prix récupéré: ${amount} ${currency}`);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
 
-    // 3. Vérifier si OTP est requis
+    // 4. Vérifier si OTP est requis
     const otpRequiredCheck = isOtpRequired(operator, country);
-    console.log(`[AfribaPay-3] OTP check: required=${otpRequiredCheck}, provided=${!!otpCode}`);
+    console.log(`[AfribaPay-4] OTP check: required=${otpRequiredCheck}, provided=${!!otpCode}`);
     if (otpRequiredCheck && !otpCode) {
       throw new AfribaPayError(
         `Code OTP requis pour ${operator} dans ce pays`,
@@ -186,17 +248,17 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
       );
     }
 
-    // 4. Générer IDs et URLs
+    // 5. Générer IDs et URLs
     const orderId = `order-${Date.now()}`;
     const { notify_url, return_url, cancel_url } = generateUrls();
-    console.log(`[AfribaPay-4] OrderId généré: ${orderId}`);
+    console.log(`[AfribaPay-5] OrderId généré: ${orderId}`);
 
-    // 5. Obtenir le token
-    console.log(`[AfribaPay-5] Tentative d'obtention du token...`);
-    const accessToken = await getAccessToken();
-    console.log(`[AfribaPay-5] Token obtenu:`, accessToken ? 'SUCCESS' : 'FAILED');
+    // 6. Obtenir le token
+    console.log(`[AfribaPay-6] Tentative d'obtention du token...`);
+    const accessToken = await getAccessToken(config);
+    console.log(`[AfribaPay-6] Token obtenu:`, accessToken ? 'SUCCESS' : 'FAILED');
 
-    // 6. Préparer les données pour l'API AfribaPay
+    // 7. Préparer les données pour l'API AfribaPay
     const paymentData = {
       operator,
       country,
@@ -204,7 +266,7 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
       amount,
       currency,
       order_id: orderId,
-      merchant_key: MERCHANT_KEY,
+      merchant_key: config.merchantKey,
       reference_id: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       lang: 'fr',
       notify_url,
@@ -215,18 +277,18 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
     if (otpRequiredCheck && otpCode) {
       paymentData.otp_code = otpCode;
     }
-    console.log(`[AfribaPay-6] PaymentData préparée:`, paymentData);
+    console.log(`[AfribaPay-7] PaymentData préparée:`, paymentData);
 
-    // 7. Appeler l'API AfribaPay
-    console.log(`[AfribaPay-7] Appel API AfribaPay en cours...`);
-    const response = await axios.post(`${API_URL}/v1/pay/payin`, paymentData, {
+    // 8. Appeler l'API AfribaPay
+    console.log(`[AfribaPay-8] Appel API AfribaPay en cours...`);
+    const response = await axios.post(`${config.apiUrl}/v1/pay/payin`, paymentData, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
       timeout: 30000
     });
-    console.log(`[AfribaPay-7] Réponse API:`, response.data);
+    console.log(`[AfribaPay-8] Réponse API:`, response.data);
 
     if (!response.data.data) {
       console.error(`[AfribaPay-ERROR] Pas de data dans la réponse:`, response.data);
@@ -237,9 +299,9 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
       );
     }
 
-    // 8. Créer la transaction
+    // 9. Créer la transaction
     const responseData = response.data.data;
-    console.log(`[AfribaPay-8] Création transaction avec ID:`, responseData.transaction_id);
+    console.log(`[AfribaPay-9] Création transaction avec ID:`, responseData.transaction_id);
     
     const afribaPayTransaction = new AfribaPayTransaction({
       appId, 
@@ -253,7 +315,7 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
       otpCode,
       amount: responseData.amount || amount,
       currency,
-      merchantKey: MERCHANT_KEY,
+      merchantKey: config.merchantKey,
       referenceId: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
       notifyUrl: notify_url,
       returnUrl: return_url,
@@ -273,9 +335,9 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
     });
 
     await afribaPayTransaction.save();
-    console.log(`[AfribaPay-8] Transaction sauvegardée avec succès`);
+    console.log(`[AfribaPay-9] Transaction sauvegardée avec succès`);
 
-    // 9. Populer et retourner
+    // 10. Populer et retourner
     await afribaPayTransaction.populate(['package', 'user']);
     console.log(`[AfribaPay-END] Transaction complétée avec succès`);
 
@@ -305,7 +367,7 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
       );
     }
 
-    if (error instanceof (AfribaPayError || AppError)) {
+    if (error instanceof AfribaPayError || error instanceof AppError) {
       throw error;
     }
 
@@ -315,9 +377,17 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, operator, 
 
 /**
  * Vérifier le statut d'une transaction
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} orderId - ID de la commande ou transaction
  */
-async function checkTransactionStatus(appId,orderId) {
+async function checkTransactionStatus(appId, app, orderId) {
   try {
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    validateConfig(config);
+
+    // 2. Trouver la transaction
     const transaction = await AfribaPayTransaction.findOne({ 
       appId, 
       $or: [{ orderId }, { transactionId: orderId }] 
@@ -327,14 +397,16 @@ async function checkTransactionStatus(appId,orderId) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
     }
 
-    const accessToken = await getAccessToken();
-    const response = await axios.get(`${API_URL}/v1/status?order_id=${transaction.orderId}`, {
+    // 3. Obtenir le token et vérifier le statut
+    const accessToken = await getAccessToken(config);
+    const response = await axios.get(`${config.apiUrl}/v1/status?order_id=${transaction.orderId}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       }
     });
 
+    // 4. Mettre à jour la transaction
     if (response.data.data) {
       const paymentData = response.data.data;
 
@@ -358,7 +430,7 @@ async function checkTransactionStatus(appId,orderId) {
       );
     }
 
-    if (error instanceof (AfribaPayError || AppError)) {
+    if (error instanceof AfribaPayError || error instanceof AppError) {
       throw error;
     }
 
@@ -367,6 +439,7 @@ async function checkTransactionStatus(appId,orderId) {
 }
 
 module.exports = {
+  getConfig,
   initiatePayment,
   checkTransactionStatus,
   getCountriesData,

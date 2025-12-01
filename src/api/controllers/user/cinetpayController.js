@@ -10,8 +10,8 @@ const catchAsync = require('../../../utils/catchAsync');
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, phoneNumber } = req.body;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
   // Validation
   if (!packageId || !phoneNumber) {
@@ -22,7 +22,16 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     ));
   }
 
-  // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
+  // Vérifier que CinetPay est activé pour cette app
+  if (!currentApp?.payments?.cinetpay?.enabled) {
+    return next(new AppError(
+      'CinetPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
@@ -41,9 +50,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
   const email = req.user.email || '';
 
-  // ⭐ Passer appId au service
   const result = await cinetpayService.initiatePayment(
     appId,
+    currentApp,
     req.user._id,
     packageId,
     phoneNumber,
@@ -75,10 +84,19 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { transactionId } = req.params;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
-  const transaction = await cinetpayService.checkTransactionStatus(appId, transactionId);
+  // Vérifier que CinetPay est activé pour cette app
+  if (!currentApp?.payments?.cinetpay?.enabled) {
+    return next(new AppError(
+      'CinetPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  const transaction = await cinetpayService.checkTransactionStatus(appId, currentApp, transactionId);
 
   // Vérifier que la transaction appartient à l'utilisateur
   if (transaction.user._id.toString() !== req.user._id.toString()) {
@@ -88,7 +106,6 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   // Traiter la transaction si le statut a changé
   let subscription = null;
   try {
-    // ⭐ Passer appId au middleware
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
@@ -124,8 +141,8 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
   const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
   console.log('CinetPay webhook received:', req.body);
 
@@ -133,11 +150,18 @@ exports.webhook = catchAsync(async (req, res, next) => {
     return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
+  // Vérifier que CinetPay est activé pour cette app
+  if (!currentApp?.payments?.cinetpay?.enabled) {
+    return next(new AppError(
+      'CinetPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
   try {
-    // Chercher la transaction
     const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
     
-    // ⭐ Filtrer par appId
     const transaction = await CinetpayTransaction.findOne({ appId, transactionId })
       .populate(['package', 'user']);
 
@@ -172,7 +196,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
     await transaction.save();
     console.log(`Transaction ${transactionId} updated to status: ${transaction.status}`);
 
-    // ⭐ Traiter la transaction mise à jour avec appId
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
@@ -184,7 +207,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
     console.error('Webhook processing error:', error.message);
     console.error('Error stack:', error.stack);
     
-    // Toujours retourner 200 pour que CinetPay ne renvoie pas le webhook
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',
@@ -199,8 +221,8 @@ exports.webhook = catchAsync(async (req, res, next) => {
 exports.paymentSuccess = catchAsync(async (req, res, next) => {
   const { token, transaction_id } = req.method === 'GET' ? req.query : req.body;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
   if (!transaction_id) {
     const errorContent = `
@@ -212,14 +234,22 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
     return res.status(400).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
   }
 
+  // Vérifier que CinetPay est activé pour cette app
+  if (!currentApp?.payments?.cinetpay?.enabled) {
+    const errorContent = `
+      <div class="icon">❌</div>
+      <h1 class="error">Erreur</h1>
+      <p>CinetPay n'est pas activé pour cette application.</p>
+    `;
+    return res.status(400).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+  }
+
   let transactionStatus;
   let errorOccurred = false;
 
   try {
-    // ⭐ Passer appId au service
-    transactionStatus = await cinetpayService.checkTransactionStatus(appId, transaction_id);
+    transactionStatus = await cinetpayService.checkTransactionStatus(appId, currentApp, transaction_id);
     
-    // ⭐ Traiter la transaction avec appId
     await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
   } catch (error) {
     console.error('CinetPay - Erreur lors de la vérification:', error.message);
@@ -299,7 +329,7 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
   return res.send(getHtmlTemplate(`CinetPay - ${transactionStatus?.status || 'Statut'}`, content));
 });
 
-// CSS et HTML template helpers (inchangés)
+// CSS et HTML template helpers
 const getMobileOptimizedCSS = () => `
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }

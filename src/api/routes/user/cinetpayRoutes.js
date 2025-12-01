@@ -11,6 +11,10 @@ const router = express.Router();
 // Webhook pour les notifications CinetPay (non protégé)
 router.post('/webhook', cinetpayController.webhook);
 
+// Page de retour après paiement (non protégé car l'utilisateur vient de CinetPay)
+router.get('/success', cinetpayController.paymentSuccess);
+router.post('/success', cinetpayController.paymentSuccess);
+
 /**
  * Routes protégées (authentification requise)
  */
@@ -21,9 +25,5 @@ router.post('/initiate', cinetpayController.initiatePayment);
 
 // Vérifier le statut d'un paiement
 router.get('/status/:transactionId', cinetpayController.checkStatus);
-
-// Page de retour après paiement (non protégé)
-router.get('/success', cinetpayController.paymentSuccess);
-router.post('/success', cinetpayController.paymentSuccess);
 
 module.exports = router;

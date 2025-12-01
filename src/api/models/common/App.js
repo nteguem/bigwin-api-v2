@@ -62,12 +62,14 @@ const appSchema = new mongoose.Schema({
       xof: {
         apiKey: String,
         siteId: String,
-        secretKey: String
+        secretKey: String,
+        apiUrl: String
       },
       xaf: {
         apiKey: String,
         siteId: String,
-        secretKey: String
+        secretKey: String,
+        apiUrl: String
       },
       enabled: {
         type: Boolean,

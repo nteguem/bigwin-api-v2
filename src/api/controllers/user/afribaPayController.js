@@ -57,8 +57,8 @@ exports.checkOtpRequirement = catchAsync(async (req, res, next) => {
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, phoneNumber, operator, country, currency, otpCode } = req.body;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
   // Validation de base
   if (!packageId || !phoneNumber || !operator || !country || !currency) {
@@ -69,7 +69,16 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     ));
   }
 
-  // ⭐ Vérifier abonnement actif POUR CETTE APP
+  // Vérifier que AfribaPay est activé pour cette app
+  if (!currentApp?.payments?.afribapay?.enabled) {
+    return next(new AppError(
+      'AfribaPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  // Vérifier abonnement actif POUR CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
@@ -85,9 +94,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   }
 
   try {
-    // ⭐ Passer appId au service
     const result = await afribaPayService.initiatePayment(
       appId,
+      currentApp,
       req.user._id,
       packageId,
       phoneNumber,
@@ -157,10 +166,19 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { orderId } = req.params;
 
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
 
-  const transaction = await afribaPayService.checkTransactionStatus(appId, orderId);
+  // Vérifier que AfribaPay est activé pour cette app
+  if (!currentApp?.payments?.afribapay?.enabled) {
+    return next(new AppError(
+      'AfribaPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  const transaction = await afribaPayService.checkTransactionStatus(appId, currentApp, orderId);
 
   if (transaction.user._id.toString() !== req.user._id.toString()) {
     return next(new AppError('Transaction non autorisée', 403, ErrorCodes.UNAUTHORIZED));
@@ -168,7 +186,6 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 
   let subscription = null;
   try {
-    // ⭐ Passer appId au middleware
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
@@ -208,17 +225,25 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const { order_id: orderId, status } = req.body;
   const rawPayload = JSON.stringify(req.body);
   
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
   
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
+  // Vérifier que AfribaPay est activé pour cette app
+  if (!currentApp?.payments?.afribapay?.enabled) {
+    return next(new AppError(
+      'AfribaPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
   try {
     const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
     
-    // ⭐ Filtrer par appId
     const transaction = await AfribaPayTransaction.findOne({ appId, orderId })
       .populate(['package', 'user']);
 
@@ -226,18 +251,23 @@ exports.webhook = catchAsync(async (req, res, next) => {
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    if (process.env.AFRIBAPAY_API_KEY && receivedSignature) {
-      const isValidSignature = afribaPayService.verifyHmacToken(receivedSignature, rawPayload);
+    // Récupérer la config pour vérifier la signature
+    const config = afribaPayService.getConfig(currentApp);
+
+    if (config.apiKey && receivedSignature) {
+      const isValidSignature = afribaPayService.verifyHmacToken(receivedSignature, rawPayload, config.apiKey);
       if (!isValidSignature) {
         console.warn('AfribaPay - Invalid HMAC signature');
       }
+      transaction.webhookVerified = isValidSignature;
+    } else {
+      transaction.webhookVerified = false;
     }
 
     transaction.status = status;
     transaction.webhookReceived = true;
     transaction.webhookData = req.body;
     transaction.webhookSignature = receivedSignature;
-    transaction.webhookVerified = afribaPayService.verifyHmacToken(receivedSignature, rawPayload);
 
     if (req.body.operator_id) transaction.operatorId = req.body.operator_id;
     if (req.body.status_date) transaction.statusDate = new Date(req.body.status_date);
@@ -246,7 +276,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
     await transaction.save();
     
-    // ⭐ Passer appId au middleware
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({

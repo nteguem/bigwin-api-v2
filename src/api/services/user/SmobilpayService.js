@@ -1,14 +1,10 @@
+// services/user/SmobilpayService.js
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
-
-// Configuration
-const API_URL = process.env.SMOBILPAY_API_URL;
-const API_KEY = process.env.SMOBILPAY_API_KEY;
-const API_SECRET = process.env.SMOBILPAY_API_SECRET;
 
 // Classe d'erreur personnalisée
 class SmobilpayError extends Error {
@@ -30,9 +26,60 @@ const COUNTRY_MAPPING = {
 };
 
 /**
- * Générer l'en-tête d'authentification Smobilpay
+ * Récupérer la configuration Smobilpay
+ * Priorité : Base de données > Variables d'environnement
+ * @param {Object} app - Document App depuis req.currentApp
+ * @returns {Object} Configuration Smobilpay
  */
-function generateAuthHeader(method, url, params = {}, data = null) {
+function getConfig(app) {
+  const dbConfig = app?.payments?.smobilpay;
+  
+  // Si config en base et activée, l'utiliser
+  if (dbConfig?.enabled) {
+    return {
+      apiUrl: dbConfig.apiUrl || process.env.SMOBILPAY_API_URL,
+      apiKey: dbConfig.apiKey || process.env.SMOBILPAY_API_KEY,
+      apiSecret: dbConfig.apiSecret || process.env.SMOBILPAY_API_SECRET,
+      enabled: true
+    };
+  }
+  
+  // Fallback sur les variables d'environnement
+  return {
+    apiUrl: process.env.SMOBILPAY_API_URL,
+    apiKey: process.env.SMOBILPAY_API_KEY,
+    apiSecret: process.env.SMOBILPAY_API_SECRET,
+    enabled: !!(process.env.SMOBILPAY_API_URL && process.env.SMOBILPAY_API_KEY && process.env.SMOBILPAY_API_SECRET)
+  };
+}
+
+/**
+ * Valider la configuration Smobilpay
+ * @param {Object} config - Configuration à valider
+ * @throws {SmobilpayError} Si configuration invalide
+ */
+function validateConfig(config) {
+  if (!config.enabled) {
+    throw new SmobilpayError('Smobilpay n\'est pas configuré pour cette application', 400);
+  }
+  
+  if (!config.apiUrl || !config.apiKey || !config.apiSecret) {
+    throw new SmobilpayError(
+      'Configuration Smobilpay incomplète. Vérifiez apiUrl, apiKey et apiSecret',
+      500
+    );
+  }
+}
+
+/**
+ * Générer l'en-tête d'authentification Smobilpay
+ * @param {Object} config - Configuration Smobilpay
+ * @param {String} method - Méthode HTTP
+ * @param {String} url - URL complète
+ * @param {Object} params - Paramètres de requête
+ * @param {Object} data - Données du body
+ */
+function generateAuthHeader(config, method, url, params = {}, data = null) {
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = Date.now().toString();
   const signatureMethod = "HMAC-SHA1";
@@ -41,7 +88,7 @@ function generateAuthHeader(method, url, params = {}, data = null) {
     s3pAuth_nonce: nonce,
     s3pAuth_timestamp: timestamp,
     s3pAuth_signature_method: signatureMethod,
-    s3pAuth_token: API_KEY
+    s3pAuth_token: config.apiKey
   };
   
   const allParams = {...params, ...(data || {}), ...s3pParams};
@@ -57,7 +104,7 @@ function generateAuthHeader(method, url, params = {}, data = null) {
   
   const baseString = method + "&" + encodeURIComponent(url) + "&" + encodeURIComponent(parameterString);
   
-  const signature = crypto.createHmac('sha1', API_SECRET)
+  const signature = crypto.createHmac('sha1', config.apiSecret)
     .update(baseString)
     .digest('base64');
   
@@ -66,7 +113,7 @@ function generateAuthHeader(method, url, params = {}, data = null) {
     "s3pAuth_signature=\"" + signature + "\", " +
     "s3pAuth_nonce=\"" + nonce + "\", " +
     "s3pAuth_signature_method=\"" + signatureMethod + "\", " +
-    "s3pAuth_token=\"" + API_KEY + "\"";
+    "s3pAuth_token=\"" + config.apiKey + "\"";
   
   return authHeader;
 }
@@ -97,7 +144,6 @@ function cleanMerchantName(merchantName, countryCode) {
   
   switch (countryCode.toUpperCase()) {
     case 'CM':
-      // Retirer CM au début et CC à la fin
       if (cleanedName.startsWith('CM')) {
         cleanedName = cleanedName.substring(2);
       }
@@ -107,28 +153,24 @@ function cleanMerchantName(merchantName, countryCode) {
       break;
       
     case 'GA':
-      // Retirer GAB au début
       if (cleanedName.startsWith('GAB')) {
         cleanedName = cleanedName.substring(3);
       }
       break;
       
     case 'TD':
-      // Retirer TCD au début
       if (cleanedName.startsWith('TCD')) {
         cleanedName = cleanedName.substring(3);
       }
       break;
       
     case 'CF':
-      // Retirer RCA au début
       if (cleanedName.startsWith('RCA')) {
         cleanedName = cleanedName.substring(3);
       }
       break;
       
     case 'CG':
-      // Retirer CG au début
       if (cleanedName.startsWith('CG')) {
         cleanedName = cleanedName.substring(2);
       }
@@ -139,26 +181,31 @@ function cleanMerchantName(merchantName, countryCode) {
 }
 
 /**
- * Formater les services pour la réponse (nettoyer les noms des merchants)
+ * Formater les services pour la réponse
  */
 function formatServicesResponse(services, countryCode) {
   return services.map(service => ({
     ...service,
     merchant: cleanMerchantName(service.merchant, countryCode),
-    // Garder le merchant original si besoin pour des traitements internes
     originalMerchant: service.merchant
   }));
 }
 
 /**
  * Récupérer les services Smobilpay
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} countryCode - Code pays (optionnel)
  */
-async function getServices(countryCode = null) {
+async function getServices(app, countryCode = null) {
   try {
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    validateConfig(config);
+
     const endpoint = '/cashout';
-    const fullUrl = `${API_URL}${endpoint}`;
+    const fullUrl = `${config.apiUrl}${endpoint}`;
     
-    const authHeader = generateAuthHeader('GET', fullUrl);
+    const authHeader = generateAuthHeader(config, 'GET', fullUrl);
     
     const response = await axios.get(fullUrl, {
       headers: {
@@ -178,12 +225,14 @@ async function getServices(countryCode = null) {
     // Filtrer par pays si spécifié
     if (countryCode) {
       services = filterServicesByCountry(services, countryCode);
-      // Formater les noms des merchants pour la réponse
       services = formatServicesResponse(services, countryCode);
     }
     
     return services;
   } catch (error) {
+    if (error instanceof SmobilpayError) {
+      throw error;
+    }
     if (error.response) {
       throw new SmobilpayError(
         error.response.data.usrMsg || error.response.data.devMsg || error.message,
@@ -197,15 +246,18 @@ async function getServices(countryCode = null) {
 
 /**
  * Demander un devis
+ * @param {Object} config - Configuration Smobilpay
+ * @param {String} payItemId - ID du payItem
+ * @param {Number} amount - Montant
  */
-async function requestQuote(payItemId, amount) {
+async function requestQuote(config, payItemId, amount) {
   try {
     const endpoint = '/quotestd';
-    const fullUrl = `${API_URL}${endpoint}`;
+    const fullUrl = `${config.apiUrl}${endpoint}`;
     
     const data = { payItemId, amount };
     
-    const authHeader = generateAuthHeader('POST', fullUrl, {}, data);
+    const authHeader = generateAuthHeader(config, 'POST', fullUrl, {}, data);
     
     const response = await axios.post(fullUrl, data, {
       headers: {
@@ -229,11 +281,15 @@ async function requestQuote(payItemId, amount) {
 
 /**
  * Exécuter un paiement
+ * @param {Object} config - Configuration Smobilpay
+ * @param {String} quoteId - ID du devis
+ * @param {Object} customerData - Données client
+ * @param {String} paymentId - ID du paiement
  */
-async function collectPayment(quoteId, customerData, paymentId) {
+async function collectPayment(config, quoteId, customerData, paymentId) {
   try {
     const endpoint = '/collectstd';
-    const fullUrl = `${API_URL}${endpoint}`;
+    const fullUrl = `${config.apiUrl}${endpoint}`;
     
     const data = {
       quoteId,
@@ -244,7 +300,7 @@ async function collectPayment(quoteId, customerData, paymentId) {
       trid: paymentId
     };
     
-    const authHeader = generateAuthHeader('POST', fullUrl, {}, data);
+    const authHeader = generateAuthHeader(config, 'POST', fullUrl, {}, data);
     
     const response = await axios.post(fullUrl, data, {
       headers: {
@@ -267,16 +323,19 @@ async function collectPayment(quoteId, customerData, paymentId) {
 }
 
 /**
- * Vérifier le statut d'une transaction
+ * Vérifier le statut d'une transaction via API
+ * @param {Object} config - Configuration Smobilpay
+ * @param {String} identifier - PTN ou paymentId
+ * @param {Boolean} isPaymentId - True si c'est un paymentId
  */
-async function verifyTransaction(identifier, isPaymentId = false) {
+async function verifyTransaction(config, identifier, isPaymentId = false) {
   try {
     const endpoint = '/verifytx';
-    const fullUrl = `${API_URL}${endpoint}`;
+    const fullUrl = `${config.apiUrl}${endpoint}`;
     
     const queryParams = isPaymentId ? { trid: identifier } : { ptn: identifier };
     
-    const authHeader = generateAuthHeader('GET', fullUrl, queryParams);
+    const authHeader = generateAuthHeader(config, 'GET', fullUrl, queryParams);
     
     const response = await axios.get(fullUrl, {
       headers: {
@@ -300,41 +359,56 @@ async function verifyTransaction(identifier, isPaymentId = false) {
 }
 
 /**
- * Initier un paiement complet (VERSION CORRIGÉE POUR MAP)
+ * Initier un paiement complet
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} userId - ID de l'utilisateur
+ * @param {String} packageId - ID du package
+ * @param {String} serviceId - ID du service
+ * @param {Object} customerData - Données client
  */
-async function initiatePayment(appId,userId, packageId, serviceId, customerData) {
+async function initiatePayment(appId, app, userId, packageId, serviceId, customerData) {
   try {
-    // 1. Récupérer le service
-    const services = await getServices();
+    console.log(`[Smobilpay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, service=${serviceId}`);
+
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    validateConfig(config);
+    console.log(`[Smobilpay-1] Config validée pour app=${appId}`);
+
+    // 2. Récupérer le service
+    const services = await getServices(app);
     const service = services.find(s => s.serviceid === serviceId);
     
     if (!service) {
       throw new AppError(`Service ${serviceId} non trouvé`, 404, ErrorCodes.NOT_FOUND);
     }
+    console.log(`[Smobilpay-2] Service trouvé: ${service.name || service.serviceName}`);
     
-    // 2. Récupérer le package
+    // 3. Récupérer le package
     const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
+    console.log(`[Smobilpay-3] Package trouvé: ${packageDoc.name.fr}`);
     
-    // 3. Récupérer le prix en XAF depuis la Map Mongoose
+    // 4. Récupérer le prix en XAF
     let amount;
     
     if (packageDoc.pricing instanceof Map) {
-      // C'est une Map Mongoose - utiliser .get()
       amount = packageDoc.pricing.get('XAF');
     } else if (packageDoc.pricing && typeof packageDoc.pricing === 'object') {
-      // C'est un objet classique
       amount = packageDoc.pricing.XAF || packageDoc.pricing['XAF'];
     }
       
     if (!amount || amount <= 0) {
       throw new AppError('Prix XAF non disponible pour ce package', 400, ErrorCodes.VALIDATION_ERROR);
     }
+    console.log(`[Smobilpay-4] Prix: ${amount} XAF`);
     
-    // 4. Créer la transaction
+    // 5. Créer la transaction
     const paymentId = uuidv4();
+    console.log(`[Smobilpay-5] PaymentId généré: ${paymentId}`);
     
     const transaction = new SmobilpayTransaction({
       appId,
@@ -353,39 +427,56 @@ async function initiatePayment(appId,userId, packageId, serviceId, customerData)
     });
     
     await transaction.save();
+    console.log(`[Smobilpay-5] Transaction sauvegardée`);
     
-    // 5. Demander un devis
-    const quote = await requestQuote(service.payItemId, amount);
+    // 6. Demander un devis
+    console.log(`[Smobilpay-6] Demande de devis...`);
+    const quote = await requestQuote(config, service.payItemId, amount);
+    console.log(`[Smobilpay-6] Devis obtenu: ${quote.quoteId}`);
     
-    // 6. Mettre à jour avec le quoteId
+    // 7. Mettre à jour avec le quoteId
     transaction.quoteId = quote.quoteId;
     await transaction.save();
     
-    // 7. Exécuter le paiement
-    const collectResult = await collectPayment(quote.quoteId, customerData, paymentId);
+    // 8. Exécuter le paiement
+    console.log(`[Smobilpay-8] Exécution du paiement...`);
+    const collectResult = await collectPayment(config, quote.quoteId, customerData, paymentId);
+    console.log(`[Smobilpay-8] Paiement exécuté, PTN: ${collectResult.ptn}`);
     
-    // 8. Mettre à jour avec le PTN
+    // 9. Mettre à jour avec le PTN
     transaction.ptn = collectResult.ptn;
     await transaction.save();
     
-    // 9. Populer et retourner
+    // 10. Populer et retourner
     await transaction.populate(['package', 'user']);
+    console.log(`[Smobilpay-END] Transaction complétée avec succès`);
     
     return transaction;
   } catch (error) {
+    console.error(`[Smobilpay-ERROR] Erreur:`, {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
     throw error;
   }
 }
 
 /**
  * Vérifier le statut d'une transaction
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} paymentId - ID du paiement
  */
-async function checkTransactionStatus(appId,paymentId) {
+async function checkTransactionStatus(appId, app, paymentId) {
   try {
-    // Trouver la transaction
-  
-      const transaction = await SmobilpayTransaction.findOne({ appId, paymentId })
-  .populate(['package', 'user']);
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    validateConfig(config);
+
+    // 2. Trouver la transaction
+    const transaction = await SmobilpayTransaction.findOne({ appId, paymentId })
+      .populate(['package', 'user']);
     
     if (!transaction) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
@@ -393,18 +484,17 @@ async function checkTransactionStatus(appId,paymentId) {
     
     let apiResponse;
     
-    // Vérifier par PTN ou paymentId
+    // 3. Vérifier par PTN ou paymentId
     if (transaction.ptn) {
-      apiResponse = await verifyTransaction(transaction.ptn);
+      apiResponse = await verifyTransaction(config, transaction.ptn);
     } else {
-      apiResponse = await verifyTransaction(paymentId, true);
+      apiResponse = await verifyTransaction(config, paymentId, true);
     }
     
-    // Traiter la réponse API
+    // 4. Traiter la réponse API
     const transactionData = Array.isArray(apiResponse) ? apiResponse[0] : apiResponse;
     
     if (transactionData) {
-      // Mettre à jour les champs
       const fieldsToUpdate = [
         'ptn', 'status', 'timestamp', 'receiptNumber', 'veriCode',
         'clearingDate', 'priceLocalCur', 'pin', 'tag', 'errorCode'
@@ -434,6 +524,7 @@ async function checkTransactionStatus(appId,paymentId) {
 }
 
 module.exports = {
+  getConfig,
   getServices,
   initiatePayment,
   checkTransactionStatus,

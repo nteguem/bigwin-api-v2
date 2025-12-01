@@ -6,36 +6,6 @@ const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
-// Configuration de base
-const API_URL = process.env.CINETPAY_API_URL;
-
-// Configuration multi-devises
-const CINETPAY_CONFIGS = {
-  XOF: {
-    API_KEY: process.env.CINETPAY_XOF_API_KEY,
-    SITE_ID: process.env.CINETPAY_XOF_SITE_ID,
-    SECRET_KEY: process.env.CINETPAY_XOF_SECRET_KEY
-  },
-  XAF: {
-    API_KEY: process.env.CINETPAY_XAF_API_KEY,
-    SITE_ID: process.env.CINETPAY_XAF_SITE_ID,
-    SECRET_KEY: process.env.CINETPAY_XAF_SECRET_KEY
-  }
-};
-
-// Validation des variables d'environnement
-if (!API_URL) {
-  throw new Error('CINETPAY_API_URL manquante');
-}
-
-if (!CINETPAY_CONFIGS.XOF.API_KEY || !CINETPAY_CONFIGS.XOF.SITE_ID || !CINETPAY_CONFIGS.XOF.SECRET_KEY) {
-  console.warn('⚠️ Variables CinetPay XOF incomplètes');
-}
-
-if (!CINETPAY_CONFIGS.XAF.API_KEY || !CINETPAY_CONFIGS.XAF.SITE_ID || !CINETPAY_CONFIGS.XAF.SECRET_KEY) {
-  console.warn('⚠️ Variables CinetPay XAF incomplètes');
-}
-
 // Classe d'erreur personnalisée
 class CinetpayError extends Error {
   constructor(message, statusCode, responseData) {
@@ -44,6 +14,94 @@ class CinetpayError extends Error {
     this.statusCode = statusCode;
     this.responseData = responseData;
   }
+}
+
+/**
+ * Récupérer la configuration CinetPay
+ * Priorité : Base de données > Variables d'environnement
+ * @param {Object} app - Document App depuis req.currentApp
+ * @returns {Object} Configuration CinetPay
+ */
+function getConfig(app) {
+  const dbConfig = app?.payments?.cinetpay;
+  
+  // Si config en base et activée, l'utiliser
+  if (dbConfig?.enabled) {
+    return {
+      apiUrl: process.env.CINETPAY_API_URL,
+      xof: {
+        apiKey: dbConfig.xof?.apiKey || process.env.CINETPAY_XOF_API_KEY,
+        siteId: dbConfig.xof?.siteId || process.env.CINETPAY_XOF_SITE_ID,
+        secretKey: dbConfig.xof?.secretKey || process.env.CINETPAY_XOF_SECRET_KEY
+      },
+      xaf: {
+        apiKey: dbConfig.xaf?.apiKey || process.env.CINETPAY_XAF_API_KEY,
+        siteId: dbConfig.xaf?.siteId || process.env.CINETPAY_XAF_SITE_ID,
+        secretKey: dbConfig.xaf?.secretKey || process.env.CINETPAY_XAF_SECRET_KEY
+      },
+      enabled: true
+    };
+  }
+  
+  // Fallback sur les variables d'environnement
+  return {
+    apiUrl: process.env.CINETPAY_API_URL,
+    xof: {
+      apiKey: process.env.CINETPAY_XOF_API_KEY,
+      siteId: process.env.CINETPAY_XOF_SITE_ID,
+      secretKey: process.env.CINETPAY_XOF_SECRET_KEY
+    },
+    xaf: {
+      apiKey: process.env.CINETPAY_XAF_API_KEY,
+      siteId: process.env.CINETPAY_XAF_SITE_ID,
+      secretKey: process.env.CINETPAY_XAF_SECRET_KEY
+    },
+    enabled: !!(process.env.CINETPAY_API_URL)
+  };
+}
+
+/**
+ * Valider la configuration CinetPay
+ * @param {Object} config - Configuration à valider
+ * @param {String} currency - Devise (XOF ou XAF)
+ * @throws {CinetpayError} Si configuration invalide
+ */
+function validateConfig(config, currency) {
+  if (!config.enabled) {
+    throw new CinetpayError('CinetPay n\'est pas configuré pour cette application', 400);
+  }
+  
+  if (!config.apiUrl) {
+    throw new CinetpayError('URL API CinetPay non configurée', 500);
+  }
+  
+  const currencyConfig = currency === 'XAF' ? config.xaf : config.xof;
+  
+  if (!currencyConfig.apiKey || !currencyConfig.siteId || !currencyConfig.secretKey) {
+    throw new CinetpayError(
+      `Configuration CinetPay ${currency} incomplète. Vérifiez apiKey, siteId et secretKey`,
+      500
+    );
+  }
+}
+
+/**
+ * Obtenir la configuration selon la devise
+ * @param {Object} config - Configuration globale
+ * @param {String} currency - Devise (XOF ou XAF)
+ */
+function getConfigForCurrency(config, currency) {
+  const currencyConfig = currency === 'XAF' ? config.xaf : config.xof;
+  
+  if (!currencyConfig) {
+    throw new AppError(`Devise non supportée: ${currency}`, 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  return {
+    API_KEY: currencyConfig.apiKey,
+    SITE_ID: currencyConfig.siteId,
+    SECRET_KEY: currencyConfig.secretKey
+  };
 }
 
 /**
@@ -73,17 +131,6 @@ function detectCurrencyFromPhone(phoneNumber) {
 }
 
 /**
- * Obtenir la configuration selon la devise
- */
-function getConfigForCurrency(currency) {
-  const config = CINETPAY_CONFIGS[currency];
-  if (!config) {
-    throw new AppError(`Devise non supportée: ${currency}`, 400, ErrorCodes.VALIDATION_ERROR);
-  }
-  return config;
-}
-
-/**
  * Générer les URLs de notification et de retour
  */
 function generateUrls() {
@@ -96,10 +143,14 @@ function generateUrls() {
 
 /**
  * Vérifier le token HMAC du webhook
+ * @param {String} receivedToken - Token reçu
+ * @param {Object} data - Données du webhook
+ * @param {Object} config - Configuration CinetPay
+ * @param {String} currency - Devise
  */
-function verifyHmacToken(receivedToken, data, currency) {
+function verifyHmacToken(receivedToken, data, config, currency) {
   try {
-    const config = getConfigForCurrency(currency);
+    const currencyConfig = getConfigForCurrency(config, currency);
     
     const concatenatedString = 
       data.cpm_site_id +
@@ -121,7 +172,7 @@ function verifyHmacToken(receivedToken, data, currency) {
       '';
 
     const calculatedToken = crypto
-      .createHmac('sha256', config.SECRET_KEY)
+      .createHmac('sha256', currencyConfig.SECRET_KEY)
       .update(concatenatedString)
       .digest('hex');
 
@@ -134,32 +185,53 @@ function verifyHmacToken(receivedToken, data, currency) {
 
 /**
  * Initier un paiement CinetPay
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} userId - ID de l'utilisateur
+ * @param {String} packageId - ID du package
+ * @param {String} phoneNumber - Numéro de téléphone
+ * @param {String} customerName - Nom du client
+ * @param {String} email - Email du client
  */
-async function initiatePayment(appId, userId, packageId, phoneNumber, customerName, email) {
+async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email) {
   try {
-    // 1. Récupérer le package
+    console.log(`[CinetPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, phone=${phoneNumber}`);
+
+    // 1. Récupérer et valider la config
+    const config = getConfig(app);
+    
+    // 2. Récupérer le package
     const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
+    console.log(`[CinetPay-2] Package trouvé: ${packageDoc.name.fr}`);
 
-    // 2. Détecter automatiquement la devise selon le numéro
+    // 3. Détecter automatiquement la devise selon le numéro
     const currency = detectCurrencyFromPhone(phoneNumber);
+    console.log(`[CinetPay-3] Devise détectée: ${currency}`);
 
-    // 3. Récupérer le prix dans la devise détectée
+    // 4. Valider la config pour cette devise
+    validateConfig(config, currency);
+
+    // 5. Récupérer le prix dans la devise détectée
     const amount = packageDoc.pricing.get(currency);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
+    console.log(`[CinetPay-5] Prix: ${amount} ${currency}`);
 
-    // 4. Obtenir la configuration pour cette devise
-    const config = getConfigForCurrency(currency);
-    // 5. Générer un ID de transaction unique
+    // 6. Obtenir la configuration pour cette devise
+    const currencyConfig = getConfigForCurrency(config, currency);
+
+    // 7. Générer un ID de transaction unique
     const transactionId = `TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
+    console.log(`[CinetPay-7] TransactionId généré: ${transactionId}`);
 
-    // 6. Générer les URLs
+    // 8. Générer les URLs
     const { notify_url, return_url } = generateUrls();
-    // 7. Créer la transaction en base
+
+    // 9. Créer la transaction en base
     const cinetpayTransaction = new CinetpayTransaction({
       appId,
       transactionId,
@@ -176,11 +248,12 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, customerNa
     });
 
     await cinetpayTransaction.save();
+    console.log(`[CinetPay-9] Transaction sauvegardée`);
 
-    // 8. Préparer les données pour l'API CinetPay
+    // 10. Préparer les données pour l'API CinetPay
     const paymentData = {
-      apikey: config.API_KEY,
-      site_id: parseInt(config.SITE_ID),
+      apikey: currencyConfig.API_KEY,
+      site_id: parseInt(currencyConfig.SITE_ID),
       transaction_id: transactionId,
       amount,
       description: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
@@ -192,17 +265,20 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, customerNa
       channels: 'ALL',
       lang: 'FR'
     };
-    // 9. Appeler l'API CinetPay
-    const response = await axios.post(API_URL, paymentData, {
+    console.log(`[CinetPay-10] PaymentData préparée`);
+
+    // 11. Appeler l'API CinetPay
+    console.log(`[CinetPay-11] Appel API CinetPay...`);
+    const response = await axios.post(config.apiUrl, paymentData, {
       headers: {
         'Content-Type': 'application/json'
       }
     });
+    console.log(`[CinetPay-11] Réponse API:`, response.data);
 
-    // 10. Vérifier la réponse
+    // 12. Vérifier la réponse
     if (response.data.code !== '201') {
       console.error('Payment initialization failed with code:', response.data.code);
-      // Supprimer la transaction si l'initialisation échoue
       await CinetpayTransaction.findByIdAndDelete(cinetpayTransaction._id);
       
       throw new CinetpayError(
@@ -212,20 +288,28 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, customerNa
       );
     }
 
-    // 11. Mettre à jour la transaction avec les données CinetPay
+    // 13. Mettre à jour la transaction avec les données CinetPay
     cinetpayTransaction.paymentToken = response.data.data.payment_token;
     cinetpayTransaction.paymentUrl = response.data.data.payment_url;
     cinetpayTransaction.apiResponseId = response.data.api_response_id;
     await cinetpayTransaction.save();
     
-    // 12. Populer et retourner
+    // 14. Populer et retourner
     await cinetpayTransaction.populate(['package', 'user']);
+    console.log(`[CinetPay-END] Transaction complétée avec succès`);
+
     return {
       transaction: cinetpayTransaction,
       paymentUrl: response.data.data.payment_url
     };
 
   } catch (error) {
+    console.error(`[CinetPay-ERROR] Erreur:`, {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+
     if (error instanceof CinetpayError || error instanceof AppError) {
       throw error;
     }
@@ -238,37 +322,45 @@ async function initiatePayment(appId, userId, packageId, phoneNumber, customerNa
       );
     }
 
-    console.error('Error stack:', error.stack);
     throw error;
   }
 }
 
 /**
  * Vérifier le statut d'une transaction
+ * @param {String} appId - ID de l'application
+ * @param {Object} app - Document App depuis req.currentApp
+ * @param {String} transactionId - ID de la transaction
  */
-async function checkTransactionStatus(appId,transactionId) {
+async function checkTransactionStatus(appId, app, transactionId) {
   try {
-    // 1. Trouver la transaction
-    const transaction = await CinetpayTransaction.findOne({appId, transactionId })
+    // 1. Récupérer la config
+    const config = getConfig(app);
+
+    // 2. Trouver la transaction
+    const transaction = await CinetpayTransaction.findOne({ appId, transactionId })
       .populate(['package', 'user']);
 
     if (!transaction) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // 2. Obtenir la configuration pour cette devise
-    const config = getConfigForCurrency(transaction.currency);
+    // 3. Valider la config pour cette devise
+    validateConfig(config, transaction.currency);
 
-    // 3. Appeler l'API CinetPay pour vérifier
+    // 4. Obtenir la configuration pour cette devise
+    const currencyConfig = getConfigForCurrency(config, transaction.currency);
+
+    // 5. Appeler l'API CinetPay pour vérifier
     const checkData = {
-      apikey: config.API_KEY,
-      site_id: parseInt(config.SITE_ID),
+      apikey: currencyConfig.API_KEY,
+      site_id: parseInt(currencyConfig.SITE_ID),
       transaction_id: transactionId
     };
 
-    console.log(`Checking ${transaction.currency} transaction ${transactionId} with SITE_ID: ${config.SITE_ID}`);
+    console.log(`Checking ${transaction.currency} transaction ${transactionId} with SITE_ID: ${currencyConfig.SITE_ID}`);
 
-    const response = await axios.post(`${API_URL}/check`, checkData, {
+    const response = await axios.post(`${config.apiUrl}/check`, checkData, {
       headers: {
         'Content-Type': 'application/json'
       }
@@ -276,7 +368,7 @@ async function checkTransactionStatus(appId,transactionId) {
 
     console.log(`Check response for ${transactionId}:`, response.data);
 
-    // 4. Traiter la réponse selon le code
+    // 6. Traiter la réponse selon le code
     if (response.data.code === '00') {
       // Transaction réussie
       const paymentData = response.data.data;
@@ -356,7 +448,7 @@ async function checkTransactionStatus(appId,transactionId) {
   } catch (error) {
     console.error('Error checking transaction status:', error.message);
     
-    if (error instanceof (CinetpayError || AppError)) {
+    if (error instanceof CinetpayError || error instanceof AppError) {
       throw error;
     }
 
@@ -374,6 +466,7 @@ async function checkTransactionStatus(appId,transactionId) {
 }
 
 module.exports = {
+  getConfig,
   initiatePayment,
   checkTransactionStatus,
   verifyHmacToken,

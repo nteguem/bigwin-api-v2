@@ -9,8 +9,19 @@ const catchAsync = require('../../../utils/catchAsync');
  */
 exports.getServices = catchAsync(async (req, res, next) => {
   const { country } = req.query;
+
+  const currentApp = req.currentApp;
+
+  // Vérifier que Smobilpay est activé pour cette app
+  if (!currentApp?.payments?.smobilpay?.enabled) {
+    return next(new AppError(
+      'Smobilpay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
   
-  const services = await smobilpayService.getServices(country);
+  const services = await smobilpayService.getServices(currentApp, country);
   
   res.status(200).json({
     success: true,
@@ -29,8 +40,8 @@ exports.getServices = catchAsync(async (req, res, next) => {
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, serviceId, phoneNumber } = req.body;
   
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
   
   // Validation - seulement 3 champs requis
   if (!packageId || !serviceId || !phoneNumber) {
@@ -40,8 +51,17 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
       ErrorCodes.VALIDATION_ERROR
     ));
   }
+
+  // Vérifier que Smobilpay est activé pour cette app
+  if (!currentApp?.payments?.smobilpay?.enabled) {
+    return next(new AppError(
+      'Smobilpay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
   
-  // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
+  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
@@ -63,9 +83,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     email: req.user.email || ''
   };
     
-  // ⭐ Passer appId au service
   const transaction = await smobilpayService.initiatePayment(
     appId,
+    currentApp,
     req.user._id,
     packageId,
     serviceId,
@@ -96,10 +116,19 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { paymentId } = req.params;
   
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
+
+  // Vérifier que Smobilpay est activé pour cette app
+  if (!currentApp?.payments?.smobilpay?.enabled) {
+    return next(new AppError(
+      'Smobilpay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
   
-  const transaction = await smobilpayService.checkTransactionStatus(appId, paymentId);
+  const transaction = await smobilpayService.checkTransactionStatus(appId, currentApp, paymentId);
   
   // Vérifier que la transaction appartient à l'utilisateur
   if (transaction.user._id.toString() !== req.user._id.toString()) {
@@ -109,7 +138,6 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   // Traiter la transaction si le statut a changé
   let subscription = null;
   try {
-    // ⭐ Passer appId au middleware
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
     console.error('Error processing transaction update:', error.message);
@@ -145,20 +173,27 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 exports.webhook = catchAsync(async (req, res, next) => {
   const { errorCode, status, trid: paymentId } = req.body;
   
-  // ⭐ Récupérer appId
   const appId = req.appId;
+  const currentApp = req.currentApp;
   
   console.log('Smobilpay webhook received:', req.body);
 
   if (!paymentId) {
     return next(new AppError('PTN ou paymentId requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
+
+  // Vérifier que Smobilpay est activé pour cette app
+  if (!currentApp?.payments?.smobilpay?.enabled) {
+    return next(new AppError(
+      'Smobilpay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
   
   try {
-    // Chercher la transaction
     const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
     
-    // ⭐ Filtrer par appId
     const query = { appId, paymentId };
     const transaction = await SmobilpayTransaction.findOne(query)
       .populate(['package', 'user']);
@@ -173,7 +208,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
       transaction.errorCode = errorCode || null;
       await transaction.save();
       
-      // ⭐ Traiter la transaction mise à jour avec appId
       await paymentMiddleware.processTransactionUpdate(appId, transaction);
     }
     
@@ -184,7 +218,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
   } catch (error) {
     console.error('Webhook processing error:', error.message);
     
-    // Retourner succès même en cas d'erreur pour éviter les retry excessifs
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',

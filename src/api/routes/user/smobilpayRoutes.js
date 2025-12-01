@@ -4,6 +4,7 @@ const smobilpayController = require('../../controllers/user/smobilpayController'
 const userAuth = require('../../middlewares/user/userAuth');
 
 const router = express.Router();
+
 /**
  * Routes publiques
  */
@@ -25,6 +26,5 @@ router.post('/initiate', smobilpayController.initiatePayment);
 
 // Vérifier le statut d'un paiement
 router.get('/status/:paymentId', smobilpayController.checkStatus);
-
 
 module.exports = router;
