@@ -8,12 +8,19 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
  */
 const send = catchAsync(async (req, res) => {
   const { playerIds, notification } = req.body;
-  
-  if (!playerIds || !notification?.contents) {
-    throw new AppError('playerIds et notification.contents requis', 400, ErrorCodes.BAD_REQUEST);
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
   }
   
-  const result = await notificationService.send(playerIds, notification);
+  if (!playerIds || !notification?.contents) {
+    throw new AppError('playerIds et notification.contents requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  const result = await notificationService.sendToUsers(appId, playerIds, notification);
   
   res.status(200).json({
     success: true,
@@ -26,12 +33,19 @@ const send = catchAsync(async (req, res) => {
  */
 const broadcast = catchAsync(async (req, res) => {
   const { notification } = req.body;
-  
-  if (!notification?.contents) {
-    throw new AppError('notification.contents requis', 400, ErrorCodes.BAD_REQUEST);
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
   }
   
-  const result = await notificationService.broadcast(notification);
+  if (!notification?.contents) {
+    throw new AppError('notification.contents requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  const result = await notificationService.sendToAll(appId, notification);
   
   res.status(200).json({
     success: true,
@@ -44,12 +58,19 @@ const broadcast = catchAsync(async (req, res) => {
  */
 const sendWithFilters = catchAsync(async (req, res) => {
   const { filters, notification } = req.body;
-  
-  if (!filters || !notification?.contents) {
-    throw new AppError('filters et notification.contents requis', 400, ErrorCodes.BAD_REQUEST);
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
   }
   
-  const result = await notificationService.sendWithFilters(filters, notification);
+  if (!filters || !notification?.contents) {
+    throw new AppError('filters et notification.contents requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  const result = await notificationService.sendWithFilters(appId, filters, notification);
   
   res.status(200).json({
     success: true,
@@ -58,16 +79,23 @@ const sendWithFilters = catchAsync(async (req, res) => {
 });
 
 /**
- * NOUVEAU: Vérifier si des player IDs sont valides
+ * Vérifier si des player IDs sont valides
  */
 const checkPlayers = catchAsync(async (req, res) => {
   const { playerIds } = req.body;
-  
-  if (!playerIds) {
-    throw new AppError('playerIds requis', 400, ErrorCodes.BAD_REQUEST);
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
   }
   
-  const result = await notificationService.checkPlayerIds(playerIds);
+  if (!playerIds) {
+    throw new AppError('playerIds requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  const result = await notificationService.checkPlayerIds(appId, playerIds);
   
   res.status(200).json({
     success: true,
@@ -76,12 +104,19 @@ const checkPlayers = catchAsync(async (req, res) => {
 });
 
 /**
- * NOUVEAU: Récupérer la liste des utilisateurs actifs
+ * Récupérer la liste des utilisateurs actifs
  */
 const getActivePlayers = catchAsync(async (req, res) => {
   const { limit = 50, offset = 0 } = req.query;
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
   
-  const result = await notificationService.getActivePlayers(parseInt(limit), parseInt(offset));
+  const result = await notificationService.getActivePlayers(appId, parseInt(limit), parseInt(offset));
   
   res.status(200).json({
     success: true,

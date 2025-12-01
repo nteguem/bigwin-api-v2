@@ -3,6 +3,8 @@ const { google } = require('googleapis');
 const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
 const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
+const Device = require('../../models/common/Device');
+const notificationService = require('../common/notificationService');
 
 class GooglePlayService {
   constructor() {
@@ -84,6 +86,133 @@ class GooglePlayService {
 
     if (!config.serviceAccountKeyPath) {
       throw new Error('serviceAccountKeyPath Google Play non configuré');
+    }
+  }
+
+  /**
+   * Envoyer une notification de paiement réussi Google Play
+   * @param {String} appId - ID de l'application
+   * @param {String} userId - ID de l'utilisateur
+   * @param {Object} packageItem - Document Package
+   * @param {Object} googleTx - Transaction Google Play
+   */
+  async sendPaymentSuccessNotification(appId, userId, packageItem, googleTx) {
+    try {
+      // Récupérer le device de l'utilisateur pour avoir son playerId
+      const device = await Device.findOne({
+        appId,
+        user: userId,
+        isActive: true,
+        playerId: { $exists: true, $ne: null }
+      }).sort({ lastActiveAt: -1 });
+
+      if (!device || !device.playerId) {
+        console.log(`[GooglePlay ${appId}] No playerId found for user ${userId}, skipping notification`);
+        return;
+      }
+
+      const packageName = packageItem?.name?.fr || packageItem?.name?.en || 'Package Premium';
+      const isOneTime = googleTx.purchaseType === 'ONE_TIME_PRODUCT';
+
+      const notification = {
+        headings: {
+          en: "🎉 Payment Successful!",
+          fr: "🎉 Paiement Réussi !"
+        },
+        contents: {
+          en: `Your ${isOneTime ? 'purchase' : 'subscription'} to ${packageName} is now active! Enjoy your premium features.`,
+          fr: `Votre ${isOneTime ? 'achat' : 'abonnement'} à ${packageName} est maintenant actif ! Profitez de vos avantages premium.`
+        },
+        data: {
+          type: "payment_success",
+          provider: "GOOGLE_PLAY",
+          transaction_id: googleTx._id.toString(),
+          order_id: googleTx.orderId,
+          package_id: packageItem._id.toString(),
+          purchase_type: googleTx.purchaseType,
+          action: "view_subscription"
+        },
+        options: {
+          android_accent_color: "00C853",
+          small_icon: "ic_notification",
+          large_icon: "ic_launcher",
+          priority: 8
+        }
+      };
+
+      await notificationService.sendToUsers(appId, [device.playerId], notification);
+
+      console.log(`[GooglePlay ${appId}] Payment success notification sent to user ${userId}`);
+    } catch (error) {
+      console.error(`[GooglePlay ${appId}] Error sending payment success notification:`, error.message);
+    }
+  }
+
+  /**
+   * Envoyer une notification de paiement échoué/annulé Google Play
+   * @param {String} appId - ID de l'application
+   * @param {String} userId - ID de l'utilisateur
+   * @param {Object} packageItem - Document Package (optionnel)
+   * @param {String} reason - Raison de l'échec
+   */
+  async sendPaymentFailedNotification(appId, userId, packageItem, reason = 'canceled') {
+    try {
+      const device = await Device.findOne({
+        appId,
+        user: userId,
+        isActive: true,
+        playerId: { $exists: true, $ne: null }
+      }).sort({ lastActiveAt: -1 });
+
+      if (!device || !device.playerId) {
+        console.log(`[GooglePlay ${appId}] No playerId found for user ${userId}, skipping notification`);
+        return;
+      }
+
+      const packageName = packageItem?.name?.fr || packageItem?.name?.en || 'Package Premium';
+
+      let headingEn, headingFr, contentEn, contentFr;
+
+      if (reason === 'expired') {
+        headingEn = "⏰ Subscription Expired";
+        headingFr = "⏰ Abonnement Expiré";
+        contentEn = `Your subscription to ${packageName} has expired. Renew now to continue enjoying premium features.`;
+        contentFr = `Votre abonnement à ${packageName} a expiré. Renouvelez maintenant pour continuer à profiter des avantages premium.`;
+      } else if (reason === 'on_hold') {
+        headingEn = "⚠️ Payment Issue";
+        headingFr = "⚠️ Problème de Paiement";
+        contentEn = `Your subscription to ${packageName} is on hold due to a payment issue. Please update your payment method.`;
+        contentFr = `Votre abonnement à ${packageName} est suspendu en raison d'un problème de paiement. Veuillez mettre à jour votre moyen de paiement.`;
+      } else {
+        headingEn = "❌ Subscription Canceled";
+        headingFr = "❌ Abonnement Annulé";
+        contentEn = `Your subscription to ${packageName} has been canceled. You can resubscribe anytime.`;
+        contentFr = `Votre abonnement à ${packageName} a été annulé. Vous pouvez vous réabonner à tout moment.`;
+      }
+
+      const notification = {
+        headings: { en: headingEn, fr: headingFr },
+        contents: { en: contentEn, fr: contentFr },
+        data: {
+          type: "payment_issue",
+          provider: "GOOGLE_PLAY",
+          reason: reason,
+          package_id: packageItem?._id?.toString(),
+          action: "view_subscription"
+        },
+        options: {
+          android_accent_color: "D32F2F",
+          small_icon: "ic_notification",
+          large_icon: "ic_launcher",
+          priority: 7
+        }
+      };
+
+      await notificationService.sendToUsers(appId, [device.playerId], notification);
+
+      console.log(`[GooglePlay ${appId}] Payment ${reason} notification sent to user ${userId}`);
+    } catch (error) {
+      console.error(`[GooglePlay ${appId}] Error sending payment ${reason} notification:`, error.message);
     }
   }
 
@@ -257,7 +386,12 @@ class GooglePlayService {
         });
       }
 
-      // 12. Retourner le résultat avec populate
+      // 12. Envoyer notification de succès
+      this.sendPaymentSuccessNotification(appId, userId, packageItem, googleTx).catch(error => {
+        console.error(`[GooglePlay ONE-TIME] Erreur notification (non bloquant):`, error.message);
+      });
+
+      // 13. Retourner le résultat avec populate
       const populatedSubscription = await Subscription.findById(subscription._id)
         .populate('package');
 
@@ -426,7 +560,12 @@ class GooglePlayService {
         });
       }
 
-      // 10. Retourner le résultat avec populate
+      // 10. Envoyer notification de succès
+      this.sendPaymentSuccessNotification(appId, userId, packageItem, googleTx).catch(error => {
+        console.error(`[GooglePlay SUB] Erreur notification (non bloquant):`, error.message);
+      });
+
+      // 11. Retourner le résultat avec populate
       const populatedSubscription = await Subscription.findById(subscription._id)
         .populate('package');
 
@@ -516,15 +655,15 @@ class GooglePlayService {
         switch (notificationType) {
           case 1: // SUBSCRIPTION_RECOVERED
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_RECOVERED');
-            await this.handleRecovery(app, googleTx);
+            await this.handleRecovery(appId, app, googleTx);
             break;
           case 2: // SUBSCRIPTION_RENEWED
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_RENEWED');
-            await this.handleRenewal(app, googleTx);
+            await this.handleRenewal(appId, app, googleTx);
             break;
           case 3: // SUBSCRIPTION_CANCELED
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_CANCELED');
-            await this.handleCancellation(googleTx);
+            await this.handleCancellation(appId, googleTx);
             break;
           case 4: // SUBSCRIPTION_PURCHASED
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_PURCHASED');
@@ -532,11 +671,11 @@ class GooglePlayService {
           case 5: // SUBSCRIPTION_ON_HOLD (ancienne version)
           case 11: // SUBSCRIPTION_ON_HOLD (nouvelle version)
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_ON_HOLD');
-            await this.handleOnHold(googleTx);
+            await this.handleOnHold(appId, googleTx);
             break;
           case 13: // SUBSCRIPTION_EXPIRED
             console.log('[NOTIFICATION SUB] → SUBSCRIPTION_EXPIRED');
-            await this.handleExpiration(googleTx);
+            await this.handleExpiration(appId, googleTx);
             break;
           default:
             console.log(`[NOTIFICATION SUB] Type ${notificationType} non géré`);
@@ -563,7 +702,7 @@ class GooglePlayService {
 
       console.log(`[NOTIFICATION ONE-TIME] App: ${appId}, Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
-      const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
+      const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken }).populate('package');
       if (!googleTx) {
         console.log(`[NOTIFICATION ONE-TIME] Transaction non trouvée pour app ${appId}:`, purchaseToken);
         return;
@@ -585,6 +724,12 @@ class GooglePlayService {
             googleTx.subscription,
             { status: 'expired' }
           );
+
+          // Envoyer notification d'annulation
+          const packageItem = await Package.findById(googleTx.package);
+          this.sendPaymentFailedNotification(appId, googleTx.user, packageItem, 'canceled').catch(error => {
+            console.error(`[NOTIFICATION ONE-TIME] Erreur notification (non bloquant):`, error.message);
+          });
           break;
 
         default:
@@ -600,7 +745,7 @@ class GooglePlayService {
   }
 
   // ===== Méthodes pour abonnements =====
-  async handleRecovery(app, googleTx) {
+  async handleRecovery(appId, app, googleTx) {
     try {
       console.log('[RECOVERY] Début récupération pour:', googleTx.purchaseToken);
       
@@ -643,6 +788,12 @@ class GooglePlayService {
         }
       );
 
+      // Envoyer notification de récupération
+      const packageItem = await Package.findById(googleTx.package);
+      this.sendPaymentSuccessNotification(appId, googleTx.user, packageItem, googleTx).catch(error => {
+        console.error(`[RECOVERY] Erreur notification (non bloquant):`, error.message);
+      });
+
       console.log('[RECOVERY] Abonnement récupéré avec succès');
       
     } catch (error) {
@@ -651,7 +802,7 @@ class GooglePlayService {
     }
   }
 
-  async handleRenewal(app, googleTx) {
+  async handleRenewal(appId, app, googleTx) {
     try {
       console.log('[RENEWAL] Début pour:', googleTx.purchaseToken);
       
@@ -710,6 +861,12 @@ class GooglePlayService {
         }
       );
 
+      // Envoyer notification de renouvellement
+      const packageItem = await Package.findById(googleTx.package);
+      this.sendPaymentSuccessNotification(appId, googleTx.user, packageItem, googleTx).catch(error => {
+        console.error(`[RENEWAL] Erreur notification (non bloquant):`, error.message);
+      });
+
       console.log('[RENEWAL] Renouvellement traité avec succès');
       
     } catch (error) {
@@ -718,12 +875,18 @@ class GooglePlayService {
     }
   }
 
-  async handleCancellation(googleTx) {
+  async handleCancellation(appId, googleTx) {
     try {
       console.log('[CANCELLATION] Début pour:', googleTx.purchaseToken);
       
       googleTx.status = 'CANCELED';
       await googleTx.save();
+
+      // Envoyer notification d'annulation
+      const packageItem = await Package.findById(googleTx.package);
+      this.sendPaymentFailedNotification(appId, googleTx.user, packageItem, 'canceled').catch(error => {
+        console.error(`[CANCELLATION] Erreur notification (non bloquant):`, error.message);
+      });
       
       console.log('[CANCELLATION] Traité - abonnement reste actif jusqu\'à expiration');
       
@@ -733,7 +896,7 @@ class GooglePlayService {
     }
   }
 
-  async handleOnHold(googleTx) {
+  async handleOnHold(appId, googleTx) {
     try {
       console.log('[ON_HOLD] Début pour:', googleTx.purchaseToken);
       
@@ -745,6 +908,12 @@ class GooglePlayService {
         { status: 'expired' }
       );
 
+      // Envoyer notification de suspension
+      const packageItem = await Package.findById(googleTx.package);
+      this.sendPaymentFailedNotification(appId, googleTx.user, packageItem, 'on_hold').catch(error => {
+        console.error(`[ON_HOLD] Erreur notification (non bloquant):`, error.message);
+      });
+
       console.log('[ON_HOLD] Traité - accès suspendu');
       
     } catch (error) {
@@ -753,7 +922,7 @@ class GooglePlayService {
     }
   }
 
-  async handleExpiration(googleTx) {
+  async handleExpiration(appId, googleTx) {
     try {
       console.log('[EXPIRATION] Début pour:', googleTx.purchaseToken);
       
@@ -764,6 +933,12 @@ class GooglePlayService {
         googleTx.subscription,
         { status: 'expired' }
       );
+
+      // Envoyer notification d'expiration
+      const packageItem = await Package.findById(googleTx.package);
+      this.sendPaymentFailedNotification(appId, googleTx.user, packageItem, 'expired').catch(error => {
+        console.error(`[EXPIRATION] Erreur notification (non bloquant):`, error.message);
+      });
 
       console.log('[EXPIRATION] Traité');
       
