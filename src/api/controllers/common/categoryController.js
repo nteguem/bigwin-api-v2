@@ -5,21 +5,21 @@ const { formatSuccess, formatError } = require('../../../utils/responseFormatter
 
 class CategoryController {
 
-  // GET /categories - Récupérer toutes les catégories
   async getCategories(req, res) {
     try {
-      // ⭐ Récupérer appId
       const appId = req.appId;
       
       const { offset = 0, limit = 10, isVip, isActive } = req.query;
       
-      // ⭐ Passer appId au service
-      const result = await categoryService.getCategories(appId, {
+      // ⭐ CONVERTIR EN BOOLEAN AVANT DE PASSER AU SERVICE
+      const filters = {
         offset: parseInt(offset),
         limit: parseInt(limit),
         isVip: isVip !== undefined ? isVip === 'true' : null,
         isActive: isActive !== undefined ? isActive === 'true' : null
-      });
+      };
+      
+      const result = await categoryService.getCategories(appId, filters);
 
       formatSuccess(res, {
         data: result.data,
@@ -31,15 +31,11 @@ class CategoryController {
     }
   }
 
-  // GET /categories/:id - Récupérer une catégorie par ID
   async getCategoryById(req, res) {
     try {
-      // ⭐ Récupérer appId
       const appId = req.appId;
-      
       const { id } = req.params;
       
-      // ⭐ Passer appId au service
       const category = await categoryService.getCategoryById(appId, id);
 
       if (!category) {
@@ -55,19 +51,15 @@ class CategoryController {
     }
   }
 
-  // POST /categories - Créer une nouvelle catégorie
   async createCategory(req, res) {
     try {
-      // ⭐ Récupérer appId
       const appId = req.appId;
-      
       const { name, description, icon, successRate, isVip, isActive } = req.body;
 
       if (!name) {
         return formatError(res, 'Name is required', 400);
       }
 
-      // Validation du successRate
       if (successRate !== undefined && (successRate < 0 || successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
@@ -78,10 +70,9 @@ class CategoryController {
         icon,
         successRate,
         isActive,
-        isVip: isVip
+        isVip
       };
 
-      // ⭐ Passer appId au service
       const category = await categoryService.createCategory(appId, categoryData);
       
       res.status(201);
@@ -93,26 +84,20 @@ class CategoryController {
       if (error.code === 11000) {
         return formatError(res, 'Category name already exists', 409);
       }
-      console.error('Error creating category:', error);
       formatError(res, error.message, 500);
     }
   }
 
-  // PUT /categories/:id - Mettre à jour une catégorie
   async updateCategory(req, res) {
     try {
-      // ⭐ Récupérer appId
       const appId = req.appId;
-      
       const { id } = req.params;
       const updates = req.body;
 
-      // Validation du successRate si présent dans les updates
       if (updates.successRate !== undefined && (updates.successRate < 0 || updates.successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
 
-      // ⭐ Passer appId au service
       const category = await categoryService.updateCategory(appId, id, updates);
 
       if (!category) {
@@ -131,15 +116,11 @@ class CategoryController {
     }
   }
 
-  // DELETE /categories/:id - Désactiver une catégorie
   async deleteCategory(req, res) {
     try {
-      // ⭐ Récupérer appId
       const appId = req.appId;
-      
       const { id } = req.params;
       
-      // ⭐ Passer appId au service
       const category = await categoryService.deactivateCategory(appId, id);
 
       if (!category) {
