@@ -24,6 +24,7 @@ class CategoryController {
         message: 'Categories retrieved successfully'
       });
     } catch (error) {
+      console.log("error",JSON.stringify(error.message))
       formatError(res, error.message, 500);
     }
   }
