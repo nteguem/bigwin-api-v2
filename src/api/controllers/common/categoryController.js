@@ -7,14 +7,10 @@ class CategoryController {
 
   async getCategories(req, res) {
     try {
-     console.log('[CategoryController] req.query BRUT:', req.query); // ⭐ AJOUTE CETTE LIGNE
     
     const appId = req.appId;
     const { offset = 0, limit = 10, isVip, isActive } = req.query;
-    
-    console.log('[CategoryController] isVip:', isVip); // ⭐ AJOUTE CETTE LIGNE
-    console.log('[CategoryController] isActive:', isActive); // ⭐ AJOUTE CETTE LIGNE
-    
+        
     const result = await categoryService.getCategories(appId, {
       offset: parseInt(offset),
       limit: parseInt(limit),
