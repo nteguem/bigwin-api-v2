@@ -1,5 +1,4 @@
 // services/user/GooglePlayService.js
-
 const { google } = require('googleapis');
 const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction');
 const Subscription = require('../../models/common/Subscription');
@@ -7,88 +6,99 @@ const Package = require('../../models/common/Package');
 
 class GooglePlayService {
   constructor() {
-    this.clientCache = new Map();
-    this.cacheMaxAge = 24 * 60 * 60 * 1000; // 24 heures
-    this.cacheTimestamps = new Map();
+    // Cache des clients Google API par appId
+    this.clients = new Map();
   }
 
   /**
-   * Obtenir le client Google Play pour une app spécifique (avec cache)
+   * Obtenir ou créer un client Google API pour une app
+   * @param {Object} app - Document App depuis req.currentApp
+   * @returns {Object} Client androidpublisher
    */
-  async getClientForApp(appId) {
-    const now = Date.now();
+  getClient(app) {
+    const appId = app.appId;
     
-    if (this.clientCache.has(appId)) {
-      const cacheTime = this.cacheTimestamps.get(appId);
-      
-      if (now - cacheTime < this.cacheMaxAge) {
-        return this.clientCache.get(appId);
-      }
-      
-      this.clientCache.delete(appId);
-      this.cacheTimestamps.delete(appId);
+    // Vérifier le cache
+    if (this.clients.has(appId)) {
+      return this.clients.get(appId);
     }
 
-    const App = require('../../models/common/App');
-    const app = await App.findOne({ appId, isActive: true });
-    
-    if (!app) {
-      throw new Error(`Application ${appId} non trouvée ou inactive`);
+    // Vérifier la configuration
+    if (!app.googlePlay?.serviceAccountKeyPath) {
+      throw new Error(`Google Play non configuré pour l'app ${appId}: serviceAccountKeyPath manquant`);
     }
 
-    const googleConfig = app.getGooglePlayConfig();
-    
-    if (!googleConfig.packageName || !googleConfig.serviceAccountKeyPath) {
-      throw new Error(`Configuration Google Play manquante pour l'app ${appId}`);
+    if (!app.googlePlay?.packageName) {
+      throw new Error(`Google Play non configuré pour l'app ${appId}: packageName manquant`);
     }
 
+    console.log(`[GooglePlay] Initialisation client pour app ${appId} avec keyPath: ${app.googlePlay.serviceAccountKeyPath}`);
+
+    // Créer le client
     const auth = new google.auth.GoogleAuth({
-      keyFile: googleConfig.serviceAccountKeyPath,
+      keyFile: app.googlePlay.serviceAccountKeyPath,
       scopes: ['https://www.googleapis.com/auth/androidpublisher']
     });
 
-    const client = {
-      androidPublisher: google.androidpublisher({
-        version: 'v3',
-        auth
-      }),
-      packageName: googleConfig.packageName
-    };
+    const androidPublisher = google.androidpublisher({
+      version: 'v3',
+      auth
+    });
 
-    this.clientCache.set(appId, client);
-    this.cacheTimestamps.set(appId, now);
-    
-    console.log(`[GooglePlay] Client créé et mis en cache pour l'app: ${appId}`);
-    
-    return client;
+    // Mettre en cache avec le packageName pour référence
+    this.clients.set(appId, {
+      androidPublisher,
+      packageName: app.googlePlay.packageName
+    });
+
+    return this.clients.get(appId);
   }
 
   /**
-   * Invalider le cache (si config change)
+   * Obtenir la configuration Google Play
+   * @param {Object} app - Document App
+   * @returns {Object} Configuration
    */
-  clearConfigCache(appId = null) {
-    if (appId) {
-      this.clientCache.delete(appId);
-      this.cacheTimestamps.delete(appId);
-      console.log(`[GooglePlay] Cache invalidé pour l'app: ${appId}`);
-    } else {
-      this.clientCache.clear();
-      this.cacheTimestamps.clear();
-      console.log('[GooglePlay] Cache global invalidé');
+  getConfig(app) {
+    return {
+      packageName: app.googlePlay?.packageName,
+      serviceAccountKeyPath: app.googlePlay?.serviceAccountKeyPath,
+      enabled: !!(app.googlePlay?.packageName && app.googlePlay?.serviceAccountKeyPath)
+    };
+  }
+
+  /**
+   * Valider la configuration
+   * @param {Object} app - Document App
+   */
+  validateConfig(app) {
+    const config = this.getConfig(app);
+    
+    if (!config.enabled) {
+      throw new Error('Google Play n\'est pas configuré pour cette application');
+    }
+
+    if (!config.packageName) {
+      throw new Error('packageName Google Play non configuré');
+    }
+
+    if (!config.serviceAccountKeyPath) {
+      throw new Error('serviceAccountKeyPath Google Play non configuré');
     }
   }
 
-  /**
-   * Valider un produit ponctuel depuis Flutter
-   */
-  async validateOneTimePurchase(appId, purchaseToken, productId, userId, packageId) {
+  // ===== NOUVEAU : Valider un PRODUIT PONCTUEL depuis Flutter =====
+  async validateOneTimePurchase(appId, app, purchaseToken, productId, userId, packageId) {
     try {
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Début validation:`, { purchaseToken, productId, packageId });
+      console.log(`[GooglePlay ONE-TIME] Début validation pour app ${appId}:`, { purchaseToken, productId, packageId });
       
-      const client = await this.getClientForApp(appId);
-      
-      const { data } = await client.androidPublisher.purchases.products.get({
-        packageName: client.packageName,
+      // Valider la config et obtenir le client
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      // 1. Vérifier avec l'API Google
+      const { data } = await androidPublisher.purchases.products.get({
+        packageName: packageName,
         productId: productId,
         token: purchaseToken
       });
@@ -97,9 +107,12 @@ class GooglePlayService {
         throw new Error('Réponse invalide de Google Play');
       }
 
+      console.log(`[GooglePlay ONE-TIME] Réponse API Google:`, JSON.stringify(data, null, 2));
+
+      // 2. Vérifier si déjà traité
       const existingTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
       if (existingTx) {
-        console.log(`[GooglePlay ONE-TIME] [${appId}] Transaction déjà traitée:`, existingTx._id);
+        console.log(`[GooglePlay ONE-TIME] Transaction déjà traitée:`, existingTx._id);
         const subscription = await Subscription.findById(existingTx.subscription)
           .populate('package');
         
@@ -113,12 +126,13 @@ class GooglePlayService {
         };
       }
 
+      // 3. Vérifier l'état de l'achat
       const purchaseState = data.purchaseState;
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Purchase state:`, purchaseState, typeof purchaseState);
+      console.log(`[GooglePlay ONE-TIME] Purchase state:`, purchaseState, typeof purchaseState);
 
       if (purchaseState === undefined) {
-        console.log(`[GooglePlay ONE-TIME] [${appId}] ⚠️ purchaseState undefined, on continue`);
+        console.log(`[GooglePlay ONE-TIME] ⚠️ purchaseState undefined, on continue pour debug`);
       } else {
         if (purchaseState === 2) {
           throw new Error('Paiement en attente. Veuillez patienter.');
@@ -133,11 +147,13 @@ class GooglePlayService {
         }
       }
 
+      // 4. Récupérer le package
       const packageItem = await Package.findOne({ _id: packageId, appId });
       if (!packageItem) {
         throw new Error('Package non trouvé: ' + packageId);
       }
 
+      // 5. Parser les dates
       let startDate = new Date();
       let purchaseTime = data.purchaseTimeMillis 
         ? new Date(parseInt(data.purchaseTimeMillis)) 
@@ -145,12 +161,13 @@ class GooglePlayService {
       
       let endDate = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Dates calculées:`, { 
+      console.log(`[GooglePlay ONE-TIME] Dates calculées:`, { 
         startDate: startDate.toISOString(), 
         endDate: endDate.toISOString(),
         purchaseTime: purchaseTime.toISOString()
       });
 
+      // 6. Extraire quantité et état de consommation
       let quantity = 1;
       let consumptionState = 'YET_TO_BE_CONSUMED';
       
@@ -158,8 +175,7 @@ class GooglePlayService {
         consumptionState = 'CONSUMED';
       }
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Quantity:`, quantity, 'Consumption:', consumptionState);
-
+      // 7. Prix depuis le package
       let packagePrice = null;
       let currency = null;
       
@@ -184,12 +200,9 @@ class GooglePlayService {
         currency = 'EUR';
       }
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Prix final:`, { 
-        priceAmountMicros: packagePrice, 
-        priceCurrencyCode: currency,
-        quantity
-      });
+      console.log(`[GooglePlay ONE-TIME] Prix final:`, { packagePrice, currency, quantity });
 
+      // 8. Créer la transaction Google Play
       const googleTx = await GooglePlayTransaction.create({
         appId,
         purchaseToken,
@@ -211,8 +224,9 @@ class GooglePlayService {
         refundableQuantity: quantity
       });
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Transaction créée:`, googleTx._id);
+      console.log(`[GooglePlay ONE-TIME] Transaction créée:`, googleTx._id);
 
+      // 9. Créer la subscription
       const subscription = await Subscription.create({
         appId,
         user: userId,
@@ -230,17 +244,20 @@ class GooglePlayService {
         autoRenewing: false
       });
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Subscription créée:`, subscription._id);
+      console.log(`[GooglePlay ONE-TIME] Subscription créée:`, subscription._id);
 
+      // 10. Mettre à jour la transaction avec l'ID de subscription
       googleTx.subscription = subscription._id;
       await googleTx.save();
 
+      // 11. Acknowledge l'achat si pas déjà fait
       if (data.acknowledgementState !== 1) {
-        this.acknowledgeOneTimePurchase(appId, purchaseToken, productId).catch(error => {
-          console.error(`[GooglePlay ONE-TIME] [${appId}] Erreur acknowledge:`, error.message);
+        this.acknowledgeOneTimePurchase(app, purchaseToken, productId).catch(error => {
+          console.error(`[GooglePlay ONE-TIME] Erreur acknowledge (non bloquant):`, error.message);
         });
       }
 
+      // 12. Retourner le résultat avec populate
       const populatedSubscription = await Subscription.findById(subscription._id)
         .populate('package');
 
@@ -253,7 +270,7 @@ class GooglePlayService {
       };
 
     } catch (error) {
-      console.error(`[GooglePlay ONE-TIME] [${appId}] Erreur validation complète:`, error);
+      console.error(`[GooglePlay ONE-TIME] Erreur validation complète:`, error);
       
       let errorMessage = 'Erreur de validation du produit: ';
       if (error.response && error.response.data) {
@@ -268,72 +285,228 @@ class GooglePlayService {
     }
   }
 
-  /**
-   * Acknowledge un abonnement
-   */
-  async acknowledgePurchase(appId, purchaseToken) {
+  // ===== Valider un ABONNEMENT depuis Flutter =====
+  async validatePurchase(appId, app, purchaseToken, productId, userId, packageId) {
     try {
-      const client = await this.getClientForApp(appId);
+      console.log(`[GooglePlay SUB] Début validation pour app ${appId}:`, { purchaseToken, productId, packageId });
       
-      await client.androidPublisher.purchases.subscriptions.acknowledge({
-        packageName: client.packageName,
+      // Valider la config et obtenir le client
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      // 1. Vérifier avec l'API Google (subscriptions v2)
+      const { data } = await androidPublisher.purchases.subscriptionsv2.get({
+        packageName: packageName,
+        token: purchaseToken
+      });
+
+      if (!data) {
+        throw new Error('Réponse invalide de Google Play');
+      }
+
+      console.log(`[GooglePlay SUB] Réponse API Google:`, JSON.stringify(data, null, 2));
+
+      // 2. Vérifier si déjà traité
+      const existingTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
+      if (existingTx) {
+        console.log(`[GooglePlay SUB] Transaction déjà traitée:`, existingTx._id);
+        const subscription = await Subscription.findById(existingTx.subscription)
+          .populate('package');
+        
+        return { 
+          success: true, 
+          message: 'Achat déjà traité',
+          data: {
+            subscription,
+            message: 'Abonnement déjà actif'
+          }
+        };
+      }
+
+      // 3. Récupérer le package
+      const packageItem = await Package.findOne({ _id: packageId, appId });
+      if (!packageItem) {
+        throw new Error('Package non trouvé: ' + packageId);
+      }
+
+      // 4. Parser les dates
+      let startDate = new Date();
+      let expiryTime;
+      let autoRenewing = false;
+
+      if (data.lineItems && data.lineItems[0]) {
+        if (data.lineItems[0].expiryTime) {
+          expiryTime = new Date(data.lineItems[0].expiryTime);
+        }
+        if (data.lineItems[0].autoRenewingPlan) {
+          autoRenewing = data.lineItems[0].autoRenewingPlan.autoRenewEnabled || false;
+        }
+      }
+
+      if (!expiryTime) {
+        expiryTime = new Date(startDate.getTime() + (packageItem.duration * 24 * 60 * 60 * 1000));
+      }
+
+      console.log(`[GooglePlay SUB] Dates:`, { startDate: startDate.toISOString(), expiryTime: expiryTime.toISOString() });
+
+      // 5. Prix depuis le package
+      let packagePrice = null;
+      let currency = null;
+      
+      const currencyPreference = ['EUR', 'USD', 'XAF', 'XOF', 'GMD', 'CDF', 'GNF'];
+      
+      for (const curr of currencyPreference) {
+        if (packageItem.pricing.has(curr)) {
+          packagePrice = packageItem.pricing.get(curr);
+          currency = curr;
+          break;
+        }
+      }
+      
+      if (!packagePrice && packageItem.pricing.size > 0) {
+        const firstCurrency = Array.from(packageItem.pricing.keys())[0];
+        packagePrice = packageItem.pricing.get(firstCurrency);
+        currency = firstCurrency;
+      }
+      
+      if (!packagePrice) {
+        packagePrice = 10;
+        currency = 'EUR';
+      }
+
+      // 6. Créer la transaction Google Play
+      const googleTx = await GooglePlayTransaction.create({
+        appId,
+        purchaseToken,
+        orderId: data.latestOrderId || `GP_SUB_${Date.now()}`,
+        productId,
+        user: userId,
+        package: packageId,
+        status: 'ACTIVE',
+        startTime: startDate,
+        expiryTime: expiryTime,
+        purchaseTime: startDate,
+        priceAmountMicros: packagePrice,
+        priceCurrencyCode: currency,
+        autoRenewing,
+        acknowledged: data.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        purchaseType: 'SUBSCRIPTION'
+      });
+
+      console.log(`[GooglePlay SUB] Transaction créée:`, googleTx._id);
+
+      // 7. Créer la subscription
+      const subscription = await Subscription.create({
+        appId,
+        user: userId,
+        package: packageId,
+        startDate,
+        endDate: expiryTime,
+        pricing: {
+          amount: packagePrice,
+          currency: currency
+        },
+        status: 'active',
+        paymentProvider: 'GOOGLE_PLAY',
+        paymentReference: googleTx.orderId,
+        googlePlayTransaction: googleTx._id,
+        autoRenewing
+      });
+
+      console.log(`[GooglePlay SUB] Subscription créée:`, subscription._id);
+
+      // 8. Mettre à jour la transaction avec l'ID de subscription
+      googleTx.subscription = subscription._id;
+      await googleTx.save();
+
+      // 9. Acknowledge l'achat si pas déjà fait
+      if (data.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
+        this.acknowledgePurchase(app, purchaseToken).catch(error => {
+          console.error(`[GooglePlay SUB] Erreur acknowledge (non bloquant):`, error.message);
+        });
+      }
+
+      // 10. Retourner le résultat avec populate
+      const populatedSubscription = await Subscription.findById(subscription._id)
+        .populate('package');
+
+      return {
+        success: true,
+        data: {
+          subscription: populatedSubscription,
+          message: 'Abonnement activé avec succès'
+        }
+      };
+
+    } catch (error) {
+      console.error(`[GooglePlay SUB] Erreur validation:`, error);
+      throw new Error('Erreur de validation de l\'abonnement: ' + error.message);
+    }
+  }
+
+  // ===== Acknowledge un abonnement =====
+  async acknowledgePurchase(app, purchaseToken) {
+    try {
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      await androidPublisher.purchases.subscriptions.acknowledge({
+        packageName: packageName,
         subscriptionId: purchaseToken,
         token: purchaseToken
       });
 
       await GooglePlayTransaction.findOneAndUpdate(
-        { appId, purchaseToken },
+        { purchaseToken },
         { acknowledged: true }
       );
 
-      console.log(`[GooglePlay] [${appId}] Acknowledge réussi:`, purchaseToken);
+      console.log(`[GooglePlay] Acknowledge réussi:`, purchaseToken);
       return true;
     } catch (error) {
-      console.error(`[GooglePlay] [${appId}] Erreur acknowledge:`, error);
+      console.error(`[GooglePlay] Erreur acknowledge:`, error);
       return false;
     }
   }
 
-  /**
-   * Acknowledge un produit ponctuel
-   */
-  async acknowledgeOneTimePurchase(appId, purchaseToken, productId) {
+  // ===== Acknowledge un produit ponctuel =====
+  async acknowledgeOneTimePurchase(app, purchaseToken, productId) {
     try {
-      const client = await this.getClientForApp(appId);
-      
-      await client.androidPublisher.purchases.products.acknowledge({
-        packageName: client.packageName,
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      await androidPublisher.purchases.products.acknowledge({
+        packageName: packageName,
         productId: productId,
         token: purchaseToken
       });
 
       await GooglePlayTransaction.findOneAndUpdate(
-        { appId, purchaseToken },
+        { purchaseToken },
         { acknowledged: true }
       );
 
-      console.log(`[GooglePlay ONE-TIME] [${appId}] Acknowledge réussi:`, purchaseToken);
+      console.log(`[GooglePlay ONE-TIME] Acknowledge réussi:`, purchaseToken);
       return true;
     } catch (error) {
-      console.error(`[GooglePlay ONE-TIME] [${appId}] Erreur acknowledge:`, error);
+      console.error(`[GooglePlay ONE-TIME] Erreur acknowledge:`, error);
       return false;
     }
   }
 
-  /**
-   * Traiter une notification RTDN
-   */
-  async processNotification(appId, notification) {
+  // ===== Traiter une notification RTDN =====
+  async processNotification(appId, app, notification) {
     try {
+      // Gérer les notifications d'abonnement
       if (notification.subscriptionNotification) {
-        const { purchaseToken, subscriptionId } = notification.subscriptionNotification;
+        const { purchaseToken } = notification.subscriptionNotification;
         const notificationType = notification.subscriptionNotification.notificationType;
 
-        console.log(`[NOTIFICATION SUB] [${appId}] Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
+        console.log(`[NOTIFICATION SUB] App: ${appId}, Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
         const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
         if (!googleTx) {
-          console.log(`[NOTIFICATION SUB] [${appId}] Transaction non trouvée:`, purchaseToken);
+          console.log(`[NOTIFICATION SUB] Transaction non trouvée pour app ${appId}:`, purchaseToken);
           return;
         }
 
@@ -341,59 +514,58 @@ class GooglePlayService {
         googleTx.lastNotificationTime = new Date();
 
         switch (notificationType) {
-          case 1:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_RECOVERED`);
-            await this.handleRecovery(appId, googleTx);
+          case 1: // SUBSCRIPTION_RECOVERED
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_RECOVERED');
+            await this.handleRecovery(app, googleTx);
             break;
-          case 2:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_RENEWED`);
-            await this.handleRenewal(appId, googleTx);
+          case 2: // SUBSCRIPTION_RENEWED
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_RENEWED');
+            await this.handleRenewal(app, googleTx);
             break;
-          case 3:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_CANCELED`);
+          case 3: // SUBSCRIPTION_CANCELED
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_CANCELED');
             await this.handleCancellation(googleTx);
             break;
-          case 4:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_PURCHASED`);
+          case 4: // SUBSCRIPTION_PURCHASED
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_PURCHASED');
             break;
-          case 5:
-          case 11:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_ON_HOLD`);
+          case 5: // SUBSCRIPTION_ON_HOLD (ancienne version)
+          case 11: // SUBSCRIPTION_ON_HOLD (nouvelle version)
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_ON_HOLD');
             await this.handleOnHold(googleTx);
             break;
-          case 13:
-            console.log(`[NOTIFICATION SUB] [${appId}] → SUBSCRIPTION_EXPIRED`);
+          case 13: // SUBSCRIPTION_EXPIRED
+            console.log('[NOTIFICATION SUB] → SUBSCRIPTION_EXPIRED');
             await this.handleExpiration(googleTx);
             break;
           default:
-            console.log(`[NOTIFICATION SUB] [${appId}] Type ${notificationType} non géré`);
+            console.log(`[NOTIFICATION SUB] Type ${notificationType} non géré`);
         }
 
         await googleTx.save();
       }
 
+      // Gérer les notifications de produits ponctuels
       if (notification.oneTimeProductNotification) {
         await this.handleOneTimeProductNotification(appId, notification);
       }
 
     } catch (error) {
-      console.error(`[NOTIFICATION] [${appId}] Erreur traitement notification:`, error);
+      console.error('[NOTIFICATION] Erreur traitement:', error);
     }
   }
 
-  /**
-   * Gérer les notifications de produits ponctuels
-   */
+  // ===== Gérer les notifications de produits ponctuels =====
   async handleOneTimeProductNotification(appId, notification) {
     try {
       const { purchaseToken } = notification.oneTimeProductNotification;
       const notificationType = notification.oneTimeProductNotification.notificationType;
 
-      console.log(`[NOTIFICATION ONE-TIME] [${appId}] Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
+      console.log(`[NOTIFICATION ONE-TIME] App: ${appId}, Type: ${notificationType}, Token: ${purchaseToken.substring(0, 20)}...`);
 
       const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
       if (!googleTx) {
-        console.log(`[NOTIFICATION ONE-TIME] [${appId}] Transaction non trouvée:`, purchaseToken);
+        console.log(`[NOTIFICATION ONE-TIME] Transaction non trouvée pour app ${appId}:`, purchaseToken);
         return;
       }
 
@@ -401,12 +573,12 @@ class GooglePlayService {
       googleTx.lastNotificationTime = new Date();
 
       switch (notificationType) {
-        case 1:
-          console.log(`[NOTIFICATION ONE-TIME] [${appId}] → ONE_TIME_PRODUCT_PURCHASED`);
+        case 1: // ONE_TIME_PRODUCT_PURCHASED
+          console.log('[NOTIFICATION ONE-TIME] → ONE_TIME_PRODUCT_PURCHASED');
           break;
 
-        case 2:
-          console.log(`[NOTIFICATION ONE-TIME] [${appId}] → ONE_TIME_PRODUCT_CANCELED`);
+        case 2: // ONE_TIME_PRODUCT_CANCELED
+          console.log('[NOTIFICATION ONE-TIME] → ONE_TIME_PRODUCT_CANCELED');
           googleTx.status = 'CANCELED';
           
           await Subscription.findByIdAndUpdate(
@@ -416,42 +588,38 @@ class GooglePlayService {
           break;
 
         default:
-          console.log(`[NOTIFICATION ONE-TIME] [${appId}] Type ${notificationType} non géré`);
+          console.log(`[NOTIFICATION ONE-TIME] Type ${notificationType} non géré`);
       }
 
       await googleTx.save();
-      console.log(`[NOTIFICATION ONE-TIME] [${appId}] Traitement terminé`);
+      console.log('[NOTIFICATION ONE-TIME] Traitement terminé');
 
     } catch (error) {
-      console.error(`[NOTIFICATION ONE-TIME] [${appId}] Erreur:`, error);
+      console.error('[NOTIFICATION ONE-TIME] Erreur:', error);
     }
   }
 
-  /**
-   * Gérer la récupération d'un abonnement
-   */
-  async handleRecovery(appId, googleTx) {
+  // ===== Méthodes pour abonnements =====
+  async handleRecovery(app, googleTx) {
     try {
-      console.log(`[RECOVERY] [${appId}] Début récupération pour:`, googleTx.purchaseToken);
+      console.log('[RECOVERY] Début récupération pour:', googleTx.purchaseToken);
       
-      const client = await this.getClientForApp(appId);
-      
-      const { data } = await client.androidPublisher.purchases.subscriptionsv2.get({
-        packageName: client.packageName,
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      const { data } = await androidPublisher.purchases.subscriptionsv2.get({
+        packageName: packageName,
         token: googleTx.purchaseToken
       });
 
-      console.log(`[RECOVERY] [${appId}] Réponse API Google:`, JSON.stringify(data, null, 2));
+      console.log('[RECOVERY] Réponse API Google:', JSON.stringify(data, null, 2));
 
       let newExpiryTime;
       
       if (data.lineItems && data.lineItems[0] && data.lineItems[0].expiryTime) {
         newExpiryTime = new Date(data.lineItems[0].expiryTime);
-        console.log(`[RECOVERY] [${appId}] Date trouvée dans lineItems[0].expiryTime`);
       } else if (data.expiryTime) {
-        const expiryTimestamp = parseInt(data.expiryTime);
-        newExpiryTime = new Date(expiryTimestamp);
-        console.log(`[RECOVERY] [${appId}] Date trouvée dans data.expiryTime`);
+        newExpiryTime = new Date(parseInt(data.expiryTime));
       } else {
         const packageData = await Package.findById(googleTx.package);
         if (packageData) {
@@ -459,10 +627,9 @@ class GooglePlayService {
         } else {
           newExpiryTime = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
         }
-        console.log(`[RECOVERY] [${appId}] Date calculée avec durée package`);
       }
 
-      console.log(`[RECOVERY] [${appId}] Nouvelle date expiration:`, newExpiryTime.toISOString());
+      console.log('[RECOVERY] Nouvelle date expiration:', newExpiryTime.toISOString());
 
       googleTx.status = 'ACTIVE';
       googleTx.expiryTime = newExpiryTime;
@@ -476,41 +643,35 @@ class GooglePlayService {
         }
       );
 
-      console.log(`[RECOVERY] [${appId}] Abonnement récupéré avec succès`);
+      console.log('[RECOVERY] Abonnement récupéré avec succès');
       
     } catch (error) {
-      console.error(`[RECOVERY] [${appId}] Erreur handleRecovery:`, error);
+      console.error('[RECOVERY] Erreur:', error);
       throw error;
     }
   }
 
-  /**
-   * Gérer le renouvellement d'un abonnement
-   */
-  async handleRenewal(appId, googleTx) {
+  async handleRenewal(app, googleTx) {
     try {
-      console.log(`[RENEWAL] [${appId}] Début handleRenewal pour:`, googleTx.purchaseToken);
+      console.log('[RENEWAL] Début pour:', googleTx.purchaseToken);
       
-      const client = await this.getClientForApp(appId);
-      
-      const { data } = await client.androidPublisher.purchases.subscriptionsv2.get({
-        packageName: client.packageName,
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      const { data } = await androidPublisher.purchases.subscriptionsv2.get({
+        packageName: packageName,
         token: googleTx.purchaseToken
       });
 
-      console.log(`[RENEWAL] [${appId}] Réponse API Google:`, JSON.stringify(data, null, 2));
+      console.log('[RENEWAL] Réponse API Google:', JSON.stringify(data, null, 2));
 
       let newExpiryTime;
       
       if (data.lineItems && data.lineItems.length > 0 && data.lineItems[0].expiryTime) {
         newExpiryTime = new Date(data.lineItems[0].expiryTime);
-        console.log(`[RENEWAL] [${appId}] Date trouvée dans lineItems[0].expiryTime`);
       } else if (data.expiryTime) {
-        const expiryTimestamp = parseInt(data.expiryTime);
-        newExpiryTime = new Date(expiryTimestamp);
-        console.log(`[RENEWAL] [${appId}] Date trouvée dans data.expiryTime`);
+        newExpiryTime = new Date(parseInt(data.expiryTime));
       } else {
-        console.log(`[RENEWAL] [${appId}] Aucune date Google, calcul avec durée package`);
         const packageData = await Package.findById(googleTx.package);
         if (packageData) {
           newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
@@ -520,7 +681,6 @@ class GooglePlayService {
       }
 
       if (isNaN(newExpiryTime.getTime()) || newExpiryTime.getFullYear() < 2020) {
-        console.log(`[RENEWAL] [${appId}] Date invalide, fallback sur durée package`);
         const packageData = await Package.findById(googleTx.package);
         if (packageData) {
           newExpiryTime = new Date(Date.now() + (packageData.duration * 24 * 60 * 60 * 1000));
@@ -529,7 +689,7 @@ class GooglePlayService {
         }
       }
 
-      console.log(`[RENEWAL] [${appId}] Nouvelle date expiration:`, newExpiryTime.toISOString());
+      console.log('[RENEWAL] Nouvelle date expiration:', newExpiryTime.toISOString());
 
       let autoRenewing = false;
       if (data.lineItems && data.lineItems[0] && data.lineItems[0].autoRenewingPlan) {
@@ -550,38 +710,32 @@ class GooglePlayService {
         }
       );
 
-      console.log(`[RENEWAL] [${appId}] Renouvellement traité avec succès`);
+      console.log('[RENEWAL] Renouvellement traité avec succès');
       
     } catch (error) {
-      console.error(`[RENEWAL] [${appId}] Erreur handleRenewal:`, error);
+      console.error('[RENEWAL] Erreur:', error);
       throw error;
     }
   }
 
-  /**
-   * Gérer l'annulation d'un abonnement
-   */
   async handleCancellation(googleTx) {
     try {
-      console.log('[CANCELLATION] Début annulation pour:', googleTx.purchaseToken);
+      console.log('[CANCELLATION] Début pour:', googleTx.purchaseToken);
       
       googleTx.status = 'CANCELED';
       await googleTx.save();
       
-      console.log('[CANCELLATION] Annulation traitée - abonnement reste actif jusqu\'à expiration');
+      console.log('[CANCELLATION] Traité - abonnement reste actif jusqu\'à expiration');
       
     } catch (error) {
-      console.error('[CANCELLATION] Erreur handleCancellation:', error);
+      console.error('[CANCELLATION] Erreur:', error);
       throw error;
     }
   }
 
-  /**
-   * Gérer la suspension d'un abonnement
-   */
   async handleOnHold(googleTx) {
     try {
-      console.log('[ON_HOLD] Début suspension pour:', googleTx.purchaseToken);
+      console.log('[ON_HOLD] Début pour:', googleTx.purchaseToken);
       
       googleTx.status = 'ON_HOLD';
       await googleTx.save();
@@ -591,20 +745,17 @@ class GooglePlayService {
         { status: 'expired' }
       );
 
-      console.log('[ON_HOLD] Suspension traitée - accès suspendu');
+      console.log('[ON_HOLD] Traité - accès suspendu');
       
     } catch (error) {
-      console.error('[ON_HOLD] Erreur handleOnHold:', error);
+      console.error('[ON_HOLD] Erreur:', error);
       throw error;
     }
   }
 
-  /**
-   * Gérer l'expiration d'un abonnement
-   */
   async handleExpiration(googleTx) {
     try {
-      console.log('[EXPIRATION] Début expiration pour:', googleTx.purchaseToken);
+      console.log('[EXPIRATION] Début pour:', googleTx.purchaseToken);
       
       googleTx.status = 'EXPIRED';
       await googleTx.save();
@@ -614,19 +765,19 @@ class GooglePlayService {
         { status: 'expired' }
       );
 
-      console.log('[EXPIRATION] Expiration traitée');
+      console.log('[EXPIRATION] Traité');
       
     } catch (error) {
-      console.error('[EXPIRATION] Erreur handleExpiration:', error);
+      console.error('[EXPIRATION] Erreur:', error);
       throw error;
     }
   }
 
-  /**
-   * Vérifier le statut d'un abonnement
-   */
-  async checkSubscriptionStatus(appId, userId) {
+  async checkSubscriptionStatus(appId, app, userId) {
     try {
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
       const googleTx = await GooglePlayTransaction.findOne({
         appId,
         user: userId,
@@ -641,10 +792,8 @@ class GooglePlayService {
         };
       }
 
-      const client = await this.getClientForApp(appId);
-      
-      const { data } = await client.androidPublisher.purchases.subscriptionsv2.get({
-        packageName: client.packageName,
+      const { data } = await androidPublisher.purchases.subscriptionsv2.get({
+        packageName: packageName,
         token: googleTx.purchaseToken
       });
 
@@ -658,7 +807,7 @@ class GooglePlayService {
       };
 
     } catch (error) {
-      console.error(`[GooglePlay] [${appId}] Erreur vérification statut:`, error);
+      console.error('[GooglePlay] Erreur vérification statut:', error);
       return {
         hasActiveSubscription: false,
         error: error.message
@@ -666,20 +815,18 @@ class GooglePlayService {
     }
   }
 
-  /**
-   * Synchroniser un abonnement avec Google Play
-   */
-  async syncSubscription(appId, purchaseToken) {
+  async syncSubscription(app, purchaseToken) {
     try {
-      const client = await this.getClientForApp(appId);
-      
-      const { data } = await client.androidPublisher.purchases.subscriptionsv2.get({
-        packageName: client.packageName,
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      const { data } = await androidPublisher.purchases.subscriptionsv2.get({
+        packageName: packageName,
         token: purchaseToken
       });
 
-      const googleTx = await GooglePlayTransaction.findOne({ appId, purchaseToken });
-      if (!googleTx) return;
+      const googleTx = await GooglePlayTransaction.findOne({ purchaseToken });
+      if (!googleTx) return null;
 
       if (data.lineItems && data.lineItems[0] && data.lineItems[0].expiryTime) {
         googleTx.expiryTime = new Date(data.lineItems[0].expiryTime);
@@ -710,10 +857,9 @@ class GooglePlayService {
         }
       );
 
-      console.log(`[GooglePlay] [${appId}] Sync réussi:`, purchaseToken);
       return googleTx;
     } catch (error) {
-      console.error(`[GooglePlay] [${appId}] Erreur sync:`, error);
+      console.error('[GooglePlay] Erreur sync:', error);
       throw error;
     }
   }

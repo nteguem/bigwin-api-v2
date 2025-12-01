@@ -70,7 +70,7 @@ router.use('/user', identifyApp, userSubscriptionRoutes);
 router.use('/user/google-play', identifyApp, googlePlayRoutes);
 
 // Webhooks: identifyApp pour savoir quelle app est concernée
-router.use('/webhooks', identifyApp, googlePlayWebhook);
+router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
 
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');
