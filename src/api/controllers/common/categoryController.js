@@ -7,15 +7,20 @@ class CategoryController {
 
   async getCategories(req, res) {
     try {
-      const appId = req.appId; // ⭐ AJOUT
-      const { offset = 0, limit = 10, isVip, isActive } = req.query;
-           
-      const result = await categoryService.getCategories(appId, { // ⭐ AJOUT appId
-        offset: parseInt(offset),
-        limit: parseInt(limit),
-        isVip: isVip !== undefined ? isVip === 'true' : null,
-        isActive: isActive !== undefined ? isActive === 'true' : null
-      });
+     console.log('[CategoryController] req.query BRUT:', req.query); // ⭐ AJOUTE CETTE LIGNE
+    
+    const appId = req.appId;
+    const { offset = 0, limit = 10, isVip, isActive } = req.query;
+    
+    console.log('[CategoryController] isVip:', isVip); // ⭐ AJOUTE CETTE LIGNE
+    console.log('[CategoryController] isActive:', isActive); // ⭐ AJOUTE CETTE LIGNE
+    
+    const result = await categoryService.getCategories(appId, {
+      offset: parseInt(offset),
+      limit: parseInt(limit),
+      isVip: isVip !== undefined ? isVip === 'true' : null,
+      isActive: isActive !== undefined ? isActive === 'true' : null
+    });
 
       formatSuccess(res, {
         data: result.data,
