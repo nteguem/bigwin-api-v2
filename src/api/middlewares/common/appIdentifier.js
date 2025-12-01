@@ -3,15 +3,8 @@
 const App = require('../../models/common/App');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
-/**
- * Middleware pour identifier l'application à partir du header X-App-Id
- * Ajoute req.appId et req.app à la requête
- */
-
 const identifyApp = async (req, res, next) => {
   try {
-    console.log('[identifyApp] ENTRÉE - req.query:', req.query); // ⭐ AJOUTE
-    
     const appId = req.headers['x-app-id'];
     
     if (!appId) {
@@ -25,7 +18,7 @@ const identifyApp = async (req, res, next) => {
     const app = await App.findOne({ 
       appId: appId.toLowerCase(),
       isActive: true 
-    });
+    }).lean();
     
     if (!app) {
       return next(new AppError(
@@ -36,9 +29,7 @@ const identifyApp = async (req, res, next) => {
     }
     
     req.appId = app.appId;
-    req.app = app;
-    
-    console.log('[identifyApp] AVANT next() - req.query:', req.query); // ⭐ AJOUTE
+    req.currentApp = app; // ⭐ CHANGÉ: req.app → req.currentApp (req.app est réservé par Express)
     
     next();
   } catch (error) {
@@ -50,39 +41,33 @@ const identifyApp = async (req, res, next) => {
   }
 };
 
-/**
- * Middleware optionnel - n'échoue pas si X-App-Id est absent
- * Utile pour les routes qui peuvent fonctionner sans app (ex: routes admin)
- */
 const identifyAppOptional = async (req, res, next) => {
   try {
     const appId = req.headers['x-app-id'];
     
     if (!appId) {
-      // Pas d'appId, on continue sans erreur
       req.appId = null;
-      req.app = null;
+      req.currentApp = null; // ⭐ CHANGÉ
       return next();
     }
     
     const app = await App.findOne({ 
       appId: appId.toLowerCase(),
       isActive: true 
-    });
+    }).lean();
     
     if (app) {
       req.appId = app.appId;
-      req.app = app;
+      req.currentApp = app; // ⭐ CHANGÉ
     } else {
       req.appId = null;
-      req.app = null;
+      req.currentApp = null; // ⭐ CHANGÉ
     }
     
     next();
   } catch (error) {
-    // En cas d'erreur, on continue quand même
     req.appId = null;
-    req.app = null;
+    req.currentApp = null; // ⭐ CHANGÉ
     next();
   }
 };
