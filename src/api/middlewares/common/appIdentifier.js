@@ -5,39 +5,42 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 const identifyApp = async (req, res, next) => {
   try {
+    console.log('[identifyApp] LIGNE 8 - req.query:', req.query);
+    
     const appId = req.headers['x-app-id'];
     
+    console.log('[identifyApp] LIGNE 12 - req.query:', req.query);
+    
     if (!appId) {
-      return next(new AppError(
-        'Header X-App-Id requis',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      ));
+      return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
     }
+    
+    console.log('[identifyApp] LIGNE 18 - req.query:', req.query);
     
     const app = await App.findOne({ 
       appId: appId.toLowerCase(),
       isActive: true 
-    }).lean(); // ⭐ AJOUT .lean()
+    }).lean();
+    
+    console.log('[identifyApp] LIGNE 25 - req.query:', req.query);
     
     if (!app) {
-      return next(new AppError(
-        `Application '${appId}' non trouvée ou désactivée`,
-        404,
-        ErrorCodes.VALIDATION_ERROR
-      ));
+      return next(new AppError(`Application '${appId}' non trouvée ou désactivée`, 404, ErrorCodes.VALIDATION_ERROR));
     }
     
+    console.log('[identifyApp] LIGNE 31 - req.query:', req.query);
+    
     req.appId = app.appId;
+    
+    console.log('[identifyApp] LIGNE 35 - req.query:', req.query);
+    
     req.app = app;
+    
+    console.log('[identifyApp] LIGNE 39 - req.query:', req.query);
     
     next();
   } catch (error) {
-    next(new AppError(
-      'Erreur lors de l\'identification de l\'application',
-      500,
-      ErrorCodes.INTERNAL_ERROR
-    ));
+    next(new AppError('Erreur lors de l\'identification de l\'application', 500, ErrorCodes.INTERNAL_ERROR));
   }
 };
 
@@ -54,7 +57,7 @@ const identifyAppOptional = async (req, res, next) => {
     const app = await App.findOne({ 
       appId: appId.toLowerCase(),
       isActive: true 
-    }).lean(); // ⭐ AJOUT .lean()
+    }).lean();
     
     if (app) {
       req.appId = app.appId;
