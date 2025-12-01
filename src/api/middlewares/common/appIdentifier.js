@@ -7,12 +7,13 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
  * Middleware pour identifier l'application à partir du header X-App-Id
  * Ajoute req.appId et req.app à la requête
  */
+
 const identifyApp = async (req, res, next) => {
   try {
-    // Récupérer l'appId depuis le header
+    console.log('[identifyApp] ENTRÉE - req.query:', req.query); // ⭐ AJOUTE
+    
     const appId = req.headers['x-app-id'];
     
-    // Si pas d'appId fourni
     if (!appId) {
       return next(new AppError(
         'Header X-App-Id requis',
@@ -21,7 +22,6 @@ const identifyApp = async (req, res, next) => {
       ));
     }
     
-    // Vérifier que l'app existe et est active
     const app = await App.findOne({ 
       appId: appId.toLowerCase(),
       isActive: true 
@@ -35,9 +35,10 @@ const identifyApp = async (req, res, next) => {
       ));
     }
     
-    // Ajouter à la requête
     req.appId = app.appId;
     req.app = app;
+    
+    console.log('[identifyApp] AVANT next() - req.query:', req.query); // ⭐ AJOUTE
     
     next();
   } catch (error) {
