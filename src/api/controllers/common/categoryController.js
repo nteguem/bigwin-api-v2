@@ -5,24 +5,42 @@ const { formatSuccess, formatError } = require('../../../utils/responseFormatter
 
 class CategoryController {
 
-async getCategories(req, res) {
-  try {
-    const appId = req.appId;
-    const { offset = 0, limit = 10, isVip, isActive } = req.query;
-    
-    const filters = {
-      offset: parseInt(offset),
-      limit: parseInt(limit),
-      isVip: isVip === 'true' ? true : isVip === 'false' ? false : null,
-      isActive: isActive === 'true' ? true : isActive === 'false' ? false : null
-    };
-    
-    const result = await categoryService.getCategories(appId, filters);
-    formatSuccess(res, { data: result.data, pagination: result.pagination, message: 'Categories retrieved successfully' });
-  } catch (error) {
-    formatError(res, error.message, 500);
+  async getCategories(req, res) {
+    try {
+      const appId = req.appId;
+      const { offset = 0, limit = 10, isVip, isActive } = req.query;
+      
+      // ⭐ CONVERSION STRING → BOOLEAN
+      let isVipBool = null;
+      let isActiveBool = null;
+      
+      if (isVip === 'true') isVipBool = true;
+      else if (isVip === 'false') isVipBool = false;
+      
+      if (isActive === 'true') isActiveBool = true;
+      else if (isActive === 'false') isActiveBool = false;
+      
+      const filters = {
+        offset: parseInt(offset),
+        limit: parseInt(limit),
+        isVip: isVipBool,
+        isActive: isActiveBool
+      };
+      
+      console.log('[CategoryController] Query reçue:', req.query);
+      console.log('[CategoryController] Filters envoyés:', filters);
+      
+      const result = await categoryService.getCategories(appId, filters);
+
+      formatSuccess(res, {
+        data: result.data,
+        pagination: result.pagination,
+        message: 'Categories retrieved successfully'
+      });
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
   }
-}
 
   async getCategoryById(req, res) {
     try {

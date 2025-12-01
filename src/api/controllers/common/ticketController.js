@@ -6,25 +6,33 @@ const { formatSuccess, formatError } = require('../../../utils/responseFormatter
 
 class TicketController {
 
- async getTickets(req, res) {
-  try {
-    const appId = req.appId;
-    const { offset = 0, limit = 10, category, date, isVisible } = req.query;
-    
-    const filters = {
-      offset: parseInt(offset),
-      limit: parseInt(limit),
-      category: category || null,
-      date: date ? new Date(date) : null,
-      isVisible: isVisible === 'true' ? true : isVisible === 'false' ? false : null
-    };
-    
-    const result = await ticketService.getTickets(appId, filters);
-    formatSuccess(res, { data: result.data, pagination: result.pagination, message: 'Tickets retrieved successfully' });
-  } catch (error) {
-    formatError(res, error.message, 500);
+  async getTickets(req, res) {
+    try {
+      const appId = req.appId;
+      const { offset = 0, limit = 10, category, date, isVisible } = req.query;
+      
+      // ⭐ CONVERSION STRING → BOOLEAN/DATE
+      let isVisibleBool = null;
+      if (isVisible === 'true') isVisibleBool = true;
+      else if (isVisible === 'false') isVisibleBool = false;
+      
+      const filters = {
+        offset: parseInt(offset),
+        limit: parseInt(limit),
+        category: category || null,
+        date: date ? new Date(date) : null,
+        isVisible: isVisibleBool
+      };
+      
+      console.log('[TicketController] Query reçue:', req.query);
+      console.log('[TicketController] Filters envoyés:', filters);
+      
+      const result = await ticketService.getTickets(appId, filters);
+      formatSuccess(res, { data: result.data, pagination: result.pagination, message: 'Tickets retrieved successfully' });
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
   }
-}
 
   async getTicketById(req, res) {
     try {

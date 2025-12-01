@@ -14,8 +14,8 @@ class TicketService {
   async getTickets(appId, { offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
     const filter = { appId };
     
-    // Les valeurs arrivent déjà converties du controller
-    if (isVisible !== null) {
+    // ⭐ FIX: Vérifier !== null ET !== undefined
+    if (isVisible !== null && isVisible !== undefined) {
       filter.isVisible = isVisible;
     }
     
@@ -28,12 +28,10 @@ class TicketService {
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
-      
-      filter.date = {
-        $gte: startOfDay,
-        $lte: endOfDay
-      };
+      filter.date = { $gte: startOfDay, $lte: endOfDay };
     }
+
+    console.log('[TicketService] Filter final:', JSON.stringify(filter));
 
     const tickets = await Ticket.find(filter)
       .populate('category')
@@ -44,10 +42,7 @@ class TicketService {
     const ticketsWithPredictions = await Promise.all(
       tickets.map(async (ticket) => {
         const predictions = await predictionService.getPredictionsByTicket(appId, ticket._id);
-        return {
-          ...ticket.toObject(),
-          predictions
-        };
+        return { ...ticket.toObject(), predictions };
       })
     );
 
@@ -55,57 +50,36 @@ class TicketService {
 
     return {
       data: ticketsWithPredictions,
-      pagination: {
-        offset,
-        limit,
-        total,
-        hasNext: (offset + limit) < total
-      }
+      pagination: { offset, limit, total, hasNext: (offset + limit) < total }
     };
   }
 
   async getTicketById(appId, id) {
     const ticket = await Ticket.findOne({ _id: id, appId }).populate('category');
     if (!ticket) return null;
-
     const predictions = await predictionService.getPredictionsByTicket(appId, id);
-    
-    return {
-      ...ticket.toObject(),
-      predictions
-    };
+    return { ...ticket.toObject(), predictions };
   }
 
   async updateTicket(appId, id, data) {
-    return await Ticket.findOneAndUpdate(
-      { _id: id, appId },
-      data, 
-      { new: true }
-    );
+    return await Ticket.findOneAndUpdate({ _id: id, appId }, data, { new: true });
   }
 
   async deleteTicket(appId, id) {
     const ticket = await Ticket.findOne({ _id: id, appId });
     if (!ticket) return null;
-
     await Prediction.deleteMany({ ticket: id, appId });
     await Ticket.findByIdAndDelete(id);
-
-    return { 
-      deletedTicket: ticket,
-      message: 'Ticket and associated predictions deleted successfully'
-    };
+    return { deletedTicket: ticket, message: 'Ticket and associated predictions deleted successfully' };
   }
 
   async updateClosingTime(appId, ticketId) {
     const predictions = await predictionService.getPredictionsByTicket(appId, ticketId);
     if (predictions.length === 0) return null;
-
     const latestMatchDate = predictions.reduce((latest, pred) => {
       const matchDate = new Date(pred.matchData.date);
       return matchDate > latest ? matchDate : latest;
     }, new Date(0));
-
     const closingAt = new Date(latestMatchDate.getTime() + (3 * 60 * 60 * 1000));
     return await this.updateTicket(appId, ticketId, { closingAt });
   }

@@ -12,14 +12,16 @@ class CategoryService {
   async getCategories(appId, { offset = 0, limit = 10, isVip = null, isActive = null }) {
     const filter = { appId };
     
-    // Les valeurs arrivent déjà en boolean du controller
-    if (isActive !== null) {
+    // ⭐ FIX: Vérifier !== null ET !== undefined
+    if (isActive !== null && isActive !== undefined) {
       filter.isActive = isActive;
     }
     
-    if (isVip !== null) {
+    if (isVip !== null && isVip !== undefined) {
       filter.isVip = isVip;
     }
+
+    console.log('[CategoryService] Filter final:', JSON.stringify(filter));
 
     const categories = await Category.find(filter)
       .skip(offset)
@@ -30,12 +32,7 @@ class CategoryService {
 
     return {
       data: categories,
-      pagination: {
-        offset,
-        limit,
-        total,
-        hasNext: (offset + limit) < total
-      }
+      pagination: { offset, limit, total, hasNext: (offset + limit) < total }
     };
   }
 
@@ -48,19 +45,11 @@ class CategoryService {
   }
 
   async updateCategory(appId, id, data) {
-    return await Category.findOneAndUpdate(
-      { _id: id, appId },
-      data, 
-      { new: true }
-    );
+    return await Category.findOneAndUpdate({ _id: id, appId }, data, { new: true });
   }
 
   async deactivateCategory(appId, id) {
-    return await Category.findOneAndUpdate(
-      { _id: id, appId },
-      { isActive: false }, 
-      { new: true }
-    );
+    return await Category.findOneAndUpdate({ _id: id, appId }, { isActive: false }, { new: true });
   }
 
   async getCategoriesByType(appId, isVip, { offset = 0, limit = 10 }) {
