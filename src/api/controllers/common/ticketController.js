@@ -1,4 +1,4 @@
-// controllers/admin/ticketController.js
+// controllers/common/ticketController.js
 
 const ticketService = require('../../services/common/ticketService');
 const categoryService = require('../../services/common/categoryService');
@@ -8,27 +8,22 @@ class TicketController {
 
   async getTickets(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { offset = 0, limit = 10, category, date, isVisible } = req.query;
       
-      // ⭐ CONVERSION STRING → BOOLEAN/DATE
-      let isVisibleBool = null;
-      if (isVisible === 'true') isVisibleBool = true;
-      else if (isVisible === 'false') isVisibleBool = false;
-      
-      const filters = {
+      const result = await ticketService.getTickets(appId, { // ⭐ AJOUT appId
         offset: parseInt(offset),
         limit: parseInt(limit),
-        category: category || null,
+        category,
         date: date ? new Date(date) : null,
-        isVisible: isVisibleBool
-      };
-      
-      console.log('[TicketController] Query reçue:', req.query);
-      console.log('[TicketController] Filters envoyés:', filters);
-      
-      const result = await ticketService.getTickets(appId, filters);
-      formatSuccess(res, { data: result.data, pagination: result.pagination, message: 'Tickets retrieved successfully' });
+        isVisible: isVisible !== undefined ? isVisible === 'true' : null
+      });
+
+      formatSuccess(res, {
+        data: result.data,
+        pagination: result.pagination,
+        message: 'Tickets retrieved successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -36,11 +31,18 @@ class TicketController {
 
   async getTicketById(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
-      const ticket = await ticketService.getTicketById(appId, id);
-      if (!ticket) return formatError(res, 'Ticket not found', 404);
-      formatSuccess(res, { data: ticket, message: 'Ticket retrieved successfully' });
+      const ticket = await ticketService.getTicketById(appId, id); // ⭐ AJOUT appId
+
+      if (!ticket) {
+        return formatError(res, 'Ticket not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: ticket,
+        message: 'Ticket retrieved successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -48,19 +50,32 @@ class TicketController {
 
   async createTicket(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { title, date, category, closingAt } = req.body;
-      if (!title || !date || !category) return formatError(res, 'Title, date and category are required', 400);
-      const categoryExists = await categoryService.categoryExists(appId, category);
-      if (!categoryExists) return formatError(res, 'Category not found', 404);
-      const ticket = await ticketService.createTicket(appId, {
+
+      if (!title || !date || !category) {
+        return formatError(res, 'Title, date and category are required', 400);
+      }
+
+      const categoryExists = await categoryService.categoryExists(appId, category); // ⭐ AJOUT appId
+      if (!categoryExists) {
+        return formatError(res, 'Category not found', 404);
+      }
+
+      const ticketData = {
         title,
         date: new Date(date),
         category,
         closingAt: closingAt ? new Date(closingAt) : new Date(date)
-      });
+      };
+
+      const ticket = await ticketService.createTicket(appId, ticketData); // ⭐ AJOUT appId
+      
       res.status(201);
-      formatSuccess(res, { data: ticket, message: 'Ticket created successfully' });
+      formatSuccess(res, {
+        data: ticket,
+        message: 'Ticket created successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -68,18 +83,34 @@ class TicketController {
 
   async updateTicket(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
       const updates = req.body;
+
       if (updates.category) {
-        const categoryExists = await categoryService.categoryExists(appId, updates.category);
-        if (!categoryExists) return formatError(res, 'Category not found', 404);
+        const categoryExists = await categoryService.categoryExists(appId, updates.category); // ⭐ AJOUT appId
+        if (!categoryExists) {
+          return formatError(res, 'Category not found', 404);
+        }
       }
-      if (updates.date) updates.date = new Date(updates.date);
-      if (updates.closingAt) updates.closingAt = new Date(updates.closingAt);
-      const ticket = await ticketService.updateTicket(appId, id, updates);
-      if (!ticket) return formatError(res, 'Ticket not found', 404);
-      formatSuccess(res, { data: ticket, message: 'Ticket updated successfully' });
+
+      if (updates.date) {
+        updates.date = new Date(updates.date);
+      }
+      if (updates.closingAt) {
+        updates.closingAt = new Date(updates.closingAt);
+      }
+
+      const ticket = await ticketService.updateTicket(appId, id, updates); // ⭐ AJOUT appId
+
+      if (!ticket) {
+        return formatError(res, 'Ticket not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: ticket,
+        message: 'Ticket updated successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -87,11 +118,19 @@ class TicketController {
 
   async deleteTicket(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
-      const result = await ticketService.deleteTicket(appId, id);
-      if (!result) return formatError(res, 'Ticket not found', 404);
-      formatSuccess(res, { data: null, message: 'Ticket and associated predictions deleted successfully' });
+      
+      const result = await ticketService.deleteTicket(appId, id); // ⭐ AJOUT appId
+
+      if (!result) {
+        return formatError(res, 'Ticket not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: null,
+        message: 'Ticket and associated predictions deleted successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }

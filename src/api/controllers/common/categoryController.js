@@ -1,4 +1,4 @@
-// controllers/admin/categoryController.js
+// controllers/common/categoryController.js
 
 const categoryService = require('../../services/common/categoryService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
@@ -7,30 +7,15 @@ class CategoryController {
 
   async getCategories(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { offset = 0, limit = 10, isVip, isActive } = req.query;
-      
-      // ⭐ CONVERSION STRING → BOOLEAN
-      let isVipBool = null;
-      let isActiveBool = null;
-      
-      if (isVip === 'true') isVipBool = true;
-      else if (isVip === 'false') isVipBool = false;
-      
-      if (isActive === 'true') isActiveBool = true;
-      else if (isActive === 'false') isActiveBool = false;
-      
-      const filters = {
+           
+      const result = await categoryService.getCategories(appId, { // ⭐ AJOUT appId
         offset: parseInt(offset),
         limit: parseInt(limit),
-        isVip: isVipBool,
-        isActive: isActiveBool
-      };
-      
-      console.log('[CategoryController] Query reçue:', req.query);
-      console.log('[CategoryController] Filters envoyés:', filters);
-      
-      const result = await categoryService.getCategories(appId, filters);
+        isVip: isVip !== undefined ? isVip === 'true' : null,
+        isActive: isActive !== undefined ? isActive === 'true' : null
+      });
 
       formatSuccess(res, {
         data: result.data,
@@ -44,11 +29,18 @@ class CategoryController {
 
   async getCategoryById(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
-      const category = await categoryService.getCategoryById(appId, id);
-      if (!category) return formatError(res, 'Category not found', 404);
-      formatSuccess(res, { data: category, message: 'Category retrieved successfully' });
+      const category = await categoryService.getCategoryById(appId, id); // ⭐ AJOUT appId
+
+      if (!category) {
+        return formatError(res, 'Category not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: category,
+        message: 'Category retrieved successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -56,45 +48,83 @@ class CategoryController {
 
   async createCategory(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { name, description, icon, successRate, isVip, isActive } = req.body;
-      if (!name) return formatError(res, 'Name is required', 400);
+
+      if (!name) {
+        return formatError(res, 'Name is required', 400);
+      }
+
       if (successRate !== undefined && (successRate < 0 || successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
-      const category = await categoryService.createCategory(appId, { name, description, icon, successRate, isActive, isVip });
+
+      const categoryData = {
+        name,
+        description,
+        icon,
+        successRate,
+        isActive,
+        isVip
+      };
+
+      const category = await categoryService.createCategory(appId, categoryData); // ⭐ AJOUT appId
+      
       res.status(201);
-      formatSuccess(res, { data: category, message: 'Category created successfully' });
+      formatSuccess(res, {
+        data: category,
+        message: 'Category created successfully'
+      });
     } catch (error) {
-      if (error.code === 11000) return formatError(res, 'Category name already exists', 409);
+      if (error.code === 11000) {
+        return formatError(res, 'Category name already exists', 409);
+      }
       formatError(res, error.message, 500);
     }
   }
 
   async updateCategory(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
       const updates = req.body;
+
       if (updates.successRate !== undefined && (updates.successRate < 0 || updates.successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
-      const category = await categoryService.updateCategory(appId, id, updates);
-      if (!category) return formatError(res, 'Category not found', 404);
-      formatSuccess(res, { data: category, message: 'Category updated successfully' });
+
+      const category = await categoryService.updateCategory(appId, id, updates); // ⭐ AJOUT appId
+
+      if (!category) {
+        return formatError(res, 'Category not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: category,
+        message: 'Category updated successfully'
+      });
     } catch (error) {
-      if (error.code === 11000) return formatError(res, 'Category name already exists', 409);
+      if (error.code === 11000) {
+        return formatError(res, 'Category name already exists', 409);
+      }
       formatError(res, error.message, 500);
     }
   }
 
   async deleteCategory(req, res) {
     try {
-      const appId = req.appId;
+      const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
-      const category = await categoryService.deactivateCategory(appId, id);
-      if (!category) return formatError(res, 'Category not found', 404);
-      formatSuccess(res, { data: category, message: 'Category deactivated successfully' });
+      const category = await categoryService.deactivateCategory(appId, id); // ⭐ AJOUT appId
+
+      if (!category) {
+        return formatError(res, 'Category not found', 404);
+      }
+
+      formatSuccess(res, {
+        data: category,
+        message: 'Category deactivated successfully'
+      });
     } catch (error) {
       formatError(res, error.message, 500);
     }
