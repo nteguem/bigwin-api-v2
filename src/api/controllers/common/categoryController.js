@@ -8,16 +8,18 @@ class CategoryController {
   async getCategories(req, res) {
     try {
       const appId = req.appId;
-      
       const { offset = 0, limit = 10, isVip, isActive } = req.query;
       
-      // ⭐ CONVERTIR EN BOOLEAN AVANT DE PASSER AU SERVICE
+      // ⭐ CONVERSION CORRECTE
       const filters = {
         offset: parseInt(offset),
         limit: parseInt(limit),
-        isVip: isVip !== undefined ? isVip === 'true' : null,
-        isActive: isActive !== undefined ? isActive === 'true' : null
+        isVip: isVip === 'true' ? true : isVip === 'false' ? false : null,
+        isActive: isActive === 'true' ? true : isActive === 'false' ? false : null
       };
+      
+      console.log('[CategoryController] Query:', req.query);
+      console.log('[CategoryController] Filters:', filters);
       
       const result = await categoryService.getCategories(appId, filters);
 
@@ -35,17 +37,9 @@ class CategoryController {
     try {
       const appId = req.appId;
       const { id } = req.params;
-      
       const category = await categoryService.getCategoryById(appId, id);
-
-      if (!category) {
-        return formatError(res, 'Category not found', 404);
-      }
-
-      formatSuccess(res, {
-        data: category,
-        message: 'Category retrieved successfully'
-      });
+      if (!category) return formatError(res, 'Category not found', 404);
+      formatSuccess(res, { data: category, message: 'Category retrieved successfully' });
     } catch (error) {
       formatError(res, error.message, 500);
     }
@@ -55,35 +49,15 @@ class CategoryController {
     try {
       const appId = req.appId;
       const { name, description, icon, successRate, isVip, isActive } = req.body;
-
-      if (!name) {
-        return formatError(res, 'Name is required', 400);
-      }
-
+      if (!name) return formatError(res, 'Name is required', 400);
       if (successRate !== undefined && (successRate < 0 || successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
-
-      const categoryData = {
-        name,
-        description,
-        icon,
-        successRate,
-        isActive,
-        isVip
-      };
-
-      const category = await categoryService.createCategory(appId, categoryData);
-      
+      const category = await categoryService.createCategory(appId, { name, description, icon, successRate, isActive, isVip });
       res.status(201);
-      formatSuccess(res, {
-        data: category,
-        message: 'Category created successfully'
-      });
+      formatSuccess(res, { data: category, message: 'Category created successfully' });
     } catch (error) {
-      if (error.code === 11000) {
-        return formatError(res, 'Category name already exists', 409);
-      }
+      if (error.code === 11000) return formatError(res, 'Category name already exists', 409);
       formatError(res, error.message, 500);
     }
   }
@@ -93,25 +67,14 @@ class CategoryController {
       const appId = req.appId;
       const { id } = req.params;
       const updates = req.body;
-
       if (updates.successRate !== undefined && (updates.successRate < 0 || updates.successRate > 100)) {
         return formatError(res, 'Success rate must be between 0 and 100', 400);
       }
-
       const category = await categoryService.updateCategory(appId, id, updates);
-
-      if (!category) {
-        return formatError(res, 'Category not found', 404);
-      }
-
-      formatSuccess(res, {
-        data: category,
-        message: 'Category updated successfully'
-      });
+      if (!category) return formatError(res, 'Category not found', 404);
+      formatSuccess(res, { data: category, message: 'Category updated successfully' });
     } catch (error) {
-      if (error.code === 11000) {
-        return formatError(res, 'Category name already exists', 409);
-      }
+      if (error.code === 11000) return formatError(res, 'Category name already exists', 409);
       formatError(res, error.message, 500);
     }
   }
@@ -120,17 +83,9 @@ class CategoryController {
     try {
       const appId = req.appId;
       const { id } = req.params;
-      
       const category = await categoryService.deactivateCategory(appId, id);
-
-      if (!category) {
-        return formatError(res, 'Category not found', 404);
-      }
-
-      formatSuccess(res, {
-        data: category,
-        message: 'Category deactivated successfully'
-      });
+      if (!category) return formatError(res, 'Category not found', 404);
+      formatSuccess(res, { data: category, message: 'Category deactivated successfully' });
     } catch (error) {
       formatError(res, error.message, 500);
     }
