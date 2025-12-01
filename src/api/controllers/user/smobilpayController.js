@@ -3,6 +3,7 @@ const smobilpayService = require('../../services/user/SmobilpayService');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
+const App = require('../../models/common/App');
 
 /**
  * Récupérer les services par pays
@@ -11,6 +12,15 @@ exports.getServices = catchAsync(async (req, res, next) => {
   const { country } = req.query;
 
   const currentApp = req.currentApp;
+
+  // Vérifier que appId est présent
+  if (!currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
 
   // Vérifier que Smobilpay est activé pour cette app
   if (!currentApp?.payments?.smobilpay?.enabled) {
@@ -42,6 +52,15 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   
   const appId = req.appId;
   const currentApp = req.currentApp;
+
+  // Vérifier que appId est présent (obligatoire pour initier un paiement)
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
   
   // Validation - seulement 3 champs requis
   if (!packageId || !serviceId || !phoneNumber) {
@@ -119,6 +138,15 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   const currentApp = req.currentApp;
 
+  // Vérifier que appId est présent
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
   // Vérifier que Smobilpay est activé pour cette app
   if (!currentApp?.payments?.smobilpay?.enabled) {
     return next(new AppError(
@@ -172,34 +200,46 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  */
 exports.webhook = catchAsync(async (req, res, next) => {
   const { errorCode, status, trid: paymentId } = req.body;
-  
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-  
-  console.log('Smobilpay webhook received:', req.body);
+
+  console.log('=== WEBHOOK SMOBILPAY REÇU ===');
+  console.log('Body:', JSON.stringify(req.body));
 
   if (!paymentId) {
     return next(new AppError('PTN ou paymentId requis', 400, ErrorCodes.VALIDATION_ERROR));
-  }
-
-  // Vérifier que Smobilpay est activé pour cette app
-  if (!currentApp?.payments?.smobilpay?.enabled) {
-    return next(new AppError(
-      'Smobilpay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
   }
   
   try {
     const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
     
-    const query = { appId, paymentId };
-    const transaction = await SmobilpayTransaction.findOne(query)
+    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
+    const transaction = await SmobilpayTransaction.findOne({ paymentId })
       .populate(['package', 'user']);
     
     if (!transaction) {
+      console.error(`[Webhook Smobilpay] Transaction ${paymentId} non trouvée`);
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Récupérer l'appId depuis la transaction
+    const appId = transaction.appId;
+    console.log(`[Webhook Smobilpay] AppId récupéré depuis transaction: ${appId}`);
+
+    // Récupérer l'app depuis la base de données
+    const currentApp = await App.findOne({ appId, isActive: true }).lean();
+
+    if (!currentApp) {
+      console.error(`[Webhook Smobilpay] App ${appId} non trouvée`);
+      return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Vérifier que Smobilpay est activé pour cette app
+    if (!currentApp?.payments?.smobilpay?.enabled) {
+      console.error(`[Webhook Smobilpay] Smobilpay non activé pour app ${appId}`);
+      return next(new AppError(
+        'Smobilpay n\'est pas activé pour cette application',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      ));
     }
     
     // Mettre à jour le statut si différent
@@ -207,6 +247,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
       transaction.status = status;
       transaction.errorCode = errorCode || null;
       await transaction.save();
+      console.log(`[Webhook Smobilpay] Transaction ${paymentId} updated to status: ${transaction.status}`);
       
       await paymentMiddleware.processTransactionUpdate(appId, transaction);
     }
@@ -217,6 +258,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
   } catch (error) {
     console.error('Webhook processing error:', error.message);
+    console.error('Error stack:', error.stack);
     
     res.status(200).json({
       success: false,

@@ -83,9 +83,9 @@ router.use('/notifications', identifyApp, notificationRoutes);
 
 // ===== ROUTES DE PAIEMENT =====
 // Routes de paiement: identifyApp OBLIGATOIRE
-router.use('/payments/smobilpay', identifyApp, smobilpayRoutes);
-router.use('/payments/cinetpay', identifyApp, cinetpayRoutes);
-router.use('/payments/afribapay', identifyApp, afribaPayRoutes);
+router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
+router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
+router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 
 /**
  * GET /api/

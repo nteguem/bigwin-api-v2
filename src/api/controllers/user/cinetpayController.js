@@ -3,6 +3,7 @@ const cinetpayService = require('../../services/user/CinetpayService');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
+const App = require('../../models/common/App');
 
 /**
  * Initier un paiement CinetPay
@@ -12,6 +13,15 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 
   const appId = req.appId;
   const currentApp = req.currentApp;
+
+  // Vérifier que appId est présent (obligatoire pour initier un paiement)
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
 
   // Validation
   if (!packageId || !phoneNumber) {
@@ -87,6 +97,15 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   const currentApp = req.currentApp;
 
+  // Vérifier que appId est présent
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
   // Vérifier que CinetPay est activé pour cette app
   if (!currentApp?.payments?.cinetpay?.enabled) {
     return next(new AppError(
@@ -141,32 +160,45 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
   const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  console.log('CinetPay webhook received:', req.body);
+  console.log('=== WEBHOOK CINETPAY REÇU ===');
+  console.log('Body:', JSON.stringify(req.body));
 
   if (!transactionId) {
     return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que CinetPay est activé pour cette app
-  if (!currentApp?.payments?.cinetpay?.enabled) {
-    return next(new AppError(
-      'CinetPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
   try {
     const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
     
-    const transaction = await CinetpayTransaction.findOne({ appId, transactionId })
+    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
+    const transaction = await CinetpayTransaction.findOne({ transactionId })
       .populate(['package', 'user']);
 
     if (!transaction) {
+      console.error(`[Webhook CinetPay] Transaction ${transactionId} non trouvée`);
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Récupérer l'appId depuis la transaction
+    const appId = transaction.appId;
+    console.log(`[Webhook CinetPay] AppId récupéré depuis transaction: ${appId}`);
+
+    // Récupérer l'app depuis la base de données
+    const currentApp = await App.findOne({ appId, isActive: true }).lean();
+
+    if (!currentApp) {
+      console.error(`[Webhook CinetPay] App ${appId} non trouvée`);
+      return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Vérifier que CinetPay est activé pour cette app
+    if (!currentApp?.payments?.cinetpay?.enabled) {
+      console.error(`[Webhook CinetPay] CinetPay non activé pour app ${appId}`);
+      return next(new AppError(
+        'CinetPay n\'est pas activé pour cette application',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      ));
     }
 
     // Mettre à jour la transaction avec les données webhook
@@ -194,7 +226,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
     }
 
     await transaction.save();
-    console.log(`Transaction ${transactionId} updated to status: ${transaction.status}`);
+    console.log(`[Webhook CinetPay] Transaction ${transactionId} updated to status: ${transaction.status}`);
 
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
@@ -221,9 +253,6 @@ exports.webhook = catchAsync(async (req, res, next) => {
 exports.paymentSuccess = catchAsync(async (req, res, next) => {
   const { token, transaction_id } = req.method === 'GET' ? req.query : req.body;
 
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
   if (!transaction_id) {
     const errorContent = `
       <div class="icon">❌</div>
@@ -232,6 +261,33 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
       <p>Veuillez réessayer ou contacter le support.</p>
     `;
     return res.status(400).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+  }
+
+  // Récupérer la transaction pour obtenir l'appId
+  const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
+  const transactionForApp = await CinetpayTransaction.findOne({ transactionId: transaction_id });
+
+  if (!transactionForApp) {
+    const errorContent = `
+      <div class="icon">❌</div>
+      <h1 class="error">Erreur</h1>
+      <p>Transaction non trouvée.</p>
+    `;
+    return res.status(404).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+  }
+
+  const appId = transactionForApp.appId;
+
+  // Récupérer l'app depuis la base de données
+  const currentApp = await App.findOne({ appId, isActive: true }).lean();
+
+  if (!currentApp) {
+    const errorContent = `
+      <div class="icon">❌</div>
+      <h1 class="error">Erreur</h1>
+      <p>Application non trouvée.</p>
+    `;
+    return res.status(404).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
   }
 
   // Vérifier que CinetPay est activé pour cette app

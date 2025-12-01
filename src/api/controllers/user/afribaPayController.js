@@ -3,6 +3,7 @@ const afribaPayService = require('../../services/user/AfribaPayService');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
+const App = require('../../models/common/App');
 
 /**
  * Récupérer les pays et opérateurs
@@ -59,6 +60,15 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 
   const appId = req.appId;
   const currentApp = req.currentApp;
+
+  // Vérifier que appId est présent (obligatoire pour initier un paiement)
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
 
   // Validation de base
   if (!packageId || !phoneNumber || !operator || !country || !currency) {
@@ -169,6 +179,15 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   const currentApp = req.currentApp;
 
+  // Vérifier que appId est présent
+  if (!appId || !currentApp) {
+    return next(new AppError(
+      'Header X-App-Id requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
   // Vérifier que AfribaPay est activé pour cette app
   if (!currentApp?.payments?.afribapay?.enabled) {
     return next(new AppError(
@@ -224,31 +243,46 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedSignature = req.headers['x-signature'];
   const { order_id: orderId, status } = req.body;
   const rawPayload = JSON.stringify(req.body);
-  
-  const appId = req.appId;
-  const currentApp = req.currentApp;
+
+  console.log('=== WEBHOOK AFRIBAPAY REÇU ===');
+  console.log('Body:', JSON.stringify(req.body));
   
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier que AfribaPay est activé pour cette app
-  if (!currentApp?.payments?.afribapay?.enabled) {
-    return next(new AppError(
-      'AfribaPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
   try {
     const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
     
-    const transaction = await AfribaPayTransaction.findOne({ appId, orderId })
+    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
+    const transaction = await AfribaPayTransaction.findOne({ orderId })
       .populate(['package', 'user']);
 
     if (!transaction) {
+      console.error(`[Webhook AfribaPay] Transaction ${orderId} non trouvée`);
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Récupérer l'appId depuis la transaction
+    const appId = transaction.appId;
+    console.log(`[Webhook AfribaPay] AppId récupéré depuis transaction: ${appId}`);
+
+    // Récupérer l'app depuis la base de données
+    const currentApp = await App.findOne({ appId, isActive: true }).lean();
+
+    if (!currentApp) {
+      console.error(`[Webhook AfribaPay] App ${appId} non trouvée`);
+      return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
+    }
+
+    // Vérifier que AfribaPay est activé pour cette app
+    if (!currentApp?.payments?.afribapay?.enabled) {
+      console.error(`[Webhook AfribaPay] AfribaPay non activé pour app ${appId}`);
+      return next(new AppError(
+        'AfribaPay n\'est pas activé pour cette application',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      ));
     }
 
     // Récupérer la config pour vérifier la signature
@@ -275,6 +309,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
     if (req.body.amount_total) transaction.amountTotal = req.body.amount_total;
 
     await transaction.save();
+    console.log(`[Webhook AfribaPay] Transaction ${orderId} updated to status: ${transaction.status}`);
     
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
@@ -285,6 +320,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   } catch (error) {
     console.error('Webhook processing error:', error.message);
+    console.error('Error stack:', error.stack);
     
     res.status(200).json({
       success: false,
