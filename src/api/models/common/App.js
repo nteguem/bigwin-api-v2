@@ -59,17 +59,15 @@ const appSchema = new mongoose.Schema({
       }
     },
     cinetpay: {
+      apiUrl: String,
+      apiKey: String,
       xof: {
-        apiKey: String,
         siteId: String,
         secretKey: String,
-        apiUrl: String
       },
       xaf: {
-        apiKey: String,
         siteId: String,
         secretKey: String,
-        apiUrl: String
       },
       enabled: {
         type: Boolean,

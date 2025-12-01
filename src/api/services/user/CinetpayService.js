@@ -28,7 +28,7 @@ function getConfig(app) {
   // Si config en base et activée, l'utiliser
   if (dbConfig?.enabled) {
     return {
-      apiUrl: process.env.CINETPAY_API_URL,
+      apiUrl: dbConfig.apiUrl || process.env.CINETPAY_API_URL,
       xof: {
         apiKey: dbConfig.xof?.apiKey || process.env.CINETPAY_XOF_API_KEY,
         siteId: dbConfig.xof?.siteId || process.env.CINETPAY_XOF_SITE_ID,
