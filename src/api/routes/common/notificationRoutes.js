@@ -44,4 +44,29 @@ router.post('/check-players', notificationController.checkPlayers);
  */
 router.get('/active-players', notificationController.getActivePlayers);
 
+/**
+ * @route POST /api/notifications/generate
+ * @desc Générer des propositions de notifications via IA
+ * @body { prompt: string, context?: object, count?: number (1-3) }
+ * @example
+ * {
+ *   "prompt": "Notification pour souhaiter bonne année 2025 et promouvoir les abonnements VIP avec une réduction de 20%",
+ *   "context": {
+ *     "event": "new_year",
+ *     "discount": "20%",
+ *     "urgency": "high"
+ *   },
+ *   "count": 3
+ * }
+ * @access Private (Admin/System)
+ */
+router.post('/generate', notificationController.generateNotifications);
+
+/**
+ * @route GET /api/notifications/ai-status
+ * @desc Vérifier si le service de génération IA est disponible
+ * @access Private (Admin/System)
+ */
+router.get('/ai-status', notificationController.checkAIStatus);
+
 module.exports = router;

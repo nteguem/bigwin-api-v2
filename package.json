@@ -2,10 +2,10 @@
   "name": "bigwin-api-v2",
   "version": "1.0.0",
   "description": "API pour la plateforme de pronostics sportifs",
-  "main": "server.js",
+  "main": "server-new.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node server-new.js",
+    "dev": "nodemon server-new.js",
     "test": "jest --detectOpenHandles",
     "seed:roles": "node src/scripts/seeders/rolePermissionSeeder.js",
     "migrate:auth": "node add-auth-provider.js",
@@ -17,6 +17,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
     "@google-cloud/pubsub": "^5.2.0",
     "agenda": "^5.0.0",
     "axios": "^1.9.0",
