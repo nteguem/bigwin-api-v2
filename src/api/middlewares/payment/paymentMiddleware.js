@@ -169,12 +169,15 @@ async function sendPaymentFailedNotification(appId, transaction) {
 /**
  * Traiter une transaction mise à jour
  */
+/**
+ * Traiter une transaction mise à jour
+ */
 async function processTransactionUpdate(appId, transaction) {
   try {
     if (transaction.isSuccessful()) {
       return await handleSuccessfulTransaction(appId, transaction);
     } 
-    else if (transaction.status === 'FAILED' || transaction.status === 'REFUSED' || transaction.status === 'ERROR') {
+    else if (transaction.status === 'FAILED' || transaction.status === 'REFUSED' || transaction.status === 'ERROR' || transaction.status === 'CANCELED') {
       await handleFailedTransaction(appId, transaction);
     }
     

@@ -7,8 +7,7 @@ const App = require('../../models/common/App');
 
 class NotificationService {
   constructor() {
-    // ✅ NOUVELLE URL API (changement novembre 2024)
-    this.apiUrl = 'https://api.onesignal.com';
+    this.apiUrl = 'https://onesignal.com/api/v1';
     this.configCache = new Map(); // Cache des configs par appId
   }
 
@@ -300,10 +299,8 @@ class NotificationService {
         method,
         url: `${this.apiUrl}/${endpoint}`,
         headers: {
-          // ✅ NOUVEAU FORMAT D'AUTORISATION (changement novembre 2024)
-          'Authorization': `Key ${config.restApiKey}`,
-          'Content-Type': 'application/json',
-          'accept': 'application/json'
+          'Authorization': `Basic ${config.restApiKey}`,
+          'Content-Type': 'application/json'
         }
       };
 
