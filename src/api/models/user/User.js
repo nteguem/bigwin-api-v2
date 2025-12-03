@@ -89,10 +89,10 @@ const userSchema = new mongoose.Schema({
 });
 
 // Indexes
-userSchema.index({ appId: 1, phoneNumber: 1 }, { unique: true, sparse: true });
+// ✅ CHANGEMENT: Unicité sur appId + dialCode + phoneNumber au lieu de appId + phoneNumber
+userSchema.index({ appId: 1, dialCode: 1, phoneNumber: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, email: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, googleId: 1 }, { unique: true, sparse: true });
-userSchema.index({ appId: 1, pseudo: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, isActive: 1 });
 userSchema.index({ referredBy: 1 });
 userSchema.index({ isActive: 1 });

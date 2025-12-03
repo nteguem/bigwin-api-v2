@@ -23,7 +23,6 @@ const GooglePlayTransaction = require('./src/api/models/user/GooglePlayTransacti
 const CinetpayTransaction = require('./src/api/models/user/CinetpayTransaction');
 const SmobilpayTransaction = require('./src/api/models/user/SmobilpayTransaction');
 const AfribaPayTransaction = require('./src/api/models/user/AfribaPayTransaction');
-const DpoPayTransaction = require('./src/api/models/user/DpoPayTransaction');
 const App = require('./src/api/models/common/App');
 
 const DEFAULT_APP_ID = 'bigwin';
@@ -65,50 +64,44 @@ async function createBigwinApp() {
         en: 'BigWin sports predictions app'
       },
       googlePlay: {
-        packageName: process.env.GOOGLE_PLAY_PACKAGE_NAME,
-        serviceAccountKeyPath: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH
+        packageName: 'com.bigwin.application',
+        serviceAccountKeyPath: './config/google-service-account.json'
       },
       oneSignal: {
-        appId: process.env.ONESIGNAL_APP_ID,
-        restApiKey: process.env.ONESIGNAL_REST_API_KEY
+        appId: '2daef6c5-6318-41b1-86d2-4c14420ab189',
+        restApiKey: 'os_v2_app_fwxpnrlddba3dbwsjqkeecvrrfpgi55oaaculefntu3hdm44zo3jkjhbmfwd5zq4r4gz3xqavpkq3xwj5ebrtefbp4ji2pxrlyuygfq'
       },
       payments: {
         smobilpay: {
-          apiUrl: process.env.SMOBILPAY_API_URL,
-          apiKey: process.env.SMOBILPAY_API_KEY,
-          apiSecret: process.env.SMOBILPAY_API_SECRET,
+          apiUrl: 'https://s3pv2cm.smobilpay.com/v2',
+          apiKey: 'd1a38446-bc57-469b-8f80-637529cea7d5',
+          apiSecret: '43fdd3c0-ddb5-4984-90e9-27a2a3dd55c6',
           enabled: true
         },
         cinetpay: {
           xof: {
-            apiKey: process.env.CINETPAY_XOF_API_KEY,
-            siteId: process.env.CINETPAY_XOF_SITE_ID,
-            secretKey: process.env.CINETPAY_XOF_SECRET_KEY
+            siteId: '105899691',
+            secretKey: '1996169631685cf5634bc441.43417923'
           },
           xaf: {
-            apiKey: process.env.CINETPAY_XAF_API_KEY,
-            siteId: process.env.CINETPAY_XAF_SITE_ID,
-            secretKey: process.env.CINETPAY_XAF_SECRET_KEY
+            siteId: '329705',
+            secretKey: '7954945265bbf3983565ae9.99916042'
           },
-          enabled: true
+          enabled: true,
+          apiUrl: 'https://api-checkout.cinetpay.com/v2/payment'
         },
         afribapay: {
-          apiUrl: process.env.AFRIBAPAY_API_URL,
-          apiUser: process.env.AFRIBAPAY_API_USER,
-          apiKey: process.env.AFRIBAPAY_API_KEY,
-          merchantKey: process.env.AFRIBAPAY_MERCHANT_KEY,
-          enabled: true
-        },
-        dpopay: {
-          companyToken: process.env.DPO_COMPANY_TOKEN,
-          serviceType: process.env.DPO_SERVICE_TYPE,
+          apiUrl: 'https://api.afribapay.com',
+          apiUser: 'pk_c6af254ff7e9d1cd254f5c99952550fc',
+          apiKey: 'sk_04ZzDVPXEZBn3Uvhvd',
+          merchantKey: 'mk_5501481uXP250703042851',
           enabled: true
         }
       },
       branding: {
         primaryColor: '#FF6B35',
-        logo: '/assets/bigwin-logo.png',
-        icon: '/assets/bigwin-icon.png'
+        logo: 'https://res.cloudinary.com/nwccompany/image/upload/v1764532275/logo_lyfyso.png',
+        icon: 'https://res.cloudinary.com/nwccompany/image/upload/v1764532275/logo_lyfyso.png'
       },
       isActive: true
     });
@@ -118,6 +111,101 @@ async function createBigwinApp() {
     
   } catch (error) {
     console.error('❌ Erreur création app bigwin:', error);
+    throw error;
+  }
+}
+
+/**
+ * Supprimer tous les index composites avec appId pour User
+ */
+async function dropUserAppIdIndexes() {
+  try {
+    console.log('\n🗑️  Suppression temporaire des index User avec appId...');
+    
+    const collection = mongoose.connection.collection('users');
+    const indexes = await collection.indexes();
+    
+    const indexesToDrop = [
+      'appId_1_phoneNumber_1',
+      'appId_1_dialCode_1_phoneNumber_1',
+      'appId_1_email_1',
+      'appId_1_googleId_1',
+      'appId_1_pseudo_1'
+    ];
+    
+    for (const indexName of indexesToDrop) {
+      const indexExists = indexes.find(idx => idx.name === indexName);
+      if (indexExists) {
+        console.log(`   🗑️  Suppression de l'index: ${indexName}`);
+        await collection.dropIndex(indexName);
+        console.log(`   ✅ Index ${indexName} supprimé`);
+      }
+    }
+    
+    console.log('   ✅ Tous les index appId supprimés');
+    
+  } catch (error) {
+    console.error('   ❌ Erreur suppression index:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Recréer les index pour User avec la nouvelle logique
+ */
+async function recreateUserIndexes() {
+  try {
+    console.log('\n🔨 Recréation des index User avec nouvelle logique...');
+    
+    const collection = mongoose.connection.collection('users');
+    
+    // Index pour dialCode + phoneNumber (uniquement si les deux existent)
+    await collection.createIndex(
+      { appId: 1, dialCode: 1, phoneNumber: 1 },
+      { 
+        unique: true, 
+        partialFilterExpression: { 
+          phoneNumber: { $type: 'string' },
+          dialCode: { $type: 'string' }
+        },
+        name: 'appId_1_dialCode_1_phoneNumber_1'
+      }
+    );
+    console.log('   ✅ Index appId_dialCode_phoneNumber créé');
+    
+    // Index pour email (uniquement si email existe)
+    await collection.createIndex(
+      { appId: 1, email: 1 },
+      { 
+        unique: true, 
+        partialFilterExpression: { email: { $type: 'string' } },
+        name: 'appId_1_email_1'
+      }
+    );
+    console.log('   ✅ Index appId_email créé');
+    
+    // Index pour googleId (uniquement si googleId existe)
+    await collection.createIndex(
+      { appId: 1, googleId: 1 },
+      { 
+        unique: true, 
+        partialFilterExpression: { googleId: { $type: 'string' } },
+        name: 'appId_1_googleId_1'
+      }
+    );
+    console.log('   ✅ Index appId_googleId créé');
+    
+    // ❌ PSEUDO N'EST PLUS UNIQUE - Index retiré
+    // Le pseudo peut être dupliqué entre utilisateurs
+    
+    // Index pour isActive (non unique)
+    await collection.createIndex({ appId: 1, isActive: 1 });
+    console.log('   ✅ Index appId_isActive créé');
+    
+    console.log('   ✅ Tous les index User recréés avec succès');
+    
+  } catch (error) {
+    console.error('   ❌ Erreur recréation index:', error.message);
     throw error;
   }
 }
@@ -171,6 +259,9 @@ async function migrate() {
     // Créer l'app bigwin
     await createBigwinApp();
     
+    // ÉTAPE 1: Supprimer les index problématiques AVANT la migration
+    await dropUserAppIdIndexes();
+    
     console.log('\n📋 Migration des collections...');
     
     const collections = [
@@ -190,7 +281,6 @@ async function migrate() {
       { model: CinetpayTransaction, name: 'CinetpayTransactions' },
       { model: SmobilpayTransaction, name: 'SmobilpayTransactions' },
       { model: AfribaPayTransaction, name: 'AfribaPayTransactions' },
-      { model: DpoPayTransaction, name: 'DpoPayTransactions' }
     ];
     
     const results = [];
@@ -199,6 +289,9 @@ async function migrate() {
       const result = await migrateCollection(collection.model, collection.name);
       results.push({ name: collection.name, ...result });
     }
+    
+    // ÉTAPE 2: Recréer les index APRÈS la migration
+    await recreateUserIndexes();
     
     // Afficher le résumé
     console.log('\n' + '='.repeat(60));
@@ -220,6 +313,11 @@ async function migrate() {
     
     console.log('\n✅ Migration terminée avec succès !');
     console.log(`\n💡 Toutes les données existantes ont été assignées à l'app '${DEFAULT_APP_ID}'`);
+    console.log(`\n🔑 Contraintes d'unicité:`);
+    console.log(`   - appId + dialCode + phoneNumber (UNIQUE)`);
+    console.log(`   - appId + email (UNIQUE)`);
+    console.log(`   - appId + googleId (UNIQUE)`);
+    console.log(`   - pseudo (NON UNIQUE - peut être dupliqué)`);
     
   } catch (error) {
     console.error('\n❌ Erreur lors de la migration:', error);
@@ -243,7 +341,7 @@ async function rollback() {
       User, Affiliate, AffiliateType, Package, Category, Ticket, 
       Prediction, Subscription, Commission, Formation, Device, Topic,
       GooglePlayTransaction, CinetpayTransaction, SmobilpayTransaction,
-      AfribaPayTransaction, DpoPayTransaction
+      AfribaPayTransaction
     ];
     
     for (const Model of collections) {
