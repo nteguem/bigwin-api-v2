@@ -293,34 +293,39 @@ class NotificationService {
    * Méthode privée pour faire les requêtes à l'API OneSignal
    * @param {Object} config - Configuration OneSignal de l'app
    */
-  async _makeRequest(config, endpoint, method = 'GET', data = null) {
-    try {
-      const axiosConfig = {
-        method,
-        url: `${this.apiUrl}/${endpoint}`,
-        headers: {
-          'Authorization': `Basic ${config.restApiKey}`,
-          'Content-Type': 'application/json'
-        }
-      };
-
-      if (data && (method === 'POST' || method === 'PUT')) {
-        axiosConfig.data = data;
+async _makeRequest(config, endpoint, method = 'GET', data = null) {
+  try {
+    // Détecter le type de clé (v1 ou v2)
+    const isV2Key = config.restApiKey.startsWith('os_v2_');
+    
+    const axiosConfig = {
+      method,
+      url: `${this.apiUrl}/${endpoint}`,
+      headers: {
+        'Authorization': isV2Key 
+          ? `Key ${config.restApiKey}` 
+          : `Basic ${config.restApiKey}`,
+        'Content-Type': 'application/json'
       }
+    };
 
-      const response = await axios(axiosConfig);
-      return response.data;
-    } catch (error) {
-      logger.error('Erreur requête OneSignal API:', {
-        endpoint,
-        method,
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
-      throw error;
+    if (data && (method === 'POST' || method === 'PUT')) {
+      axiosConfig.data = data;
     }
+
+    const response = await axios(axiosConfig);
+    return response.data;
+  } catch (error) {
+    logger.error('Erreur requête OneSignal API:', {
+      endpoint,
+      method,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    throw error;
   }
+}
 
   /**
    * Vider le cache de configuration (utile si config change en DB)
