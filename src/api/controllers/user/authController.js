@@ -164,7 +164,8 @@ exports.login = catchAsync(async (req, res, next) => {
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
   const { idToken, affiliateCode, city, countryCode, deviceId } = req.body;
-  
+   console.log("req.body",req.body)
+  console.log("req.body",countryCode)
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
   
