@@ -342,7 +342,7 @@ class NotificationService {
     return this.sendToAll(appId, notification);
   }
 
-  /**
+/**
  * Envoyer une notification à tous les utilisateurs de pays spécifiques
  * @param {String} appId - ID de l'application
  * @param {Array<String>} countryCodes - Codes pays ISO (ex: ["SN", "CM", "CI"])
@@ -401,17 +401,19 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
           ? {
               $or: [
                 { 'userData.countryCode': { $in: normalizedCodes } },
-                { 'userData': { $exists: false } } // Guests sans user
+                { 'userData': { $exists: false } }
               ]
             }
           : { 'userData.countryCode': { $in: normalizedCodes } }
       },
-      // Étape 5: Projeter uniquement le playerId (fcmToken)
+      // Étape 5: Projeter les infos nécessaires
       {
         $project: {
+          _id: 1,
           playerId: '$fcmToken',
           countryCode: '$userData.countryCode',
-          userType: 1
+          userType: 1,
+          userId: '$user'
         }
       }
     ];
@@ -423,22 +425,81 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
       return {
         id: null,
         recipients: 0,
-        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')}`
+        successful: 0,
+        failed: 0,
+        invalidTokens: 0,
+        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')}`,
+        details: {
+          targetCountries: normalizedCodes,
+          statsByCountry: {}
+        }
       };
     }
 
-    const playerIds = devices.map(d => d.playerId);
+    logger.info(`[${appId}] ${devices.length} devices trouvés, filtrage des playerIds valides...`);
 
-    logger.info(`[${appId}] ${playerIds.length} playerIds trouvés pour ${normalizedCodes.join(', ')}`);
+    // Regex pour valider les UUIDs OneSignal (format standard UUID v4)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    // Statistiques par pays
-    const statsByCountry = devices.reduce((acc, device) => {
+    // Séparer les playerIds valides et invalides
+    const validDevices = [];
+    const invalidDevices = [];
+
+    devices.forEach(device => {
+      if (uuidRegex.test(device.playerId)) {
+        validDevices.push(device);
+      } else {
+        invalidDevices.push(device);
+      }
+    });
+
+    // Logger les tokens invalides pour debug/nettoyage futur
+    if (invalidDevices.length > 0) {
+      logger.warn(`[${appId}] ${invalidDevices.length} tokens invalides détectés (anciens FCM tokens):`, {
+        sample: invalidDevices.slice(0, 3).map(d => ({
+          deviceId: d._id,
+          token: d.playerId.substring(0, 50) + '...',
+          country: d.countryCode
+        })),
+        total: invalidDevices.length
+      });
+    }
+
+    if (validDevices.length === 0) {
+      logger.warn(`[${appId}] Aucun playerId OneSignal valide trouvé pour les pays:`, normalizedCodes);
+      return {
+        id: null,
+        recipients: 0,
+        successful: 0,
+        failed: 0,
+        invalidTokens: invalidDevices.length,
+        message: `Aucun playerId OneSignal valide trouvé. ${invalidDevices.length} anciens FCM tokens détectés.`,
+        details: {
+          targetCountries: normalizedCodes,
+          totalDevices: devices.length,
+          validDevices: 0,
+          invalidDevices: invalidDevices.length,
+          statsByCountry: devices.reduce((acc, device) => {
+            const country = device.countryCode || 'unknown';
+            acc[country] = (acc[country] || 0) + 1;
+            return acc;
+          }, {})
+        }
+      };
+    }
+
+    const playerIds = validDevices.map(d => d.playerId);
+
+    logger.info(`[${appId}] ${playerIds.length} playerIds valides (${invalidDevices.length} invalides ignorés)`);
+
+    // Statistiques par pays (seulement les valides)
+    const statsByCountry = validDevices.reduce((acc, device) => {
       const country = device.countryCode || 'unknown';
       acc[country] = (acc[country] || 0) + 1;
       return acc;
     }, {});
 
-    logger.info(`[${appId}] Répartition par pays:`, statsByCountry);
+    logger.info(`[${appId}] Répartition par pays (playerIds valides):`, statsByCountry);
 
     // Envoi par lots si trop de playerIds (limite OneSignal: 2000 par requête)
     if (playerIds.length <= batchSize) {
@@ -465,10 +526,21 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
 
       return {
         ...response,
-        meta: {
+        successful: response.recipients || playerIds.length,
+        failed: playerIds.length - (response.recipients || playerIds.length),
+        invalidTokens: invalidDevices.length,
+        details: {
           targetCountries: normalizedCodes,
+          totalDevices: devices.length,
+          validDevices: validDevices.length,
+          invalidDevices: invalidDevices.length,
           totalRecipients: playerIds.length,
-          statsByCountry
+          statsByCountry,
+          invalidTokensSample: invalidDevices.slice(0, 5).map(d => ({
+            deviceId: d._id.toString(),
+            countryCode: d.countryCode,
+            tokenPreview: d.playerId.substring(0, 50) + '...'
+          }))
         }
       };
     } else {
@@ -498,8 +570,20 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
           ...notification.options
         };
 
-        const response = await this._makeRequest(config, 'notifications', 'POST', payload);
-        results.push(response);
+        try {
+          const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+          results.push({
+            success: true,
+            ...response
+          });
+        } catch (error) {
+          logger.error(`[${appId}] Erreur sur le lot ${i + 1}:`, error.message);
+          results.push({
+            success: false,
+            error: error.message,
+            batchSize: batch.length
+          });
+        }
 
         // Petit délai entre les lots pour éviter le rate limiting
         if (i < batches.length - 1) {
@@ -507,26 +591,44 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         }
       }
 
-      const totalRecipients = results.reduce((sum, r) => sum + (r.recipients || 0), 0);
+      const successfulBatches = results.filter(r => r.success);
+      const failedBatches = results.filter(r => !r.success);
+      const totalRecipients = successfulBatches.reduce((sum, r) => sum + (r.recipients || 0), 0);
 
-      logger.info(`[${appId}] Tous les lots envoyés avec succès`, {
-        batches: results.length,
-        totalRecipients,
-        statsByCountry
+      logger.info(`[${appId}] Tous les lots traités`, {
+        successful: successfulBatches.length,
+        failed: failedBatches.length,
+        totalRecipients
       });
 
       return {
-        id: results[0].id,
+        id: successfulBatches[0]?.id || null,
         recipients: totalRecipients,
+        successful: totalRecipients,
+        failed: playerIds.length - totalRecipients,
+        invalidTokens: invalidDevices.length,
         batches: results.length,
-        batchResults: results.map(r => ({
+        successfulBatches: successfulBatches.length,
+        failedBatches: failedBatches.length,
+        batchResults: results.map((r, idx) => ({
+          batchNumber: idx + 1,
+          success: r.success,
           id: r.id,
-          recipients: r.recipients
+          recipients: r.recipients,
+          error: r.error
         })),
-        meta: {
+        details: {
           targetCountries: normalizedCodes,
+          totalDevices: devices.length,
+          validDevices: validDevices.length,
+          invalidDevices: invalidDevices.length,
           totalRecipients: playerIds.length,
-          statsByCountry
+          statsByCountry,
+          invalidTokensSample: invalidDevices.slice(0, 5).map(d => ({
+            deviceId: d._id.toString(),
+            countryCode: d.countryCode,
+            tokenPreview: d.playerId.substring(0, 50) + '...'
+          }))
         }
       };
     }
