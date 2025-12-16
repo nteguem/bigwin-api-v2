@@ -368,15 +368,14 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
 
     // Récupérer les playerIds via agrégation MongoDB
     const Device = require('../../models/common/Device');
-    const User = require('../../models/user/User');
 
     const pipeline = [
-      // Étape 1: Filtrer les devices actifs de l'app
+      // Étape 1: Filtrer les devices actifs de l'app avec playerId valide
       {
         $match: {
           appId: appId,
           isActive: true,
-          fcmToken: { $exists: true, $ne: null, $ne: '' }
+          playerId: { $exists: true, $ne: null, $ne: '' }
         }
       },
       // Étape 2: Joindre avec la collection User
@@ -410,7 +409,7 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
       {
         $project: {
           _id: 1,
-          playerId: '$fcmToken',
+          playerId: 1,
           countryCode: '$userData.countryCode',
           userType: 1,
           userId: '$user'
@@ -427,7 +426,6 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         recipients: 0,
         successful: 0,
         failed: 0,
-        invalidTokens: 0,
         message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')}`,
         details: {
           targetCountries: normalizedCodes,
@@ -436,70 +434,38 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
       };
     }
 
-    logger.info(`[${appId}] ${devices.length} devices trouvés, filtrage des playerIds valides...`);
+    logger.info(`[${appId}] ${devices.length} devices trouvés`);
 
-    // Regex pour valider les UUIDs OneSignal (format standard UUID v4)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    // Extraire les playerIds
+    const playerIds = devices.map(d => d.playerId).filter(Boolean);
 
-    // Séparer les playerIds valides et invalides
-    const validDevices = [];
-    const invalidDevices = [];
-
-    devices.forEach(device => {
-      if (uuidRegex.test(device.playerId)) {
-        validDevices.push(device);
-      } else {
-        invalidDevices.push(device);
-      }
-    });
-
-    // Logger les tokens invalides pour debug/nettoyage futur
-    if (invalidDevices.length > 0) {
-      logger.warn(`[${appId}] ${invalidDevices.length} tokens invalides détectés (anciens FCM tokens):`, {
-        sample: invalidDevices.slice(0, 3).map(d => ({
-          deviceId: d._id,
-          token: d.playerId.substring(0, 50) + '...',
-          country: d.countryCode
-        })),
-        total: invalidDevices.length
-      });
-    }
-
-    if (validDevices.length === 0) {
-      logger.warn(`[${appId}] Aucun playerId OneSignal valide trouvé pour les pays:`, normalizedCodes);
+    if (playerIds.length === 0) {
+      logger.warn(`[${appId}] Aucun playerId valide trouvé pour les pays:`, normalizedCodes);
       return {
         id: null,
         recipients: 0,
         successful: 0,
         failed: 0,
-        invalidTokens: invalidDevices.length,
-        message: `Aucun playerId OneSignal valide trouvé. ${invalidDevices.length} anciens FCM tokens détectés.`,
+        message: `Aucun playerId OneSignal trouvé pour les pays: ${normalizedCodes.join(', ')}`,
         details: {
           targetCountries: normalizedCodes,
           totalDevices: devices.length,
-          validDevices: 0,
-          invalidDevices: invalidDevices.length,
-          statsByCountry: devices.reduce((acc, device) => {
-            const country = device.countryCode || 'unknown';
-            acc[country] = (acc[country] || 0) + 1;
-            return acc;
-          }, {})
+          validPlayerIds: 0,
+          statsByCountry: {}
         }
       };
     }
 
-    const playerIds = validDevices.map(d => d.playerId);
+    logger.info(`[${appId}] ${playerIds.length} playerIds valides trouvés`);
 
-    logger.info(`[${appId}] ${playerIds.length} playerIds valides (${invalidDevices.length} invalides ignorés)`);
-
-    // Statistiques par pays (seulement les valides)
-    const statsByCountry = validDevices.reduce((acc, device) => {
+    // Statistiques par pays
+    const statsByCountry = devices.reduce((acc, device) => {
       const country = device.countryCode || 'unknown';
       acc[country] = (acc[country] || 0) + 1;
       return acc;
     }, {});
 
-    logger.info(`[${appId}] Répartition par pays (playerIds valides):`, statsByCountry);
+    logger.info(`[${appId}] Répartition par pays:`, statsByCountry);
 
     // Envoi par lots si trop de playerIds (limite OneSignal: 2000 par requête)
     if (playerIds.length <= batchSize) {
@@ -528,19 +494,12 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         ...response,
         successful: response.recipients || playerIds.length,
         failed: playerIds.length - (response.recipients || playerIds.length),
-        invalidTokens: invalidDevices.length,
         details: {
           targetCountries: normalizedCodes,
           totalDevices: devices.length,
-          validDevices: validDevices.length,
-          invalidDevices: invalidDevices.length,
+          validPlayerIds: playerIds.length,
           totalRecipients: playerIds.length,
-          statsByCountry,
-          invalidTokensSample: invalidDevices.slice(0, 5).map(d => ({
-            deviceId: d._id.toString(),
-            countryCode: d.countryCode,
-            tokenPreview: d.playerId.substring(0, 50) + '...'
-          }))
+          statsByCountry
         }
       };
     } else {
@@ -606,7 +565,6 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         recipients: totalRecipients,
         successful: totalRecipients,
         failed: playerIds.length - totalRecipients,
-        invalidTokens: invalidDevices.length,
         batches: results.length,
         successfulBatches: successfulBatches.length,
         failedBatches: failedBatches.length,
@@ -620,15 +578,9 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         details: {
           targetCountries: normalizedCodes,
           totalDevices: devices.length,
-          validDevices: validDevices.length,
-          invalidDevices: invalidDevices.length,
+          validPlayerIds: playerIds.length,
           totalRecipients: playerIds.length,
-          statsByCountry,
-          invalidTokensSample: invalidDevices.slice(0, 5).map(d => ({
-            deviceId: d._id.toString(),
-            countryCode: d.countryCode,
-            tokenPreview: d.playerId.substring(0, 50) + '...'
-          }))
+          statsByCountry
         }
       };
     }
