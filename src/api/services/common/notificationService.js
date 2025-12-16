@@ -341,6 +341,211 @@ class NotificationService {
   async broadcast(appId, notification) {
     return this.sendToAll(appId, notification);
   }
+
+  /**
+ * Envoyer une notification à tous les utilisateurs de pays spécifiques
+ * @param {String} appId - ID de l'application
+ * @param {Array<String>} countryCodes - Codes pays ISO (ex: ["SN", "CM", "CI"])
+ * @param {Object} notification - Contenu de la notification
+ * @param {Object} options - Options supplémentaires
+ * @param {Boolean} options.includeGuests - Inclure les users non enregistrés (défaut: false)
+ * @param {Number} options.batchSize - Taille des lots pour l'envoi (défaut: 2000)
+ */
+async sendToCountries(appId, countryCodes, notification, options = {}) {
+  try {
+    const config = await this._getConfig(appId);
+    const { includeGuests = false, batchSize = 2000 } = options;
+
+    // Validation des codes pays
+    if (!Array.isArray(countryCodes) || countryCodes.length === 0) {
+      throw new AppError('countryCodes doit être un tableau non vide', 400);
+    }
+
+    // Normaliser les codes pays (uppercase)
+    const normalizedCodes = countryCodes.map(code => code.toUpperCase());
+
+    logger.info(`[${appId}] Récupération des playerIds pour les pays:`, normalizedCodes);
+
+    // Récupérer les playerIds via agrégation MongoDB
+    const Device = require('../../models/common/Device');
+    const User = require('../../models/user/User');
+
+    const pipeline = [
+      // Étape 1: Filtrer les devices actifs de l'app
+      {
+        $match: {
+          appId: appId,
+          isActive: true,
+          fcmToken: { $exists: true, $ne: null, $ne: '' }
+        }
+      },
+      // Étape 2: Joindre avec la collection User
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user',
+          foreignField: '_id',
+          as: 'userData'
+        }
+      },
+      // Étape 3: Dérouler le tableau userData
+      {
+        $unwind: {
+          path: '$userData',
+          preserveNullAndEmptyArrays: !includeGuests
+        }
+      },
+      // Étape 4: Filtrer par countryCode
+      {
+        $match: includeGuests 
+          ? {
+              $or: [
+                { 'userData.countryCode': { $in: normalizedCodes } },
+                { 'userData': { $exists: false } } // Guests sans user
+              ]
+            }
+          : { 'userData.countryCode': { $in: normalizedCodes } }
+      },
+      // Étape 5: Projeter uniquement le playerId (fcmToken)
+      {
+        $project: {
+          playerId: '$fcmToken',
+          countryCode: '$userData.countryCode',
+          userType: 1
+        }
+      }
+    ];
+
+    const devices = await Device.aggregate(pipeline);
+
+    if (!devices || devices.length === 0) {
+      logger.warn(`[${appId}] Aucun device trouvé pour les pays:`, normalizedCodes);
+      return {
+        id: null,
+        recipients: 0,
+        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')}`
+      };
+    }
+
+    const playerIds = devices.map(d => d.playerId);
+
+    logger.info(`[${appId}] ${playerIds.length} playerIds trouvés pour ${normalizedCodes.join(', ')}`);
+
+    // Statistiques par pays
+    const statsByCountry = devices.reduce((acc, device) => {
+      const country = device.countryCode || 'unknown';
+      acc[country] = (acc[country] || 0) + 1;
+      return acc;
+    }, {});
+
+    logger.info(`[${appId}] Répartition par pays:`, statsByCountry);
+
+    // Envoi par lots si trop de playerIds (limite OneSignal: 2000 par requête)
+    if (playerIds.length <= batchSize) {
+      // Envoi simple
+      const payload = {
+        app_id: config.appId,
+        include_player_ids: playerIds,
+        headings: notification.headings || { en: "Notification", fr: "Notification" },
+        contents: notification.contents,
+        data: {
+          ...notification.data,
+          targetCountries: normalizedCodes
+        },
+        ...notification.options
+      };
+
+      const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+      
+      logger.info(`[${appId}] Notification envoyée aux pays ${normalizedCodes.join(', ')}`, {
+        notificationId: response.id,
+        recipients: response.recipients,
+        statsByCountry
+      });
+
+      return {
+        ...response,
+        meta: {
+          targetCountries: normalizedCodes,
+          totalRecipients: playerIds.length,
+          statsByCountry
+        }
+      };
+    } else {
+      // Envoi par lots
+      logger.info(`[${appId}] Envoi par lots (${batchSize} playerIds par lot)...`);
+      
+      const batches = [];
+      for (let i = 0; i < playerIds.length; i += batchSize) {
+        batches.push(playerIds.slice(i, i + batchSize));
+      }
+
+      const results = [];
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        logger.info(`[${appId}] Envoi du lot ${i + 1}/${batches.length} (${batch.length} playerIds)`);
+
+        const payload = {
+          app_id: config.appId,
+          include_player_ids: batch,
+          headings: notification.headings || { en: "Notification", fr: "Notification" },
+          contents: notification.contents,
+          data: {
+            ...notification.data,
+            targetCountries: normalizedCodes,
+            batchNumber: i + 1
+          },
+          ...notification.options
+        };
+
+        const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+        results.push(response);
+
+        // Petit délai entre les lots pour éviter le rate limiting
+        if (i < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      const totalRecipients = results.reduce((sum, r) => sum + (r.recipients || 0), 0);
+
+      logger.info(`[${appId}] Tous les lots envoyés avec succès`, {
+        batches: results.length,
+        totalRecipients,
+        statsByCountry
+      });
+
+      return {
+        id: results[0].id,
+        recipients: totalRecipients,
+        batches: results.length,
+        batchResults: results.map(r => ({
+          id: r.id,
+          recipients: r.recipients
+        })),
+        meta: {
+          targetCountries: normalizedCodes,
+          totalRecipients: playerIds.length,
+          statsByCountry
+        }
+      };
+    }
+
+  } catch (error) {
+    logger.error(`[${appId}] Erreur envoi notification par pays:`, {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      countryCodes
+    });
+    
+    const errorMessage = error.response?.data?.errors 
+      ? JSON.stringify(error.response.data.errors)
+      : error.message;
+    
+    throw new AppError(`Échec envoi notification par pays: ${errorMessage}`, 500);
+  }
+}
 }
 
 module.exports = new NotificationService();

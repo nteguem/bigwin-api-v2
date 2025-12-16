@@ -69,4 +69,39 @@ router.post('/generate', notificationController.generateNotifications);
  */
 router.get('/ai-status', notificationController.checkAIStatus);
 
+
+/**
+ * @route POST /api/notifications/send-to-countries
+ * @desc Envoyer une notification à tous les utilisateurs de pays spécifiques
+ * @body { 
+ *   countryCodes: string[] (ex: ["SN", "CM", "CI"]),
+ *   notification: { contents: object, headings?: object, data?: object, options?: object },
+ *   options?: { includeGuests?: boolean, batchSize?: number }
+ * }
+ * @example
+ * {
+ *   "countryCodes": ["SN", "CM"],
+ *   "notification": {
+ *     "headings": {
+ *       "en": "Special Offer",
+ *       "fr": "Offre Spéciale"
+ *     },
+ *     "contents": {
+ *       "en": "Get 20% off on all VIP subscriptions!",
+ *       "fr": "Obtenez 20% de réduction sur tous les abonnements VIP !"
+ *     },
+ *     "data": {
+ *       "type": "promotion",
+ *       "discount": "20"
+ *     }
+ *   },
+ *   "options": {
+ *     "includeGuests": false,
+ *     "batchSize": 2000
+ *   }
+ * }
+ * @access Private (Admin/System)
+ */
+router.post('/send-to-countries', notificationController.sendToCountries);
+
 module.exports = router;

@@ -191,6 +191,36 @@ const checkAIStatus = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * Endpoint : Envoyer une notification à des pays spécifiques
+ */
+const sendToCountries = catchAsync(async (req, res) => {
+  const { countryCodes, notification, options } = req.body;
+
+  const appId = req.appId;
+
+  // Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  if (!countryCodes || !Array.isArray(countryCodes) || countryCodes.length === 0) {
+    throw new AppError('countryCodes requis (tableau de codes pays ISO)', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  if (!notification?.contents) {
+    throw new AppError('notification.contents requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  
+  const result = await notificationService.sendToCountries(appId, countryCodes, notification, options);
+  
+  res.status(200).json({
+    success: true,
+    data: result,
+    message: `Notification envoyée à ${result.recipients} utilisateur(s) dans ${countryCodes.length} pays`
+  });
+});
+
 module.exports = {
   send,
   broadcast,
@@ -198,5 +228,6 @@ module.exports = {
   checkPlayers,
   getActivePlayers,
   generateNotifications,
-  checkAIStatus
+  checkAIStatus,
+  sendToCountries
 };
