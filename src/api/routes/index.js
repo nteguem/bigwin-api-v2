@@ -94,7 +94,7 @@ router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.get('/', (req, res) => {
   res.status(200).json({
     success: true,
-    message: 'BigWin API v2 - Multi-Tenant',
+    message: 'proxidream API v2 - Multi-Tenant',
     version: '2.0.0',
     multiTenant: true,
     info: {
