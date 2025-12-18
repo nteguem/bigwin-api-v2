@@ -31,13 +31,16 @@ app.use((req, res, next) => {
 
 // Routes de l'API
 app.use('/api', routes);
-app.use(errorHandler);
-// Middleware pour les routes non trouvées
+
+// Middleware pour les routes non trouvées (AVANT errorHandler)
 app.use((req, res, next) => {
   const error = new Error(`Route ${req.originalUrl} not found`);
   error.statusCode = 404;
   next(error);
 });
+
+// Gestionnaire d'erreurs global (TOUJOURS EN DERNIER)
+app.use(errorHandler);
 
 // Gestion des signaux d'arrêt
 process.on('SIGTERM', async () => {
@@ -50,5 +53,4 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-// Export compatible avec votre structure
 module.exports = app;
