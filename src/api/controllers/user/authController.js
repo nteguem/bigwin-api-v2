@@ -43,7 +43,7 @@ exports.register = catchAsync(async (req, res, next) => {
   
   // Créer l'utilisateur AVEC APPID
   const user = await User.create({
-    appId, // ⭐ AJOUT DE APPID
+    appId,
     phoneNumber,
     email: generatedEmail,
     password,
@@ -164,8 +164,7 @@ exports.login = catchAsync(async (req, res, next) => {
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
   const { idToken, affiliateCode, city, countryCode, deviceId } = req.body;
-   console.log("req.body",req.body)
-  console.log("req.body",countryCode)
+  
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
   
@@ -175,12 +174,12 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
   }
   
   try {
-    // 1. Vérifier et décoder le token Google
-    console.log('🔐 Vérification du token Google...');
-    const googleData = await googleAuthService.verifyGoogleToken(idToken);
+    // 1. Vérifier et décoder le token Google - ⭐ PASSER APPID
+    console.log(`🔐 Vérification du token Google pour app: ${appId}...`);
+    const googleData = await googleAuthService.verifyGoogleToken(appId, idToken);
     console.log(`✅ Token valide pour: ${googleData.email}`);
     
-    // 2. Créer ou récupérer l'utilisateur POUR CETTE APP
+    // 2. Créer ou récupérer l'utilisateur POUR CETTE APP - ⭐ PASSER APPID
     const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(appId, googleData, {
       affiliateCode,
       city,
@@ -417,7 +416,7 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
 
   // Trouver l'utilisateur avec phoneNumber ET pseudo POUR CETTE APP
   const user = await User.findOne({ 
-    appId, // ⭐ AJOUT DE APPID
+    appId,
     phoneNumber, 
     pseudo 
   });

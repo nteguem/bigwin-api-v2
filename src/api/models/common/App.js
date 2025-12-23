@@ -6,7 +6,7 @@ const appSchema = new mongoose.Schema({
   appId: {
     type: String,
     required: true,
-    unique: true,  // ✅ Ceci crée DÉJÀ un index unique
+    unique: true,
     lowercase: true,
     trim: true,
     match: /^[a-z0-9-]+$/
@@ -94,6 +94,27 @@ const appSchema = new mongoose.Schema({
     }
   },
   
+  // ⭐ NOUVEAU : Configuration Google Auth
+  googleAuth: {
+    clientId: {
+      type: String,
+      default: null,
+      trim: true,
+      comment: 'Google OAuth Client ID (Web ou Android) pour cette app'
+    },
+    webClientId: {
+      type: String,
+      default: null,
+      trim: true,
+      comment: 'Google Web Client ID (souvent partagé entre apps)'
+    },
+    enabled: {
+      type: Boolean,
+      default: false,
+      comment: 'Activer/désactiver Google Sign-In pour cette app'
+    }
+  },
+  
   branding: {
     primaryColor: String,
     logo: String,
@@ -117,8 +138,6 @@ const appSchema = new mongoose.Schema({
 });
 
 // Indexes
-// ❌ SUPPRIMÉ : appSchema.index({ appId: 1 }); 
-// (déjà créé automatiquement par "unique: true")
 appSchema.index({ isActive: 1 });
 
 // Methods
@@ -138,6 +157,15 @@ appSchema.methods.getOneSignalConfig = function() {
 
 appSchema.methods.getPaymentConfig = function(provider) {
   return this.payments?.[provider] || null;
+};
+
+// ⭐ NOUVEAU : Méthode pour récupérer la config Google Auth
+appSchema.methods.getGoogleAuthConfig = function() {
+  return {
+    clientId: this.googleAuth?.clientId,
+    webClientId: this.googleAuth?.webClientId,
+    enabled: this.googleAuth?.enabled || false
+  };
 };
 
 appSchema.methods.toJSON = function() {
@@ -160,6 +188,9 @@ appSchema.methods.toJSON = function() {
       }
     });
   }
+  
+  // Les Client IDs Google ne sont pas sensibles (publics dans les apps)
+  // Donc pas besoin de les masquer
   
   delete app.__v;
   return app;
