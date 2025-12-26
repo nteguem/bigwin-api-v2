@@ -76,10 +76,12 @@ router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');
 const notificationRoutes = require('./common/notificationRoutes');
+const configRoutes = require('./common/configRoutes'); // ⭐ NOUVEAU
 
 router.use('/devices', identifyApp, deviceRoutes);
 router.use('/topics', identifyApp, topicRoutes);
 router.use('/notifications', identifyApp, notificationRoutes);
+router.use('/config', configRoutes); // ⭐ NOUVEAU - Routes globales (sans identifyApp)
 
 // ===== ROUTES DE PAIEMENT =====
 // Routes de paiement: identifyApp OBLIGATOIRE
@@ -107,7 +109,8 @@ router.get('/', (req, res) => {
         packages: 'GET /admin/packages - Gestion des packages',
         categories: 'GET /admin/categories - Gestion des catégories',
         tickets: 'GET /admin/tickets - Gestion des tickets',
-        affiliates: 'GET /admin/affiliates - Gestion des affiliés'
+        affiliates: 'GET /admin/affiliates - Gestion des affiliés',
+        config: 'GET /admin/config - Gestion des configurations pays'
       },
       user: {
         coupons: 'GET /user/coupons - Coupons disponibles',
@@ -116,6 +119,10 @@ router.get('/', (req, res) => {
       },
       affiliate: {
         dashboard: 'GET /affiliate/dashboard - Tableau de bord affilié'
+      },
+      common: {
+        config: 'POST /config - Obtenir config par IP',
+        configByCountry: 'GET /config/:countryCode - Config par code pays'
       }
     }
   });
