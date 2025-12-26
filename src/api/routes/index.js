@@ -68,6 +68,7 @@ router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
 router.use('/user', identifyApp, userSubscriptionRoutes);
 router.use('/user/google-play', identifyApp, googlePlayRoutes);
+router.use('/user/packages',identifyApp, packageRoutes);
 
 // Webhooks: identifyApp pour savoir quelle app est concernée
 router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
