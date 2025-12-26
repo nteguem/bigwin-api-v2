@@ -63,7 +63,7 @@ const afribaPayRoutes = require('./user/afribaPayRoutes');
 const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
-
+const packageRoutes = require('./user/packageRoutes');
 router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
 router.use('/user', identifyApp, userSubscriptionRoutes);
