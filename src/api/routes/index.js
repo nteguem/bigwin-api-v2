@@ -22,7 +22,7 @@ router.use('/affiliate/auth', identifyApp, affiliateAuthRoutes);
 router.use('/user/auth', identifyApp, userAuthRoutes);
 
 // ===== ROUTES ADMIN =====
-const adminAppRoutes = require('./admin/appRoutes'); // ⭐ NOUVEAU
+const adminAppRoutes = require('./admin/appRoutes');
 const adminPackageRoutes = require('./admin/packageRoutes');
 const adminCategoryRoutes = require('./admin/categoryRoutes');
 const adminTicketRoutes = require('./admin/ticketRoutes');
@@ -32,9 +32,9 @@ const adminEventRoutes = require('./admin/eventRoutes');
 const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminCommissionRoutes = require('./admin/commissionRoutes');
 const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
-const adminFormationRoutes = require('./admin/formationRoutes'); 
+const adminFormationRoutes = require('./admin/formationRoutes');
 
-// ⭐ NOUVEAU : Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
+// Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
 router.use('/admin/apps', adminAppRoutes);
 
 // Admin routes: identifyApp pour savoir sur quelle app il travaille
@@ -64,11 +64,15 @@ const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
 const packageRoutes = require('./user/packageRoutes');
+
+// ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
-router.use('/user', identifyApp, userSubscriptionRoutes);
 router.use('/user/google-play', identifyApp, googlePlayRoutes);
-router.use('/user/packages',identifyApp, packageRoutes);
+router.use('/user/packages', identifyApp, packageRoutes);
+
+// Route générique /user EN DERNIER (sinon elle capture toutes les requêtes /user/*)
+router.use('/user', identifyApp, userSubscriptionRoutes);
 
 // Webhooks: identifyApp pour savoir quelle app est concernée
 router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
@@ -77,12 +81,12 @@ router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');
 const notificationRoutes = require('./common/notificationRoutes');
-const configRoutes = require('./common/configRoutes'); // ⭐ NOUVEAU
+const configRoutes = require('./common/configRoutes');
 
 router.use('/devices', identifyApp, deviceRoutes);
 router.use('/topics', identifyApp, topicRoutes);
 router.use('/notifications', identifyApp, notificationRoutes);
-router.use('/config', configRoutes); // ⭐ NOUVEAU - Routes globales (sans identifyApp)
+router.use('/config', configRoutes); // Routes globales (sans identifyApp)
 
 // ===== ROUTES DE PAIEMENT =====
 // Routes de paiement: identifyApp OBLIGATOIRE
@@ -116,6 +120,7 @@ router.get('/', (req, res) => {
       user: {
         coupons: 'GET /user/coupons - Coupons disponibles',
         subscriptions: 'GET /user/subscriptions - Abonnements',
+        packages: 'GET /user/packages - Packages disponibles',
         googlePlay: 'POST /user/google-play/validate - Paiements Google Play'
       },
       affiliate: {
