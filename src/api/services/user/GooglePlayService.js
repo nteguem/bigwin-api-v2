@@ -379,10 +379,16 @@ class GooglePlayService {
       googleTx.subscription = subscription._id;
       await googleTx.save();
 
-      // 11. Acknowledge l'achat si pas déjà fait
+      // 11. ✅ CRITIQUE : Acknowledge ET Consume le produit (non bloquant)
       if (data.acknowledgementState !== 1) {
-        this.acknowledgeOneTimePurchase(app, purchaseToken, productId).catch(error => {
-          console.error(`[GooglePlay ONE-TIME] Erreur acknowledge (non bloquant):`, error.message);
+        // Pas encore acknowledged → acknowledge + consume
+        this.acknowledgeAndConsumeOneTimePurchase(app, purchaseToken, productId).catch(error => {
+          console.error(`[GooglePlay ONE-TIME] Erreur acknowledge/consume (non bloquant):`, error.message);
+        });
+      } else {
+        // Déjà acknowledged → juste consume
+        this.consumeOneTimePurchase(app, purchaseToken, productId).catch(error => {
+          console.error(`[GooglePlay ONE-TIME] Erreur consume (non bloquant):`, error.message);
         });
       }
 
@@ -629,6 +635,72 @@ class GooglePlayService {
       return true;
     } catch (error) {
       console.error(`[GooglePlay ONE-TIME] Erreur acknowledge:`, error);
+      return false;
+    }
+  }
+
+  // ===== NOUVEAU : Acknowledge ET Consume un produit ponctuel =====
+  async acknowledgeAndConsumeOneTimePurchase(app, purchaseToken, productId) {
+    try {
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      // 1. Acknowledge
+      await androidPublisher.purchases.products.acknowledge({
+        packageName: packageName,
+        productId: productId,
+        token: purchaseToken
+      });
+
+      console.log(`[GooglePlay ONE-TIME] Acknowledge réussi:`, purchaseToken);
+
+      // 2. ✅ CRITIQUE : Consume (permet rachats multiples)
+      await androidPublisher.purchases.products.consume({
+        packageName: packageName,
+        productId: productId,
+        token: purchaseToken
+      });
+
+      console.log(`[GooglePlay ONE-TIME] Consume réussi - Rachats autorisés:`, purchaseToken);
+
+      // 3. Mettre à jour la BDD
+      await GooglePlayTransaction.findOneAndUpdate(
+        { purchaseToken },
+        { 
+          acknowledged: true,
+          consumptionState: 'CONSUMED'
+        }
+      );
+
+      return true;
+    } catch (error) {
+      console.error(`[GooglePlay ONE-TIME] Erreur acknowledge/consume:`, error);
+      return false;
+    }
+  }
+
+  // ===== NOUVEAU : Consume uniquement (si déjà acknowledged) =====
+  async consumeOneTimePurchase(app, purchaseToken, productId) {
+    try {
+      this.validateConfig(app);
+      const { androidPublisher, packageName } = this.getClient(app);
+
+      await androidPublisher.purchases.products.consume({
+        packageName: packageName,
+        productId: productId,
+        token: purchaseToken
+      });
+
+      console.log(`[GooglePlay ONE-TIME] Consume réussi - Rachats autorisés:`, purchaseToken);
+
+      await GooglePlayTransaction.findOneAndUpdate(
+        { purchaseToken },
+        { consumptionState: 'CONSUMED' }
+      );
+
+      return true;
+    } catch (error) {
+      console.error(`[GooglePlay ONE-TIME] Erreur consume:`, error);
       return false;
     }
   }
