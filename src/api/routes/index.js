@@ -60,6 +60,7 @@ const couponRoutes = require('./user/couponRoutes');
 const smobilpayRoutes = require('./user/smobilpayRoutes');
 const cinetpayRoutes = require('./user/cinetpayRoutes');
 const afribaPayRoutes = require('./user/afribaPayRoutes');
+const flutterwaveRoutes = require('./user/flutterwaveRoutes');
 const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
@@ -93,6 +94,7 @@ router.use('/config', configRoutes); // Routes globales (sans identifyApp)
 router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
 router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
 router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
+router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
 
 /**
  * GET /api/
@@ -129,6 +131,12 @@ router.get('/', (req, res) => {
       common: {
         config: 'POST /config - Obtenir config par IP',
         configByCountry: 'GET /config/:countryCode - Config par code pays'
+      },
+      payments: {
+        smobilpay: 'POST /payments/smobilpay/initiate - Paiement SmobilPay',
+        cinetpay: 'POST /payments/cinetpay/initiate - Paiement CinetPay',
+        afribapay: 'POST /payments/afribapay/initiate - Paiement AfribaPay',
+        flutterwave: 'POST /payments/flutterwave/initiate - Paiement Flutterwave Mobile Money'
       }
     }
   });
