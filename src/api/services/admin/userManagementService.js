@@ -90,6 +90,9 @@ class UserManagementService {
     const skip = (page - 1) * limit;
     const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
 
+    // 🔍 DEBUG - Afficher la query finale
+    console.log('📊 [UserService] Query MongoDB finale:', JSON.stringify(query));
+
     // Exécution de la requête avec population
     const users = await User.find(query)
       .populate('referredBy', 'firstName lastName affiliateCode')
@@ -103,7 +106,7 @@ class UserManagementService {
 
     // Si filtre par abonnement, on doit vérifier chaque user
     let filteredUsers = users;
-    if (hasSubscription !== undefined) {
+    if (hasSubscription !== undefined && hasSubscription !== '' && hasSubscription !== null) {
       const shouldHaveSub = hasSubscription === 'true' || hasSubscription === true;
       
       const usersWithSubStatus = await Promise.all(
