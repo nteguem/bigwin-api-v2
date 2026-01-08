@@ -30,8 +30,18 @@ class UserManagementService {
       sortOrder = 'desc'
     } = options;
 
+    // 🔍 DEBUG
+    console.log('📊 [UserService] getAllUsers - appId:', appId);
+    console.log('📊 [UserService] filters:', filters);
+
     // Construction de la query MongoDB
     const query = { appId };
+    
+    // 🔍 DEBUG - Compter TOUS les users
+    const totalInDb = await User.countDocuments({});
+    const totalForApp = await User.countDocuments({ appId });
+    console.log('📊 [UserService] Total users dans DB:', totalInDb);
+    console.log('📊 [UserService] Total users pour appId:', totalForApp);
 
     // Filtre de recherche (nom, prénom, pseudo, email, téléphone)
     if (search) {

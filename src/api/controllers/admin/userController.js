@@ -10,6 +10,10 @@ const catchAsync = require('../../../utils/catchAsync');
  */
 exports.getAllUsers = catchAsync(async (req, res, next) => {
   const appId = req.appId;
+  
+  // 🔍 DEBUG
+  console.log('🔍 [UserController] appId reçu:', appId);
+  console.log('🔍 [UserController] query params:', req.query);
 
   // Extraction des filtres depuis query params
   const filters = {
