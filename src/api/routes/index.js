@@ -33,6 +33,7 @@ const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminCommissionRoutes = require('./admin/commissionRoutes');
 const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes');
+const adminUserRoutes = require('./admin/userRoutes'); // ⭐ NOUVEAU
 
 // Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
 router.use('/admin/apps', adminAppRoutes);
@@ -48,6 +49,7 @@ router.use('/admin/affiliates', identifyApp, adminAffiliateRoutes);
 router.use('/admin/commissions', identifyApp, adminCommissionRoutes);
 router.use('/admin/affiliate-types', identifyApp, adminAffiliateTypeRoutes);
 router.use('/admin/formations', identifyApp, adminFormationRoutes);
+router.use('/admin/users', identifyApp, adminUserRoutes); // ⭐ NOUVEAU
 
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
@@ -117,6 +119,7 @@ router.get('/', (req, res) => {
         categories: 'GET /admin/categories - Gestion des catégories',
         tickets: 'GET /admin/tickets - Gestion des tickets',
         affiliates: 'GET /admin/affiliates - Gestion des affiliés',
+        users: 'GET /admin/users - Gestion des utilisateurs', // ⭐ NOUVEAU
         config: 'GET /admin/config - Gestion des configurations pays'
       },
       user: {
