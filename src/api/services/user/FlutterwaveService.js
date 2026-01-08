@@ -264,6 +264,9 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
         ? 'https://api.flutterwave.com/v3'  // Test mode utilise la même URL
         : 'https://api.flutterwave.com/v3';
       
+      console.log(`[Flutterwave-9] Appel API: POST ${baseUrl}/customers`);
+      console.log(`[Flutterwave-9] Secret Key (first 20 chars): ${config.secretKey.substring(0, 20)}...`);
+      
       customerResponse = await axios.post(
         `${baseUrl}/customers`,
         customerPayload,
@@ -275,21 +278,31 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
         }
       );
       
-      if (customerResponse.data.status !== 'success') {
-        throw new FlutterwaveError(
-          'Échec de création du customer',
-          400,
-          customerResponse.data
-        );
+      console.log(`[Flutterwave-9] Réponse reçue, status: ${customerResponse.status}`);
+      console.log(`[Flutterwave-9] Réponse data:`, JSON.stringify(customerResponse.data, null, 2));
+      
+      console.log(`[Flutterwave-9] Réponse reçue, status: ${customerResponse.status}`);
+      console.log(`[Flutterwave-9] Réponse data:`, JSON.stringify(customerResponse.data, null, 2));
+      
+      if (!customerResponse.data || customerResponse.data.status !== 'success') {
+        const errorMsg = customerResponse.data?.message || 'Échec de création du customer';
+        console.error('[Flutterwave-9-ERROR] API returned non-success:', customerResponse.data);
+        throw new FlutterwaveError(errorMsg, 400, customerResponse.data);
       }
     } catch (error) {
       console.error('[Flutterwave-9-ERROR] Erreur création customer:');
+      console.error('  Type:', error.constructor.name);
       console.error('  Status:', error.response?.status);
+      console.error('  StatusText:', error.response?.statusText);
+      console.error('  Headers:', error.response?.headers);
       console.error('  Data:', JSON.stringify(error.response?.data, null, 2));
       console.error('  Message:', error.message);
+      console.error('  Code:', error.code);
+      console.error('  Full error:', error);
       console.error('  Payload sent:', JSON.stringify(customerPayload, null, 2));
+      
       throw new FlutterwaveError(
-        error.response?.data?.message || error.response?.data?.error?.message || 'Erreur lors de la création du customer',
+        error.response?.data?.message || error.response?.data?.error?.message || error.message || 'Erreur lors de la création du customer',
         error.response?.status || 500,
         error.response?.data
       );
