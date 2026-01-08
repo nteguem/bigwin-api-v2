@@ -257,8 +257,15 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     try {
       // Utiliser l'API directe car le SDK peut ne pas avoir la méthode customer.create
       const axios = require('axios');
+      
+      // Déterminer l'URL selon le type de clé (test ou production)
+      const isTestMode = config.secretKey.includes('TEST');
+      const baseUrl = isTestMode 
+        ? 'https://api.flutterwave.com/v3'  // Test mode utilise la même URL
+        : 'https://api.flutterwave.com/v3';
+      
       customerResponse = await axios.post(
-        'https://api.flutterwave.com/v3/customers',
+        `${baseUrl}/customers`,
         customerPayload,
         {
           headers: {
@@ -276,9 +283,13 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
         );
       }
     } catch (error) {
-      console.error('[Flutterwave-9-ERROR] Erreur création customer:', error.response?.data || error.message);
+      console.error('[Flutterwave-9-ERROR] Erreur création customer:');
+      console.error('  Status:', error.response?.status);
+      console.error('  Data:', JSON.stringify(error.response?.data, null, 2));
+      console.error('  Message:', error.message);
+      console.error('  Payload sent:', JSON.stringify(customerPayload, null, 2));
       throw new FlutterwaveError(
-        error.response?.data?.message || 'Erreur lors de la création du customer',
+        error.response?.data?.message || error.response?.data?.error?.message || 'Erreur lors de la création du customer',
         error.response?.status || 500,
         error.response?.data
       );
