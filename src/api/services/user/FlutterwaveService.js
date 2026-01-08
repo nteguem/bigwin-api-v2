@@ -1,6 +1,7 @@
 // services/user/FlutterwaveService.js
 const Flutterwave = require('flutterwave-node-v3');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 const FlutterwaveTransaction = require('../../models/user/FlutterwaveTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -256,7 +257,6 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     let customerResponse;
     try {
       // Utiliser l'API directe car le SDK peut ne pas avoir la méthode customer.create
-      const axios = require('axios');
       
       // Déterminer l'URL selon le type de clé (test ou production)
       const isTestMode = config.secretKey.includes('TEST');
@@ -313,7 +313,6 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     let paymentMethodResponse;
     try {
-      const axios = require('axios');
       paymentMethodResponse = await axios.post(
         'https://api.flutterwave.com/v3/payment-methods',
         paymentMethodPayload,
@@ -358,7 +357,6 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     let chargeResponse;
     try {
-      const axios = require('axios');
       chargeResponse = await axios.post(
         'https://api.flutterwave.com/v3/charges',
         chargePayload,
@@ -489,7 +487,6 @@ async function checkTransactionStatus(appId, app, transactionId) {
     console.log(`[Flutterwave-CHECK] Transaction trouvée: ${transaction.transactionId}`);
 
     // 3. Appeler l'API Flutterwave pour vérifier
-    const axios = require('axios');
     const checkResponse = await axios.get(
       `https://api.flutterwave.com/v3/charges/${transaction.chargeId}`,
       {
