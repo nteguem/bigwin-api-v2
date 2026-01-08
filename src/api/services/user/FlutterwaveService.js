@@ -48,33 +48,34 @@ function getConfig(app) {
 
 /**
  * Valider la configuration Flutterwave
- * @param {Object} config - Configuration à valider
- * @throws {FlutterwaveError} Si configuration invalide
+ * @param {Object} config 
  */
 function validateConfig(config) {
-  if (!config.enabled) {
-    throw new FlutterwaveError('Flutterwave n\'est pas configuré pour cette application', 400);
-  }
-  
-  if (!config.publicKey || !config.secretKey) {
-    throw new FlutterwaveError(
-      'Configuration Flutterwave incomplète. Vérifiez publicKey et secretKey',
-      500
+  if (!config.publicKey || !config.secretKey || !config.encryptionKey) {
+    throw new AppError(
+      'Configuration Flutterwave incomplète. Vérifiez vos clés API.',
+      500,
+      ErrorCodes.SERVER_ERROR
     );
   }
 }
 
 /**
- * Obtenir l'instance Flutterwave SDK
- * @param {Object} config - Configuration Flutterwave
- * @returns {Flutterwave} Instance du SDK
+ * Initialiser une instance du SDK Flutterwave
+ * @param {Object} config 
+ * @returns {Object} Instance Flutterwave
  */
 function getFlutterwaveInstance(config) {
   return new Flutterwave(config.publicKey, config.secretKey);
 }
 
+// ============================================================
+// MAPPINGS DEVISES <-> PAYS <-> RÉSEAUX
+// ============================================================
+
 /**
- * Mapping des devises vers les codes pays
+ * Mapping devise → country code
+ * Ces codes sont utilisés pour les numéros de téléphone
  */
 const CURRENCY_TO_COUNTRY = {
   'GHS': '233',  // Ghana
@@ -84,12 +85,13 @@ const CURRENCY_TO_COUNTRY = {
   'RWF': '250',  // Rwanda
   'ZMW': '260',  // Zambia
   'NGN': '234',  // Nigeria
-  'XOF': '225',  // Côte d'Ivoire (exemple)
-  'XAF': '237'   // Cameroun (exemple)
+  'XOF': '225',  // Côte d'Ivoire (UEMOA)
+  'XAF': '237'   // Cameroun (CEMAC)
 };
 
 /**
- * Mapping des réseaux Mobile Money par devise
+ * Mapping devise → réseaux disponibles
+ * Basé sur la documentation Flutterwave
  */
 const CURRENCY_NETWORKS = {
   'GHS': ['MTN', 'VODAFONE', 'AIRTEL'],
@@ -97,94 +99,118 @@ const CURRENCY_NETWORKS = {
   'UGX': ['MTN', 'AIRTEL'],
   'TZS': ['AIRTEL', 'TIGO', 'HALOPESA'],
   'RWF': ['MTN', 'AIRTEL'],
-  'ZMW': ['MTN']
+  'ZMW': ['MTN'],
+  'NGN': [],  // Pas de mobile money direct pour NGN dans l'API standard
+  'XOF': [],  // Francophone - réseaux gérés différemment
+  'XAF': []   // Francophone - réseaux gérés différemment
 };
 
 /**
- * Extraire le country code du numéro de téléphone
- * @param {String} phoneNumber - Numéro avec ou sans préfixe
- * @returns {String} Country code (ex: "233")
+ * Mapping devise → charge type pour l'API v3
+ */
+const CURRENCY_CHARGE_TYPES = {
+  'GHS': 'mobile_money_ghana',
+  'KES': 'mpesa',
+  'UGX': 'mobile_money_uganda',
+  'TZS': 'mobile_money_tanzania',
+  'RWF': 'mobile_money_rwanda',
+  'ZMW': 'mobile_money_zambia',
+  'XOF': 'mobile_money_franco',
+  'XAF': 'mobile_money_franco'
+};
+
+// ============================================================
+// FONCTIONS UTILITAIRES
+// ============================================================
+
+/**
+ * Extraire le country code d'un numéro de téléphone
+ * @param {String} phoneNumber - Numéro avec ou sans country code
+ * @returns {String|null} Country code ou null
  */
 function extractCountryCode(phoneNumber) {
-  const cleanPhone = phoneNumber.replace(/[\s\-\(\)+]/g, '');
+  const cleaned = phoneNumber.replace(/\D/g, '');
   
-  // Vérifier les préfixes connus
-  for (const [currency, code] of Object.entries(CURRENCY_TO_COUNTRY)) {
-    if (cleanPhone.startsWith(code)) {
+  // Vérifier tous les country codes connus
+  for (const code of Object.values(CURRENCY_TO_COUNTRY)) {
+    if (cleaned.startsWith(code)) {
       return code;
     }
   }
   
-  // Si pas de préfixe reconnu, retourner null
   return null;
 }
 
 /**
- * Nettoyer le numéro de téléphone (enlever country code si présent)
- * @param {String} phoneNumber - Numéro complet
- * @param {String} countryCode - Code pays
- * @returns {String} Numéro sans country code
+ * Nettoyer un numéro de téléphone (retirer country code et zéro initial)
+ * @param {String} phoneNumber 
+ * @param {String} expectedCountryCode 
+ * @returns {String} Numéro nettoyé
  */
-function cleanPhoneNumber(phoneNumber, countryCode) {
-  let cleanPhone = phoneNumber.replace(/[\s\-\(\)+]/g, '');
+function cleanPhoneNumber(phoneNumber, expectedCountryCode) {
+  let cleaned = phoneNumber.replace(/\D/g, '');
   
-  // Enlever le country code s'il est présent
-  if (cleanPhone.startsWith(countryCode)) {
-    cleanPhone = cleanPhone.substring(countryCode.length);
+  // Retirer le country code s'il est présent
+  if (cleaned.startsWith(expectedCountryCode)) {
+    cleaned = cleaned.substring(expectedCountryCode.length);
   }
   
-  // Enlever le 0 initial si présent
-  if (cleanPhone.startsWith('0')) {
-    cleanPhone = cleanPhone.substring(1);
+  // Retirer le zéro initial s'il existe
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
   }
   
-  return cleanPhone;
+  return cleaned;
+}
+
+/**
+ * Mapper les statuts Flutterwave vers les statuts internes
+ * @param {String} flutterwaveStatus 
+ * @returns {String} Statut interne
+ */
+function mapFlutterwaveStatus(flutterwaveStatus) {
+  const statusMap = {
+    'successful': 'ACCEPTED',
+    'success': 'ACCEPTED',
+    'pending': 'PENDING',
+    'failed': 'REFUSED',
+    'cancelled': 'CANCELED',
+    'NEW': 'PENDING',
+    'PENDING': 'PENDING',
+    'SUCCESSFUL': 'ACCEPTED',
+    'FAILED': 'REFUSED'
+  };
+  
+  return statusMap[flutterwaveStatus] || 'PENDING';
 }
 
 /**
  * Vérifier la signature du webhook
- * @param {String} receivedHash - Hash reçu dans le header
- * @param {Object} config - Configuration Flutterwave
- * @returns {Boolean} True si signature valide
+ * @param {String} receivedHash 
+ * @param {Object} config 
+ * @returns {Boolean}
  */
 function verifyWebhookSignature(receivedHash, config) {
-  if (!config.webhookHash) {
-    console.warn('[Flutterwave] Webhook hash non configuré, vérification impossible');
-    return false;
-  }
-  
   return receivedHash === config.webhookHash;
 }
 
-/**
- * Mapper le statut Flutterwave vers notre système
- * @param {String} flwStatus - Status Flutterwave
- * @returns {String} Notre status
- */
-function mapFlutterwaveStatus(flwStatus) {
-  const statusMap = {
-    'succeeded': 'ACCEPTED',
-    'successful': 'ACCEPTED',
-    'pending': 'PENDING',
-    'failed': 'REFUSED',
-    'cancelled': 'CANCELED',
-    'canceled': 'CANCELED'
-  };
-  
-  return statusMap[flwStatus?.toLowerCase()] || 'PENDING';
-}
+// ============================================================
+// FONCTION PRINCIPALE : INITIER UN PAIEMENT
+// ============================================================
 
 /**
- * Initier un paiement Flutterwave Mobile Money
+ * Initier un paiement Mobile Money via Flutterwave API v3
+ * 
  * @param {String} appId - ID de l'application
- * @param {Object} app - Document App depuis req.currentApp
+ * @param {Object} app - Document App
  * @param {String} userId - ID de l'utilisateur
  * @param {String} packageId - ID du package
- * @param {String} phoneNumber - Numéro de téléphone
+ * @param {String} phoneNumber - Numéro de téléphone (avec ou sans country code)
  * @param {String} customerName - Nom du client
- * @param {String} email - Email du client
+ * @param {String} email - Email du client (optionnel)
  * @param {String} currency - Devise (GHS, KES, etc.)
- * @param {String} network - Réseau mobile (MTN, MPESA, etc.)
+ * @param {String} network - Réseau mobile money (MTN, MPESA, etc.)
+ * @returns {Object} { transaction, nextAction }
  */
 async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email, currency, network) {
   try {
@@ -208,170 +234,61 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     }
     console.log(`[Flutterwave-3] Devise: ${currencyUpper}`);
 
-    // 4. Récupérer le prix dans la devise
+    // 4. Vérifier que cette devise a un charge type
+    const chargeType = CURRENCY_CHARGE_TYPES[currencyUpper];
+    if (!chargeType) {
+      throw new AppError(`Type de paiement non disponible pour ${currencyUpper}`, 400, ErrorCodes.VALIDATION_ERROR);
+    }
+
+    // 5. Récupérer le prix dans la devise
     const amount = packageDoc.pricing.get(currencyUpper);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currencyUpper} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
     console.log(`[Flutterwave-5] Prix: ${amount} ${currencyUpper}`);
 
-    // 5. Valider le réseau pour cette devise
+    // 6. Valider le réseau pour cette devise
     const networkUpper = network.toUpperCase();
-    if (!CURRENCY_NETWORKS[currencyUpper]?.includes(networkUpper)) {
+    const availableNetworks = CURRENCY_NETWORKS[currencyUpper];
+    if (availableNetworks && availableNetworks.length > 0 && !availableNetworks.includes(networkUpper)) {
       throw new AppError(
-        `Réseau ${network} non supporté pour ${currencyUpper}. Réseaux disponibles: ${CURRENCY_NETWORKS[currencyUpper]?.join(', ')}`,
+        `Réseau ${network} non supporté pour ${currencyUpper}. Réseaux disponibles: ${availableNetworks.join(', ')}`,
         400,
         ErrorCodes.VALIDATION_ERROR
       );
     }
 
-    // 6. Extraire et nettoyer le numéro
+    // 7. Extraire et nettoyer le numéro
     const countryCode = CURRENCY_TO_COUNTRY[currencyUpper];
     const cleanPhone = cleanPhoneNumber(phoneNumber, countryCode);
     console.log(`[Flutterwave-6] Country code: ${countryCode}, Clean phone: ${cleanPhone}`);
 
-    // 7. Générer un ID de transaction unique
+    // 8. Générer un ID de transaction unique
     const transactionId = `FLW_${Date.now()}_${uuidv4().substring(0, 8)}`;
     console.log(`[Flutterwave-7] TransactionId généré: ${transactionId}`);
 
-    // 8. Initialiser le SDK Flutterwave
-    const flw = getFlutterwaveInstance(config);
-    console.log(`[Flutterwave-8] SDK initialisé`);
-
     // ============================================================
-    // ÉTAPE API 1 : Créer le Customer
+    // APPEL API V3 : CRÉER LE CHARGE (1 seul appel)
     // ============================================================
-    console.log(`[Flutterwave-9] Création du customer...`);
-    const customerPayload = {
-      email: email || `user${userId}@temp.com`,
-      name: {
-        first: customerName.split(' ')[0] || customerName,
-        last: customerName.split(' ').slice(1).join(' ') || customerName
-      },
-      phone: {
-        country_code: countryCode,
-        number: cleanPhone
-      }
-    };
-
-    let customerResponse;
-    try {
-      // Utiliser l'API directe car le SDK peut ne pas avoir la méthode customer.create
-      
-      // Déterminer l'URL selon le type de clé (test ou production)
-      const isTestMode = config.secretKey.includes('TEST');
-      const baseUrl = isTestMode 
-        ? 'https://api.flutterwave.com/v3'  // Test mode utilise la même URL
-        : 'https://api.flutterwave.com/v3';
-      
-      console.log(`[Flutterwave-9] Appel API: POST ${baseUrl}/customers`);
-      console.log(`[Flutterwave-9] Secret Key (first 20 chars): ${config.secretKey.substring(0, 20)}...`);
-      
-      customerResponse = await axios.post(
-        `${baseUrl}/customers`,
-        customerPayload,
-        {
-          headers: {
-            'Authorization': `Bearer ${config.secretKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      console.log(`[Flutterwave-9] Réponse reçue, status: ${customerResponse.status}`);
-      console.log(`[Flutterwave-9] Réponse data:`, JSON.stringify(customerResponse.data, null, 2));
-      
-      console.log(`[Flutterwave-9] Réponse reçue, status: ${customerResponse.status}`);
-      console.log(`[Flutterwave-9] Réponse data:`, JSON.stringify(customerResponse.data, null, 2));
-      
-      if (!customerResponse.data || customerResponse.data.status !== 'success') {
-        const errorMsg = customerResponse.data?.message || 'Échec de création du customer';
-        console.error('[Flutterwave-9-ERROR] API returned non-success:', customerResponse.data);
-        throw new FlutterwaveError(errorMsg, 400, customerResponse.data);
-      }
-    } catch (error) {
-      console.error('[Flutterwave-9-ERROR] Erreur création customer:');
-      console.error('  Type:', error.constructor.name);
-      console.error('  Status:', error.response?.status);
-      console.error('  StatusText:', error.response?.statusText);
-      console.error('  Headers:', error.response?.headers);
-      console.error('  Data:', JSON.stringify(error.response?.data, null, 2));
-      console.error('  Message:', error.message);
-      console.error('  Code:', error.code);
-      console.error('  Full error:', error);
-      console.error('  Payload sent:', JSON.stringify(customerPayload, null, 2));
-      
-      throw new FlutterwaveError(
-        error.response?.data?.message || error.response?.data?.error?.message || error.message || 'Erreur lors de la création du customer',
-        error.response?.status || 500,
-        error.response?.data
-      );
-    }
-
-    const customerId = customerResponse.data.data.id;
-    console.log(`[Flutterwave-9] Customer créé: ${customerId}`);
-
-    // ============================================================
-    // ÉTAPE API 2 : Créer le Payment Method
-    // ============================================================
-    console.log(`[Flutterwave-10] Création du payment method...`);
-    const paymentMethodPayload = {
-      type: 'mobile_money',
-      mobile_money: {
-        country_code: countryCode,
-        network: networkUpper,
-        phone_number: cleanPhone
-      }
-    };
-
-    let paymentMethodResponse;
-    try {
-      paymentMethodResponse = await axios.post(
-        'https://api.flutterwave.com/v3/payment-methods',
-        paymentMethodPayload,
-        {
-          headers: {
-            'Authorization': `Bearer ${config.secretKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (paymentMethodResponse.data.status !== 'success') {
-        throw new FlutterwaveError(
-          'Échec de création du payment method',
-          400,
-          paymentMethodResponse.data
-        );
-      }
-    } catch (error) {
-      console.error('[Flutterwave-10-ERROR] Erreur création payment method:', error.response?.data || error.message);
-      throw new FlutterwaveError(
-        error.response?.data?.message || 'Erreur lors de la création du payment method',
-        error.response?.status || 500,
-        error.response?.data
-      );
-    }
-
-    const paymentMethodId = paymentMethodResponse.data.data.id;
-    console.log(`[Flutterwave-10] Payment method créé: ${paymentMethodId}`);
-
-    // ============================================================
-    // ÉTAPE API 3 : Créer le Charge
-    // ============================================================
-    console.log(`[Flutterwave-11] Création du charge...`);
+    console.log(`[Flutterwave-8] Appel API v3 charge...`);
+    console.log(`[Flutterwave-8] Charge type: ${chargeType}`);
+    
     const chargePayload = {
-      customer_id: customerId,
-      payment_method_id: paymentMethodId,
+      tx_ref: transactionId,
       amount: amount,
       currency: currencyUpper,
-      reference: transactionId
+      network: networkUpper,
+      email: email || `user${userId}@temp.com`,
+      phone_number: cleanPhone,
+      fullname: customerName
     };
+    
+    console.log(`[Flutterwave-8] Payload:`, JSON.stringify(chargePayload, null, 2));
 
     let chargeResponse;
     try {
       chargeResponse = await axios.post(
-        'https://api.flutterwave.com/v3/charges',
+        `https://api.flutterwave.com/v3/charges?type=${chargeType}`,
         chargePayload,
         {
           headers: {
@@ -381,17 +298,24 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
         }
       );
       
-      if (chargeResponse.data.status !== 'success') {
-        throw new FlutterwaveError(
-          'Échec de création du charge',
-          400,
-          chargeResponse.data
-        );
+      console.log(`[Flutterwave-8] Réponse reçue, status: ${chargeResponse.status}`);
+      console.log(`[Flutterwave-8] Réponse data:`, JSON.stringify(chargeResponse.data, null, 2));
+      
+      if (!chargeResponse.data || chargeResponse.data.status !== 'success') {
+        const errorMsg = chargeResponse.data?.message || 'Échec de création du charge';
+        console.error('[Flutterwave-8-ERROR] API returned non-success:', chargeResponse.data);
+        throw new FlutterwaveError(errorMsg, 400, chargeResponse.data);
       }
     } catch (error) {
-      console.error('[Flutterwave-11-ERROR] Erreur création charge:', error.response?.data || error.message);
+      console.error('[Flutterwave-8-ERROR] Erreur création charge:');
+      console.error('  Status:', error.response?.status);
+      console.error('  Data:', JSON.stringify(error.response?.data, null, 2));
+      console.error('  Message:', error.message);
+      
+      if (error instanceof FlutterwaveError) throw error;
+      
       throw new FlutterwaveError(
-        error.response?.data?.message || 'Erreur lors de la création du charge',
+        error.response?.data?.message || error.message || 'Erreur lors de la création du charge',
         error.response?.status || 500,
         error.response?.data
       );
@@ -399,20 +323,23 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     const chargeData = chargeResponse.data.data;
     const chargeId = chargeData.id;
-    console.log(`[Flutterwave-11] Charge créé: ${chargeId}`);
-    console.log(`[Flutterwave-11] Status: ${chargeData.status}`);
+    const flwRef = chargeData.flw_ref;
+    
+    console.log(`[Flutterwave-8] Charge créé avec succès`);
+    console.log(`[Flutterwave-8] ID: ${chargeId}, Ref: ${flwRef}`);
+    console.log(`[Flutterwave-8] Status: ${chargeData.status}`);
 
     // ============================================================
-    // ÉTAPE 4 : Créer la transaction en base
+    // SAUVEGARDER LA TRANSACTION EN DB
     // ============================================================
-    console.log(`[Flutterwave-12] Sauvegarde transaction en DB...`);
+    console.log(`[Flutterwave-9] Sauvegarde transaction en DB...`);
     
     const flutterwaveTransaction = new FlutterwaveTransaction({
       appId,
       transactionId,
-      customerId,
-      paymentMethodId,
-      chargeId,
+      customerId: 'v3_api', // v3 ne crée pas de customer séparé
+      paymentMethodId: 'v3_api', // v3 ne crée pas de payment method séparé
+      chargeId: chargeId,
       user: userId,
       package: packageId,
       amount,
@@ -425,26 +352,27 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       description: `${packageDoc.name.fr || packageDoc.name.en} - ${packageDoc.duration} jours`,
       status: mapFlutterwaveStatus(chargeData.status),
       processorResponse: chargeData.processor_response,
-      nextAction: chargeData.next_action,
-      fees: chargeData.fees,
+      nextAction: chargeData.meta?.authorization,
       metadata: {
         packageName: packageDoc.name,
-        packageDuration: packageDoc.duration
+        packageDuration: packageDoc.duration,
+        flwRef: flwRef,
+        chargeType: chargeType
       }
     });
 
     await flutterwaveTransaction.save();
-    console.log(`[Flutterwave-12] Transaction sauvegardée`);
+    console.log(`[Flutterwave-9] Transaction sauvegardée`);
 
     // ============================================================
-    // ÉTAPE 5 : Populer et retourner
+    // POPULER ET RETOURNER
     // ============================================================
     await flutterwaveTransaction.populate(['package', 'user']);
     console.log(`[Flutterwave-END] Transaction complétée avec succès`);
 
     return {
       transaction: flutterwaveTransaction,
-      nextAction: chargeData.next_action
+      nextAction: chargeData.meta?.authorization
     };
 
   } catch (error) {
@@ -470,26 +398,30 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
   }
 }
 
+// ============================================================
+// VÉRIFIER LE STATUT D'UNE TRANSACTION
+// ============================================================
+
 /**
  * Vérifier le statut d'une transaction
- * @param {String} appId - ID de l'application
- * @param {Object} app - Document App depuis req.currentApp
- * @param {String} transactionId - ID de la transaction (notre ID ou chargeId)
+ * @param {String} appId 
+ * @param {Object} app 
+ * @param {String} transactionId - ID transaction ou chargeId
+ * @returns {Object} Transaction mise à jour
  */
 async function checkTransactionStatus(appId, app, transactionId) {
   try {
-    console.log(`[Flutterwave-CHECK] Vérification statut pour: ${transactionId}`);
-    
+    console.log(`[Flutterwave-Status] Vérification transaction: ${transactionId}`);
+
     // 1. Récupérer la config
     const config = getConfig(app);
     validateConfig(config);
 
-    // 2. Trouver la transaction (par notre transactionId OU par chargeId)
-    const transaction = await FlutterwaveTransaction.findOne({
-      appId,
+    // 2. Trouver la transaction en DB
+    let transaction = await FlutterwaveTransaction.findOne({
       $or: [
-        { transactionId: transactionId },
-        { chargeId: transactionId }
+        { transactionId, appId },
+        { chargeId: transactionId, appId }
       ]
     }).populate(['package', 'user']);
 
@@ -497,74 +429,70 @@ async function checkTransactionStatus(appId, app, transactionId) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
     }
 
-    console.log(`[Flutterwave-CHECK] Transaction trouvée: ${transaction.transactionId}`);
+    console.log(`[Flutterwave-Status] Transaction trouvée: ${transaction.transactionId}, status: ${transaction.status}`);
 
     // 3. Appeler l'API Flutterwave pour vérifier
     const checkResponse = await axios.get(
-      `https://api.flutterwave.com/v3/charges/${transaction.chargeId}`,
+      `https://api.flutterwave.com/v3/transactions/${transaction.chargeId}/verify`,
       {
         headers: {
-          'Authorization': `Bearer ${config.secretKey}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${config.secretKey}`
         }
       }
     );
 
-    console.log(`[Flutterwave-CHECK] Réponse API:`, checkResponse.data);
+    console.log(`[Flutterwave-Status] Réponse API:`, JSON.stringify(checkResponse.data, null, 2));
 
-    if (checkResponse.data.status !== 'success') {
-      throw new FlutterwaveError(
-        'Échec de vérification du statut',
-        400,
-        checkResponse.data
-      );
+    if (checkResponse.data.status === 'success' && checkResponse.data.data) {
+      const verifyData = checkResponse.data.data;
+      const newStatus = mapFlutterwaveStatus(verifyData.status);
+
+      // 4. Mettre à jour si le status a changé
+      if (transaction.status !== newStatus) {
+        console.log(`[Flutterwave-Status] Changement de status: ${transaction.status} → ${newStatus}`);
+        
+        transaction.status = newStatus;
+        transaction.processorResponse = verifyData.processor_response;
+        
+        if (newStatus === 'ACCEPTED' && !transaction.paymentDate) {
+          transaction.paymentDate = new Date();
+        }
+        
+        await transaction.save();
+      }
     }
-
-    const chargeData = checkResponse.data.data;
-
-    // 4. Mettre à jour la transaction
-    transaction.status = mapFlutterwaveStatus(chargeData.status);
-    transaction.processorResponse = chargeData.processor_response;
-    
-    if (chargeData.created_datetime) {
-      transaction.paymentDate = new Date(chargeData.created_datetime);
-    }
-
-    await transaction.save();
-    console.log(`[Flutterwave-CHECK] Transaction mise à jour: ${transaction.status}`);
 
     return transaction;
 
   } catch (error) {
-    console.error('[Flutterwave-CHECK-ERROR] Erreur:', error.message);
+    console.error('[Flutterwave-Status-ERROR]', error.message);
     
-    if (error instanceof FlutterwaveError || error instanceof AppError) {
+    if (error instanceof AppError) {
       throw error;
     }
-
-    if (error.response) {
-      console.error('Flutterwave status check error:', error.response.data);
-      throw new FlutterwaveError(
-        error.response.data.message || error.message,
-        error.response.status,
-        error.response.data
-      );
-    }
-
-    throw error;
+    
+    throw new AppError(
+      error.response?.data?.message || 'Erreur lors de la vérification du statut',
+      error.response?.status || 500,
+      ErrorCodes.SERVER_ERROR
+    );
   }
 }
 
+// ============================================================
+// EXPORTS
+// ============================================================
+
 module.exports = {
-  getConfig,
-  validateConfig,
   initiatePayment,
   checkTransactionStatus,
   verifyWebhookSignature,
-  mapFlutterwaveStatus,
-  extractCountryCode,
-  cleanPhoneNumber,
+  getConfig,
+  
+  // Exports pour les endpoints d'info
   CURRENCY_TO_COUNTRY,
   CURRENCY_NETWORKS,
+  
+  // Classe d'erreur
   FlutterwaveError
 };
