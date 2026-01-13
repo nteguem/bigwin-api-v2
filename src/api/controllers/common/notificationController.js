@@ -127,10 +127,17 @@ const getActivePlayers = catchAsync(async (req, res) => {
 });
 
 /**
- * NOUVEAU : Générer des propositions de notifications via IA
+ * ⭐ MODIFIÉ : Générer des propositions de notifications via IA
  */
 const generateNotifications = catchAsync(async (req, res) => {
   const { prompt, context = {}, count = 3 } = req.body;
+  
+  const appId = req.appId; // ⭐ Récupérer appId
+
+  // ⭐ Vérifier que appId est présent
+  if (!appId) {
+    throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
 
   // Vérifier que le service IA est disponible
   if (!aiNotificationService.isAvailable()) {
@@ -157,14 +164,15 @@ const generateNotifications = catchAsync(async (req, res) => {
   // Validation du count
   const proposalCount = Math.min(Math.max(parseInt(count) || 3, 1), 3);
 
-  // Générer les propositions
-  const proposals = await aiNotificationService.generateNotifications(prompt, context, proposalCount);
+  // ⭐ Passer appId au service IA
+  const proposals = await aiNotificationService.generateNotifications(appId, prompt, context, proposalCount);
 
   res.status(200).json({
     success: true,
     data: {
       proposals,
       meta: {
+        appId, // ⭐ Inclure appId dans la réponse
         prompt: prompt,
         context: context,
         count: proposals.length,
@@ -227,7 +235,7 @@ module.exports = {
   sendWithFilters,
   checkPlayers,
   getActivePlayers,
-  generateNotifications,
+  generateNotifications, // ⭐ Maintenant multitenant
   checkAIStatus,
   sendToCountries
 };

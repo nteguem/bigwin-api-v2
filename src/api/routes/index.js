@@ -1,7 +1,7 @@
 // src/api/routes/index.js
 
 /**
- * @fileoverview Point d'entrée des routes API pour le système BigWin
+ * @fileoverview Point d'entrée des routes API pour le système 
  * Centralise toutes les routes par type d'utilisateur
  */
 const express = require('express');

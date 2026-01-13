@@ -31,12 +31,13 @@ class AINotificationService {
 
   /**
    * Générer des propositions de notifications
+   * @param {String} appId - Nom de l'application (⭐ C'est déjà le nom, pas un ID)
    * @param {String} prompt - Description de la notification souhaitée
    * @param {Object} context - Contexte additionnel (événement, réduction, etc.)
    * @param {Number} count - Nombre de propositions (1-3)
    * @returns {Array} Propositions de notifications
    */
-  async generateNotifications(prompt, context = {}, count = 3) {
+  async generateNotifications(appId, prompt, context = {}, count = 3) {
     if (!this.client) {
       throw new AppError('Service IA non configuré. Vérifiez ANTHROPIC_API_KEY.', 500);
     }
@@ -48,11 +49,16 @@ class AINotificationService {
     // Limiter le nombre de propositions
     const proposalCount = Math.min(Math.max(count, 1), 3);
 
-    const systemPrompt = this._buildSystemPrompt();
+    // ⭐ appId est déjà le nom de l'app, on l'utilise directement
+    const systemPrompt = this._buildSystemPrompt(appId);
     const userPrompt = this._buildUserPrompt(prompt, context, proposalCount);
 
     try {
-      logger.info('[AINotification] Génération de notifications...', { prompt, context });
+      logger.info('[AINotification] Génération de notifications...', { 
+        appName: appId, // ⭐ appId = nom de l'app
+        prompt, 
+        context 
+      });
 
       const response = await this.client.messages.create({
         model: this.model,
@@ -73,6 +79,7 @@ class AINotificationService {
       const proposals = this._parseResponse(content, proposalCount);
 
       logger.info('[AINotification] Notifications générées avec succès', {
+        appName: appId,
         count: proposals.length
       });
 
@@ -80,6 +87,7 @@ class AINotificationService {
 
     } catch (error) {
       logger.error('[AINotification] Erreur génération:', {
+        appName: appId,
         message: error.message,
         status: error.status
       });
@@ -98,9 +106,10 @@ class AINotificationService {
 
   /**
    * Construire le prompt système
+   * @param {String} appName - Nom de l'application (⭐ C'est appId qui est déjà le nom)
    */
-  _buildSystemPrompt() {
-    return `Tu es un expert en marketing mobile et notifications push pour une application de pronostics sportifs appelée BigWin / WinTips.
+  _buildSystemPrompt(appName) {
+    return `Tu es un expert en marketing mobile et notifications push pour une application de pronostics sportifs appelée ${appName}.
 
 Ton rôle est de générer des notifications push engageantes, persuasives et professionnelles.
 
