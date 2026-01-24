@@ -41,7 +41,23 @@ const subscriptionSchema = new mongoose.Schema({
     currency: {
       type: String,
       required: true,
-      enum: ['XAF', 'XOF', 'GMD', 'CDF', 'GNF', 'USD', 'EUR'],
+      // ⭐ AJOUT DES DEVISES KORAPAY
+      enum: [
+        'XAF',  // CFA Franc BEAC (Cameroun, etc.)
+        'XOF',  // CFA Franc BCEAO (Côte d'Ivoire, etc.)
+        'GMD',  // Gambian Dalasi
+        'CDF',  // Congolese Franc
+        'GNF',  // Guinean Franc
+        'USD',  // US Dollar
+        'EUR',  // Euro
+        // Nouvelles devises KoraPay
+        'NGN',  // Nigerian Naira
+        'KES',  // Kenyan Shilling
+        'GHS',  // Ghanaian Cedi
+        'EGP',  // Egyptian Pound
+        'TZS',  // Tanzanian Shilling
+        'ZAR'   // South African Rand
+      ],
       default: 'XAF'
     }
   },

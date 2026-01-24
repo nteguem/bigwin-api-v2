@@ -33,7 +33,23 @@ const appConfigSchema = new mongoose.Schema(
       required: [true, 'La devise est requise'],
       uppercase: true,
       trim: true,
-      enum: ['XAF', 'XOF', 'CDF', 'GNF', 'GMD', 'USD', 'EUR'],
+      // ⭐ AJOUT DES DEVISES KORAPAY
+      enum: [
+        'XAF',  // CFA Franc BEAC (Cameroun, Gabon, etc.)
+        'XOF',  // CFA Franc BCEAO (Côte d'Ivoire, Sénégal, etc.)
+        'CDF',  // Congolese Franc
+        'GNF',  // Guinean Franc
+        'GMD',  // Gambian Dalasi
+        'USD',  // US Dollar
+        'EUR',  // Euro
+        // Nouvelles devises KoraPay
+        'NGN',  // Nigerian Naira
+        'KES',  // Kenyan Shilling
+        'GHS',  // Ghanaian Cedi
+        'EGP',  // Egyptian Pound
+        'TZS',  // Tanzanian Shilling
+        'ZAR'   // South African Rand
+      ],
     },
     language: {
       type: String,
@@ -53,7 +69,8 @@ const appConfigSchema = new mongoose.Schema(
       required: [true, 'Le fournisseur de paiement est requis'],
       lowercase: true,
       trim: true,
-      enum: ['cinetpay', 'afribapay', 'smobilpay', 'googlepay'],
+      // ⭐ AJOUT DE KORAPAY
+      enum: ['cinetpay', 'afribapay', 'smobilpay', 'googlepay', 'korapay', 'flutterwave'],
       default: 'googlepay',
     },
     isActive: {
