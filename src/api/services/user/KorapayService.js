@@ -239,6 +239,7 @@ async function initiatePayment(
     }
 
     console.log(`[KoraPay-8] InitializeData préparée`);
+    console.log('[KoraPay-DEBUG] Données envoyées à KoraPay:', JSON.stringify(initializeData, null, 2));
 
     // 9. Appeler l'API KoraPay Initialize
     const headers = createHeaders(config);
