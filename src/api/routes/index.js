@@ -67,6 +67,7 @@ const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
 const packageRoutes = require('./user/packageRoutes');
+const korapayRoutes = require('./user/korapayRoutes'); // ⭐ NOUVEAU KORAPAY
 
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
@@ -97,6 +98,7 @@ router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
 router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
 router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
+router.use('/payments/korapay', identifyAppOptional, korapayRoutes); // ⭐ NOUVEAU KORAPAY
 
 /**
  * GET /api/
@@ -139,7 +141,8 @@ router.get('/', (req, res) => {
         smobilpay: 'POST /payments/smobilpay/initiate - Paiement SmobilPay',
         cinetpay: 'POST /payments/cinetpay/initiate - Paiement CinetPay',
         afribapay: 'POST /payments/afribapay/initiate - Paiement AfribaPay',
-        flutterwave: 'POST /payments/flutterwave/initiate - Paiement Flutterwave Mobile Money'
+        flutterwave: 'POST /payments/flutterwave/initiate - Paiement Flutterwave Mobile Money',
+        korapay: 'POST /payments/korapay/initiate - Paiement KoraPay' 
       }
     }
   });

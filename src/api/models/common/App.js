@@ -60,7 +60,6 @@ const appSchema = new mongoose.Schema({
     },
     cinetpay: {
       apiUrl: String,
-      apiKey: String,
       xof: {
         siteId: String,
         secretKey: String,
@@ -91,10 +90,43 @@ const appSchema = new mongoose.Schema({
         type: Boolean,
         default: false
       }
+    },
+    flutterwave: {
+      apiUrl: String,
+      publicKey: String,
+      secretKey: String,
+      encryptionKey: String,
+      webhookHash: String,
+      enabled: {
+        type: Boolean,
+        default: false
+      }
+    },
+    // ⭐ NOUVEAU : Configuration KoraPay
+    korapay: {
+      apiUrl: {
+        type: String,
+        default: 'https://api.korapay.com/merchant'
+      },
+      publicKey: {
+        type: String,
+        trim: true
+      },
+      secretKey: {
+        type: String,
+        trim: true
+      },
+      encryptionKey: {
+        type: String,
+        trim: true
+      },
+      enabled: {
+        type: Boolean,
+        default: false
+      }
     }
   },
   
-  // ⭐ NOUVEAU : Configuration Google Auth
   googleAuth: {
     clientId: {
       type: String,
@@ -159,12 +191,22 @@ appSchema.methods.getPaymentConfig = function(provider) {
   return this.payments?.[provider] || null;
 };
 
-// ⭐ NOUVEAU : Méthode pour récupérer la config Google Auth
 appSchema.methods.getGoogleAuthConfig = function() {
   return {
     clientId: this.googleAuth?.clientId,
     webClientId: this.googleAuth?.webClientId,
     enabled: this.googleAuth?.enabled || false
+  };
+};
+
+// ⭐ NOUVEAU : Méthode pour récupérer la config KoraPay
+appSchema.methods.getKorapayConfig = function() {
+  return {
+    apiUrl: this.payments?.korapay?.apiUrl || 'https://api.korapay.com/merchant',
+    publicKey: this.payments?.korapay?.publicKey,
+    secretKey: this.payments?.korapay?.secretKey,
+    encryptionKey: this.payments?.korapay?.encryptionKey,
+    enabled: this.payments?.korapay?.enabled || false
   };
 };
 
@@ -185,6 +227,11 @@ appSchema.methods.toJSON = function() {
         delete app.payments[provider].secretKey;
         delete app.payments[provider].merchantKey;
         delete app.payments[provider].companyToken;
+        // ⭐ NOUVEAU : Masquer les clés sensibles KoraPay
+        if (provider === 'korapay') {
+          delete app.payments[provider].secretKey;
+          delete app.payments[provider].encryptionKey;
+        }
       }
     });
   }
