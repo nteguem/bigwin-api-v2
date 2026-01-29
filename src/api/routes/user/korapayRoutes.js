@@ -3,31 +3,27 @@
 const express = require('express');
 const korapayController = require('../../controllers/user/korapayController');
 const userAuth = require('../../middlewares/user/userAuth');
-const { identifyApp } = require('../../middlewares/common/appIdentifier');
 
 const router = express.Router();
 
 /**
  * Routes publiques (appelées par KoraPay)
- * PAS de middleware identifyApp
+ * PAS de middleware du tout
  */
 router.post('/webhook', korapayController.webhook);
 router.get('/callback', korapayController.callback);
 
 /**
  * Routes protégées (authentification requise)
- * AVEC identifyApp + userAuth
+ * identifyApp extrait l'appId du header X-App-Id
+ * userAuth vérifie le token
  */
-router.use(identifyApp); // ⬅️ identifyApp pour les routes suivantes
+const { identifyApp } = require('../../middlewares/common/appIdentifier');
+router.use(identifyApp); // Pour les 3 routes suivantes
 router.use(userAuth.protect);
 
-// Initier un paiement KoraPay (Checkout)
 router.post('/initiate', korapayController.initiatePayment);
-
-// Initier un paiement Mobile Money direct
 router.post('/mobile-money', korapayController.initiateMobileMoneyPayment);
-
-// Vérifier le statut d'un paiement
 router.get('/status/:reference', korapayController.checkTransactionStatus);
 
 module.exports = router;
