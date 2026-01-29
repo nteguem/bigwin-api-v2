@@ -249,8 +249,7 @@ exports.checkTransactionStatus = async (req, res) => {
     // 4. Traiter si succès et non traité
     let subscription = null;
     if (updatedTransaction.isSuccessful() && !updatedTransaction.processed) {
-      const result = await paymentMiddleware.processTransactionUpdate(updatedTransaction);
-      subscription = result.subscription;
+      subscription = await paymentMiddleware.processTransactionUpdate(appId, updatedTransaction);
     }
 
     return res.status(200).json({
@@ -343,7 +342,7 @@ exports.webhook = async (req, res) => {
     // 6. Traiter le paiement si succès
     if (transaction.isSuccessful() && !transaction.processed) {
       console.log('[KoraPay-Webhook] Processing successful transaction...');
-      await paymentMiddleware.processTransactionUpdate(transaction);
+      await paymentMiddleware.processTransactionUpdate(transaction.appId, transaction);
       console.log('[KoraPay-Webhook] ✅ Transaction processed');
     }
 
@@ -416,7 +415,7 @@ exports.callback = async (req, res) => {
     // 4. Process if successful and not yet processed
     if (updatedTransaction.isSuccessful() && !updatedTransaction.processed) {
       console.log(`[KoraPay-Callback] Processing successful transaction...`);
-      await paymentMiddleware.processTransactionUpdate(updatedTransaction);
+      await paymentMiddleware.processTransactionUpdate(transaction.appId, updatedTransaction);
       console.log(`[KoraPay-Callback] ✅ Transaction processed`);
     }
 
