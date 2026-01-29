@@ -5,7 +5,7 @@
 
 const korapayService = require('../../services/user/KorapayService');
 const KorapayTransaction = require('../../models/user/KorapayTransaction');
-const paymentMiddleware = require('../../middlewares/paymentMiddleware');
+const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const App = require('../../models/common/App');
 
 /**
