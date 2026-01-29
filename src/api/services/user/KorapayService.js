@@ -75,8 +75,8 @@ function validateConfig(config) {
 function generateUrls() {
   const baseUrl = process.env.APP_BASE_URL;
   return {
-    notification_url: `${baseUrl}/api/user/korapay/webhook`,
-    redirect_url: `${baseUrl}/api/user/korapay/callback`
+   notification_url: `${baseUrl}/api/payments/korapay/webhook`,
+redirect_url: `${baseUrl}/api/payments/korapay/callback`
   };
 }
 
