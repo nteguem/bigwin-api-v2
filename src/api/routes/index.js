@@ -98,7 +98,7 @@ router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
 router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
 router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
-router.use('/payments/korapay', identifyAppOptional, korapayRoutes); // ⭐ NOUVEAU KORAPAY
+router.use('/payments/korapay', korapayRoutes); // ⬅️ ENLEVER identifyAppOptional
 
 /**
  * GET /api/
