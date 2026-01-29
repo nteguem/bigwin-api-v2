@@ -14,7 +14,7 @@ const router = express.Router();
 router.post('/webhook', korapayController.webhook);
 
 // Page de retour après paiement (non protégé car l'utilisateur vient de KoraPay)
-router.get('/callback', korapayController.paymentCallback);
+router.get('/callback', korapayController.callback);
 
 /**
  * Routes protégées (authentification requise)
@@ -28,6 +28,6 @@ router.post('/initiate', korapayController.initiatePayment);
 router.post('/mobile-money', korapayController.initiateMobileMoneyPayment);
 
 // Vérifier le statut d'un paiement
-router.get('/status/:reference', korapayController.checkStatus);
+router.get('/status/:reference', korapayController.checkTransactionStatus);
 
 module.exports = router;
