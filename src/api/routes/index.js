@@ -33,7 +33,7 @@ const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminCommissionRoutes = require('./admin/commissionRoutes');
 const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes');
-const adminUserRoutes = require('./admin/userRoutes'); // ⭐ NOUVEAU
+const adminUserRoutes = require('./admin/userRoutes');
 
 // Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
 router.use('/admin/apps', adminAppRoutes);
@@ -49,7 +49,7 @@ router.use('/admin/affiliates', identifyApp, adminAffiliateRoutes);
 router.use('/admin/commissions', identifyApp, adminCommissionRoutes);
 router.use('/admin/affiliate-types', identifyApp, adminAffiliateTypeRoutes);
 router.use('/admin/formations', identifyApp, adminFormationRoutes);
-router.use('/admin/users', identifyApp, adminUserRoutes); // ⭐ NOUVEAU
+router.use('/admin/users', identifyApp, adminUserRoutes);
 
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
@@ -67,7 +67,15 @@ const userFormationRoutes = require('./user/formationRoutes');
 const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
 const packageRoutes = require('./user/packageRoutes');
-const korapayRoutes = require('./user/korapayRoutes'); // ⭐ NOUVEAU KORAPAY
+const korapayRoutes = require('./user/korapayRoutes');
+
+// ===== ROUTES DE PAIEMENT =====
+// ⚠️ CRITIQUE: Routes de paiement AVANT la route générique /user
+router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
+router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
+router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
+router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
+router.use('/payments/korapay', korapayRoutes);
 
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
@@ -90,15 +98,7 @@ const configRoutes = require('./common/configRoutes');
 router.use('/devices', identifyApp, deviceRoutes);
 router.use('/topics', identifyApp, topicRoutes);
 router.use('/notifications', identifyApp, notificationRoutes);
-router.use('/config', configRoutes); // Routes globales (sans identifyApp)
-
-// ===== ROUTES DE PAIEMENT =====
-// Routes de paiement: identifyApp OBLIGATOIRE
-router.use('/payments/smobilpay', identifyAppOptional, smobilpayRoutes);
-router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
-router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
-router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
-router.use('/payments/korapay', korapayRoutes); // ⬅️ ENLEVER identifyAppOptional
+router.use('/config', configRoutes);
 
 /**
  * GET /api/
@@ -121,7 +121,7 @@ router.get('/', (req, res) => {
         categories: 'GET /admin/categories - Gestion des catégories',
         tickets: 'GET /admin/tickets - Gestion des tickets',
         affiliates: 'GET /admin/affiliates - Gestion des affiliés',
-        users: 'GET /admin/users - Gestion des utilisateurs', // ⭐ NOUVEAU
+        users: 'GET /admin/users - Gestion des utilisateurs',
         config: 'GET /admin/config - Gestion des configurations pays'
       },
       user: {
