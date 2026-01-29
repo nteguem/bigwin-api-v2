@@ -1,617 +1,641 @@
-// src/api/controllers/user/korapayController.js
+/**
+ * @fileoverview KoraPay Payment Controller
+ * Gestion des paiements via KoraPay (Nigeria, Ghana, Kenya, etc.)
+ */
 
 const korapayService = require('../../services/user/KorapayService');
-const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
-const { AppError, ErrorCodes } = require('../../../utils/AppError');
-const catchAsync = require('../../../utils/catchAsync');
-const App = require('../../models/common/App');
 const KorapayTransaction = require('../../models/user/KorapayTransaction');
+const paymentMiddleware = require('../../middlewares/paymentMiddleware');
+const App = require('../../models/common/App');
 
 /**
- * Initier un paiement KoraPay (Checkout)
+ * Initier un paiement KoraPay
+ * POST /api/payments/korapay/initiate
  */
-exports.initiatePayment = catchAsync(async (req, res, next) => {
-  const { packageId, currency, phone } = req.body;
-
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  // Vérifier que appId est présent
-  if (!appId || !currentApp) {
-    return next(new AppError(
-      'Header X-App-Id requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Validation
-  if (!packageId || !currency) {
-    return next(new AppError(
-      'packageId et currency sont requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Vérifier que KoraPay est activé pour cette app
-  if (!currentApp?.payments?.korapay?.enabled) {
-    return next(new AppError(
-      'KoraPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package
-  const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
-  const hasActivePackage = activeSubscriptions.some(sub => 
-    sub.package._id.toString() === packageId
-  );
-
-  if (hasActivePackage) {
-    return next(new AppError(
-      'Vous avez déjà un abonnement actif pour ce package',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Récupérer automatiquement les données utilisateur
-  const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
-  const customerEmail = req.user.email || `user_${req.user._id}@temp.app`;
-  const customerPhone = phone || req.user.phone || null;
-
-  // Option: merchant bears cost (peut être passé en paramètre)
-  const merchantBearsCost = req.body.merchantBearsCost || false;
-
-  const result = await korapayService.initiatePayment(
-    appId,
-    currentApp,
-    req.user._id,
-    packageId,
-    currency,
-    customerName,
-    customerEmail,
-    customerPhone,
-    merchantBearsCost
-  );
-
-  res.status(201).json({
-    success: true,
-    message: 'Paiement initié avec succès',
-    data: {
-      transaction: {
-        transactionId: result.transaction.transactionId,
-        reference: result.transaction.reference,
-        korapayReference: result.transaction.korapayReference,
-        amount: result.transaction.amount,
-        currency: result.transaction.currency,
-        status: result.transaction.status,
-        customerName: result.transaction.customerName,
-        customerEmail: result.transaction.customerEmail,
-        package: result.transaction.package
-      },
-      checkoutUrl: result.checkoutUrl
-    }
-  });
-});
-
-/**
- * Initier un paiement Mobile Money direct
- */
-exports.initiateMobileMoneyPayment = catchAsync(async (req, res, next) => {
-  const { packageId, currency, mobileNumber } = req.body;
-
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  // Vérifier que appId est présent
-  if (!appId || !currentApp) {
-    return next(new AppError(
-      'Header X-App-Id requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Validation
-  if (!packageId || !currency || !mobileNumber) {
-    return next(new AppError(
-      'packageId, currency et mobileNumber sont requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Vérifier que KoraPay est activé
-  if (!currentApp?.payments?.korapay?.enabled) {
-    return next(new AppError(
-      'KoraPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Vérifier si l'utilisateur a déjà un abonnement actif
-  const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
-  const hasActivePackage = activeSubscriptions.some(sub => 
-    sub.package._id.toString() === packageId
-  );
-
-  if (hasActivePackage) {
-    return next(new AppError(
-      'Vous avez déjà un abonnement actif pour ce package',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Récupérer les données utilisateur
-  const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
-  const customerEmail = req.user.email || `user_${req.user._id}@temp.app`;
-  const merchantBearsCost = req.body.merchantBearsCost || false;
-
-  const result = await korapayService.initiateMobileMoneyPayment(
-    appId,
-    currentApp,
-    req.user._id,
-    packageId,
-    currency,
-    mobileNumber,
-    customerName,
-    customerEmail,
-    merchantBearsCost
-  );
-
-  res.status(201).json({
-    success: true,
-    message: 'Paiement Mobile Money initié avec succès',
-    data: {
-      transaction: {
-        transactionId: result.transaction.transactionId,
-        reference: result.transaction.reference,
-        korapayReference: result.transaction.korapayReference,
-        amount: result.transaction.amount,
-        currency: result.transaction.currency,
-        status: result.transaction.status,
-        authModel: result.authModel,
-        package: result.transaction.package
-      },
-      authModel: result.authModel,
-      message: result.message
-    }
-  });
-});
-
-/**
- * Vérifier le statut d'un paiement
- */
-exports.checkStatus = catchAsync(async (req, res, next) => {
-  const { reference } = req.params;
-
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  // Vérifier que appId est présent
-  if (!appId || !currentApp) {
-    return next(new AppError(
-      'Header X-App-Id requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  // Vérifier que KoraPay est activé
-  if (!currentApp?.payments?.korapay?.enabled) {
-    return next(new AppError(
-      'KoraPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
-  }
-
-  const transaction = await korapayService.checkTransactionStatus(appId, currentApp, reference);
-
-  // Vérifier que la transaction appartient à l'utilisateur
-  if (transaction.user._id.toString() !== req.user._id.toString()) {
-    return next(new AppError('Transaction non autorisée', 403, ErrorCodes.UNAUTHORIZED));
-  }
-
-  // Traiter la transaction si le statut a changé
-  let subscription = null;
+exports.initiatePayment = async (req, res) => {
   try {
-    subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
+    const { packageId, currency, phone, merchantBearsCost } = req.body;
+    const { appId, currentApp } = req;
+    const userId = req.user._id;
+
+    // 1. Validation basique
+    if (!appId || !currentApp) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Application non identifiée'
+        }
+      });
+    }
+
+    // 2. Vérifier que KoraPay est activé
+    if (!currentApp.payments?.korapay?.enabled) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'PROVIDER_DISABLED',
+          message: 'KoraPay n\'est pas activé pour cette application'
+        }
+      });
+    }
+
+    // 3. Vérifier qu'il n'y a pas déjà un abonnement actif pour ce package
+    const Subscription = require('../../models/common/Subscription');
+    const existingSubscription = await Subscription.findOne({
+      appId,
+      user: userId,
+      package: packageId,
+      status: 'active',
+      endDate: { $gt: new Date() }
+    });
+
+    if (existingSubscription) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'ACTIVE_SUBSCRIPTION_EXISTS',
+          message: 'Vous avez déjà un abonnement actif pour ce package'
+        }
+      });
+    }
+
+    // 4. Auto-populate name/email si non fourni
+    const customerName = req.body.customerName || req.user.name || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'User';
+    const customerEmail = req.body.customerEmail || req.user.email || `user_${userId}@temp.app`;
+    const customerPhone = phone || req.user.phone;
+
+    // 5. Appeler le service KoraPay
+    const result = await korapayService.initiatePayment(
+      appId,
+      currentApp,
+      userId,
+      packageId,
+      currency,
+      customerName,
+      customerEmail,
+      customerPhone,
+      merchantBearsCost
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Paiement initié avec succès',
+      data: result
+    });
+
   } catch (error) {
-    console.error('[KoraPay] Error processing transaction update:', error.message);
-  }
+    console.error('[KoraPay-Controller] Error in initiatePayment:', error);
 
-  res.status(200).json({
-    success: true,
-    data: {
-      transaction: {
-        transactionId: transaction.transactionId,
-        reference: transaction.reference,
-        korapayReference: transaction.korapayReference,
-        status: transaction.status,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
-        processed: transaction.processed,
-        createdAt: transaction.createdAt,
-        package: transaction.package
-      },
-      subscription: subscription ? {
-        id: subscription._id,
-        startDate: subscription.startDate,
-        endDate: subscription.endDate,
-        status: subscription.status
-      } : null
+    // Gérer les erreurs spécifiques
+    if (error.name === 'KorapayError') {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        error: {
+          code: error.message,
+          message: error.message,
+          details: error.responseData
+        }
+      });
     }
-  });
-});
+
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message
+      }
+    });
+  }
+};
 
 /**
- * Webhook KoraPay
+ * Initier un paiement Mobile Money
+ * POST /api/payments/korapay/mobile-money
  */
-exports.webhook = catchAsync(async (req, res, next) => {
-  const receivedSignature = req.headers['x-korapay-signature'];
-  const webhookBody = req.body;
-
-  console.log('=== WEBHOOK KORAPAY REÇU ===');
-  console.log('Signature:', receivedSignature);
-  console.log('Event:', webhookBody.event);
-
-  if (!receivedSignature) {
-    console.error('[Webhook KoraPay] Signature manquante');
-    return res.status(200).json({ received: true }); // Retourner 200 pour éviter les retry
-  }
-
-  if (!webhookBody.data || !webhookBody.data.payment_reference) {
-    console.error('[Webhook KoraPay] Données webhook invalides');
-    return res.status(200).json({ received: true });
-  }
-
+exports.initiateMobileMoneyPayment = async (req, res) => {
   try {
-    const paymentReference = webhookBody.data.payment_reference;
-    
-    // Chercher la transaction par référence (sans appId d'abord)
+    const { packageId, currency, mobileNumber, merchantBearsCost } = req.body;
+    const { appId, currentApp } = req;
+    const userId = req.user._id;
+
+    // 1. Validation
+    if (!appId || !currentApp) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Application non identifiée'
+        }
+      });
+    }
+
+    if (!mobileNumber) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Numéro de téléphone mobile requis'
+        }
+      });
+    }
+
+    // 2. Vérifier que KoraPay est activé
+    if (!currentApp.payments?.korapay?.enabled) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'PROVIDER_DISABLED',
+          message: 'KoraPay n\'est pas activé'
+        }
+      });
+    }
+
+    // 3. Auto-populate
+    const customerName = req.body.customerName || req.user.name || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'User';
+    const customerEmail = req.body.customerEmail || req.user.email || `user_${userId}@temp.app`;
+
+    // 4. Appeler service
+    const result = await korapayService.initiateMobileMoneyPayment(
+      appId,
+      currentApp,
+      userId,
+      packageId,
+      currency,
+      mobileNumber,
+      customerName,
+      customerEmail,
+      merchantBearsCost
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Paiement Mobile Money initié',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('[KoraPay-Controller] Error in initiateMobileMoneyPayment:', error);
+
+    if (error.name === 'KorapayError') {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        error: {
+          code: error.message,
+          message: error.message,
+          details: error.responseData
+        }
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Vérifier le statut d'une transaction (protected)
+ * GET /api/payments/korapay/status/:reference
+ */
+exports.checkTransactionStatus = async (req, res) => {
+  try {
+    const { reference } = req.params;
+    const { appId, currentApp } = req;
+    const userId = req.user._id;
+
+    // 1. Trouver la transaction
     const transaction = await KorapayTransaction.findOne({
+      appId,
       $or: [
-        { reference: paymentReference },
-        { transactionId: paymentReference },
-        { korapayReference: paymentReference }
+        { transactionId: reference },
+        { reference: reference },
+        { korapayReference: reference }
       ]
-    }).populate(['package', 'user']);
+    });
 
     if (!transaction) {
-      console.error(`[Webhook KoraPay] Transaction non trouvée pour reference: ${paymentReference}`);
-      return res.status(200).json({ received: true });
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Transaction non trouvée'
+        }
+      });
     }
 
-    // Récupérer l'appId depuis la transaction
-    const appId = transaction.appId;
-    console.log(`[Webhook KoraPay] AppId récupéré: ${appId}`);
-
-    // Récupérer l'app depuis la base
-    const currentApp = await App.findOne({ appId, isActive: true }).lean();
-
-    if (!currentApp) {
-      console.error(`[Webhook KoraPay] App ${appId} non trouvée`);
-      return res.status(200).json({ received: true });
+    // 2. Vérifier que la transaction appartient à l'utilisateur
+    if (transaction.user.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Accès non autorisé à cette transaction'
+        }
+      });
     }
 
-    // Vérifier que KoraPay est activé
-    if (!currentApp?.payments?.korapay?.enabled) {
-      console.error(`[Webhook KoraPay] KoraPay non activé pour app ${appId}`);
-      return res.status(200).json({ received: true });
+    // 3. Vérifier le statut auprès de KoraPay
+    const updatedTransaction = await korapayService.checkTransactionStatus(
+      appId,
+      currentApp,
+      reference
+    );
+
+    // 4. Traiter si succès et non traité
+    let subscription = null;
+    if (updatedTransaction.isSuccessful() && !updatedTransaction.processed) {
+      const result = await paymentMiddleware.processTransactionUpdate(updatedTransaction);
+      subscription = result.subscription;
     }
 
-    // Vérifier la signature
-    const config = korapayService.getConfig(currentApp);
-    const isValid = korapayService.verifyWebhookSignature(
-      receivedSignature,
+    return res.status(200).json({
+      success: true,
+      message: 'Statut de la transaction récupéré',
+      data: {
+        transaction: updatedTransaction,
+        subscription
+      }
+    });
+
+  } catch (error) {
+    console.error('[KoraPay-Controller] Error in checkTransactionStatus:', error);
+
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Webhook KoraPay (public - NO X-App-Id required)
+ * POST /api/payments/korapay/webhook
+ */
+exports.webhook = async (req, res) => {
+  try {
+    const signature = req.headers['x-korapay-signature'];
+    const webhookBody = req.body;
+
+    console.log('[KoraPay-Webhook] Webhook received from KoraPay');
+
+    // 1. Extraire la référence
+    const paymentReference = webhookBody?.data?.payment_reference;
+
+    if (!paymentReference) {
+      console.error('[KoraPay-Webhook] No payment_reference in webhook');
+      return res.status(400).json({ success: false, message: 'Invalid webhook data' });
+    }
+
+    console.log(`[KoraPay-Webhook] Payment reference: ${paymentReference}`);
+
+    // 2. Trouver transaction (SANS filter appId car on ne l'a pas encore)
+    const transaction = await KorapayTransaction.findOne({
+      $or: [
+        { transactionId: paymentReference },
+        { reference: paymentReference },
+        { korapayReference: paymentReference }
+      ]
+    });
+
+    if (!transaction) {
+      console.error(`[KoraPay-Webhook] Transaction not found: ${paymentReference}`);
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+
+    console.log(`[KoraPay-Webhook] Transaction found: ${transaction.transactionId}`);
+    console.log(`[KoraPay-Webhook] AppId: ${transaction.appId}`);
+
+    // 3. Charger l'app pour vérifier la signature
+    const app = await App.findOne({ appId: transaction.appId });
+
+    if (!app) {
+      console.error(`[KoraPay-Webhook] App not found: ${transaction.appId}`);
+      return res.status(404).json({ success: false, message: 'App not found' });
+    }
+
+    // 4. Vérifier la signature
+    const config = korapayService.getConfig(app);
+    const isValidSignature = korapayService.verifyWebhookSignature(
+      signature,
       webhookBody.data,
       config.secretKey
     );
 
-    if (!isValid) {
-      console.error('[Webhook KoraPay] Signature invalide');
-      return res.status(200).json({ received: true });
+    if (!isValidSignature) {
+      console.error('[KoraPay-Webhook] ❌ Invalid signature');
+      return res.status(401).json({ success: false, message: 'Invalid signature' });
     }
 
-    console.log(`[Webhook KoraPay] Signature valide pour transaction ${transaction.transactionId}`);
+    console.log('[KoraPay-Webhook] ✅ Signature valid');
 
-    // Enregistrer le webhook dans la transaction
+    // 5. Enregistrer le webhook
     await transaction.recordWebhook(webhookBody);
-    
-    console.log(`[Webhook KoraPay] Webhook enregistré, statut: ${transaction.status}`);
+    console.log('[KoraPay-Webhook] Webhook data recorded');
 
-    // Traiter la transaction via le middleware
-    await paymentMiddleware.processTransactionUpdate(appId, transaction);
+    // 6. Traiter le paiement si succès
+    if (transaction.isSuccessful() && !transaction.processed) {
+      console.log('[KoraPay-Webhook] Processing successful transaction...');
+      await paymentMiddleware.processTransactionUpdate(transaction);
+      console.log('[KoraPay-Webhook] ✅ Transaction processed');
+    }
 
-    res.status(200).json({
+    // 7. Toujours retourner 200 pour éviter les retries KoraPay
+    return res.status(200).json({
       success: true,
-      message: 'Webhook traité avec succès'
+      message: 'Webhook processed successfully'
     });
 
   } catch (error) {
-    console.error('[Webhook KoraPay] Erreur:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('[KoraPay-Webhook] Error:', error);
     
-    // Toujours retourner 200 pour éviter les retry de KoraPay
-    res.status(200).json({
-      success: false,
-      message: 'Erreur lors du traitement du webhook',
-      error: error.message
+    // Retourner 200 quand même pour éviter les retries
+    return res.status(200).json({
+      success: true,
+      message: 'Webhook received'
     });
   }
-});
+};
 
 /**
- * Callback après paiement (redirect_url)
+ * Callback après paiement (public - NO X-App-Id required)
+ * GET /api/payments/korapay/callback
  */
-exports.paymentCallback = catchAsync(async (req, res, next) => {
-  const { reference } = req.query;
-
-  console.log('=== CALLBACK KORAPAY ===');
-  console.log('Reference:', reference);
-
-  if (!reference) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Référence de transaction manquante.</p>
-      <p>Veuillez réessayer ou contacter le support.</p>
-    `;
-    return res.status(400).send(getHtmlTemplate('KoraPay - Erreur', errorContent));
-  }
-
-  // Récupérer la transaction pour obtenir l'appId
-  const transactionForApp = await KorapayTransaction.findOne({
-    $or: [
-      { reference },
-      { transactionId: reference },
-      { korapayReference: reference }
-    ]
-  });
-
-  if (!transactionForApp) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Transaction non trouvée.</p>
-      <p>Référence: <span class="transaction-id">${reference}</span></p>
-    `;
-    return res.status(404).send(getHtmlTemplate('KoraPay - Erreur', errorContent));
-  }
-
-  const appId = transactionForApp.appId;
-
-  // Récupérer l'app
-  const currentApp = await App.findOne({ appId, isActive: true }).lean();
-
-  if (!currentApp) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Application non trouvée.</p>
-    `;
-    return res.status(404).send(getHtmlTemplate('KoraPay - Erreur', errorContent));
-  }
-
-  // Vérifier que KoraPay est activé
-  if (!currentApp?.payments?.korapay?.enabled) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>KoraPay n'est pas activé pour cette application.</p>
-    `;
-    return res.status(400).send(getHtmlTemplate('KoraPay - Erreur', errorContent));
-  }
-
-  let transactionStatus;
-  let errorOccurred = false;
-
+exports.callback = async (req, res) => {
   try {
-    // Vérifier le statut de la transaction
-    transactionStatus = await korapayService.checkTransactionStatus(appId, currentApp, reference);
+    const { reference } = req.query;
+
+    if (!reference) {
+      return res.status(400).send(renderHTML('ERROR', 'Missing reference'));
+    }
+
+    console.log(`[KoraPay-Callback] Processing reference: ${reference}`);
+
+    // 1. Find transaction (NO appId filter)
+    const transaction = await KorapayTransaction.findOne({
+      $or: [
+        { transactionId: reference },
+        { reference: reference },
+        { korapayReference: reference }
+      ]
+    }).populate('package');
+
+    if (!transaction) {
+      console.error(`[KoraPay-Callback] Transaction not found: ${reference}`);
+      return res.status(404).send(renderHTML('ERROR', 'Transaction not found'));
+    }
+
+    console.log(`[KoraPay-Callback] Transaction found: ${transaction.transactionId}`);
+    console.log(`[KoraPay-Callback] AppId: ${transaction.appId}`);
+
+    // 2. Load app from transaction
+    const app = await App.findOne({ appId: transaction.appId });
     
-    // Traiter la transaction
-    await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
+    if (!app) {
+      console.error(`[KoraPay-Callback] App not found: ${transaction.appId}`);
+      return res.status(404).send(renderHTML('ERROR', 'Application not found'));
+    }
+
+    // 3. Check status with KoraPay API
+    console.log(`[KoraPay-Callback] Checking status with KoraPay...`);
+    const updatedTransaction = await korapayService.checkTransactionStatus(
+      transaction.appId,
+      app,
+      reference
+    );
+
+    console.log(`[KoraPay-Callback] Status: ${updatedTransaction.status}`);
+
+    // 4. Process if successful and not yet processed
+    if (updatedTransaction.isSuccessful() && !updatedTransaction.processed) {
+      console.log(`[KoraPay-Callback] Processing successful transaction...`);
+      await paymentMiddleware.processTransactionUpdate(updatedTransaction);
+      console.log(`[KoraPay-Callback] ✅ Transaction processed`);
+    }
+
+    // 5. Render HTML based on status
+    const html = renderHTML(updatedTransaction.status, updatedTransaction);
+    
+    return res.send(html);
+
   } catch (error) {
-    console.error('[KoraPay Callback] Erreur lors de la vérification:', error.message);
-    errorOccurred = true;
+    console.error('[KoraPay-Callback] Error:', error);
+    return res.status(500).send(renderHTML('ERROR', 'Server error occurred'));
   }
+};
 
-  // Générer le contenu HTML selon le statut
-  let content;
+/**
+ * Generate HTML response for callback page
+ */
+function renderHTML(status, transaction) {
+  const statusConfig = {
+    SUCCESS: {
+      icon: '✓',
+      color: '#10b981',
+      title: 'Payment Successful',
+      message: 'Your payment has been confirmed. Your subscription is now active.'
+    },
+    PROCESSING: {
+      icon: '⏳',
+      color: '#f59e0b',
+      title: 'Payment Processing',
+      message: 'Your payment is being processed. This may take a few moments.'
+    },
+    FAILED: {
+      icon: '✗',
+      color: '#ef4444',
+      title: 'Payment Failed',
+      message: 'The payment failed. Please try again.'
+    },
+    CANCELLED: {
+      icon: '⊗',
+      color: '#6b7280',
+      title: 'Payment Cancelled',
+      message: 'The payment was cancelled.'
+    },
+    PENDING: {
+      icon: '⋯',
+      color: '#3b82f6',
+      title: 'Payment Pending',
+      message: 'Your payment is pending confirmation.'
+    },
+    ERROR: {
+      icon: '⚠',
+      color: '#dc2626',
+      title: 'Error',
+      message: typeof transaction === 'string' ? transaction : 'An error occurred.'
+    }
+  };
 
-  if (errorOccurred) {
-    content = `
-      <div class="icon">⏳</div>
-      <h1 class="warning">Vérification en cours</h1>
-      <p>Nous vérifions le statut de votre paiement...</p>
-      <p>Vous recevrez une notification dès que le traitement sera terminé.</p>
-      <div class="transaction-id">${reference}</div>
-    `;
-  } else if (transactionStatus.status === 'SUCCESS') {
-    content = `
-      <div class="icon">🎉</div>
-      <h1 class="success">Paiement Réussi !</h1>
-      <div class="status-badge status-success">✅ Confirmé</div>
-      <p>Votre abonnement <strong>${transactionStatus.package.name.fr || transactionStatus.package.name.en}</strong> a été activé avec succès.</p>
-      
-      <div class="details">
-        <p><strong>Référence:</strong> <span class="transaction-id">${reference}</span></p>
-        <p><strong>Montant:</strong> <span class="amount">${transactionStatus.amount} ${transactionStatus.currency}</span></p>
-        <p><strong>Méthode:</strong> ${transactionStatus.paymentMethod || 'KoraPay'}</p>
-        <p><strong>Durée:</strong> ${transactionStatus.package.duration} jours</p>
-      </div>
-      
-      <p>✅ Notification de confirmation envoyée</p>
-      <p>✅ Accès premium maintenant actif</p>
-    `;
-  } else if (transactionStatus.status === 'FAILED') {
-    content = `
-      <div class="icon">❌</div>
-      <h1 class="error">Paiement Échoué</h1>
-      <div class="status-badge status-error">❌ Refusé</div>
-      <p><strong>${transactionStatus.errorMessage || 'Le paiement a échoué'}</strong></p>
-      <div class="transaction-id">${reference}</div>
-      <p>Veuillez réessayer ou contacter le support.</p>
-    `;
-  } else if (transactionStatus.status === 'CANCELLED') {
-    content = `
-      <div class="icon">⚠️</div>
-      <h1 class="warning">Paiement Annulé</h1>
-      <div class="status-badge status-warning">⚠️ Annulé</div>
-      <p>Vous avez annulé le paiement.</p>
-      <div class="transaction-id">${reference}</div>
-      <p>Vous pouvez réessayer quand vous le souhaitez.</p>
-    `;
-  } else if (transactionStatus.status === 'PROCESSING') {
-    content = `
-      <div class="icon">📱</div>
-      <h1 class="warning">Confirmation Requise</h1>
-      <div class="status-badge status-warning">⏳ En attente</div>
-      <p>Votre demande de paiement a été envoyée.</p>
-      
-      <div class="highlight">
-        <p><strong>📲 Vérifiez votre téléphone</strong></p>
-        <p>Une notification de paiement vous a été envoyée.</p>
-        <p>Veuillez confirmer pour finaliser le paiement.</p>
-      </div>
-      
-      <div class="transaction-id">${reference}</div>
-      <p>Vous recevrez une notification de confirmation.</p>
-    `;
-  } else {
-    content = `
-      <div class="icon">⏳</div>
-      <h1 class="pending">Paiement En Attente</h1>
-      <div class="status-badge status-pending">⏳ En cours</div>
-      <p>Votre paiement est en cours de traitement.</p>
-      <div class="transaction-id">${reference}</div>
-      <p>Veuillez patienter quelques instants.</p>
-    `;
-  }
+  const config = statusConfig[status] || statusConfig.ERROR;
+  const details = typeof transaction === 'object' && transaction.transactionId ? transaction : null;
 
-  return res.send(getHtmlTemplate(`KoraPay - ${transactionStatus?.status || 'Statut'}`, content));
-});
-
-// ==================== HTML TEMPLATES ====================
-
-const getMobileOptimizedCSS = () => `
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${config.title}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 16px;
-      line-height: 1.6;
+      padding: 20px;
     }
     .container {
       background: white;
-      border-radius: 16px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 500px;
       width: 100%;
-      max-width: 400px;
-      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
       text-align: center;
-      animation: slideUp 0.3s ease-out;
+      animation: slideUp 0.4s ease-out;
     }
     @keyframes slideUp {
       from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    h1 { font-size: 1.5rem; margin-bottom: 16px; font-weight: 600; }
-    p { font-size: 0.95rem; color: #666; margin-bottom: 12px; }
-    .success { color: #10b981; }
-    .error { color: #ef4444; }
-    .warning { color: #f59e0b; }
-    .pending { color: #6366f1; }
+    .icon {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 24px;
+      border-radius: 50%;
+      background: ${config.color}15;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      color: ${config.color};
+      font-weight: bold;
+    }
+    h1 {
+      font-size: 28px;
+      color: #1f2937;
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+    .message {
+      font-size: 16px;
+      color: #6b7280;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
     .details {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
+      background: #f9fafb;
       border-radius: 12px;
-      padding: 16px;
-      margin: 20px 0;
+      padding: 20px;
+      margin: 24px 0;
       text-align: left;
     }
-    .details p { margin-bottom: 8px; font-size: 0.9rem; color: #374151; }
-    .details p:last-child { margin-bottom: 0; }
-    .highlight {
-      background: #fef3c7;
-      border: 1px solid #fbbf24;
-      border-radius: 12px;
-      padding: 16px;
-      margin: 20px 0;
-      border-left: 4px solid #f59e0b;
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #e5e7eb;
     }
-    .highlight p { color: #92400e; font-size: 0.9rem; }
-    .icon { font-size: 2rem; margin-bottom: 12px; }
-    .transaction-id {
-      font-family: 'Courier New', monospace;
-      background: #f1f5f9;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      color: #475569;
-      display: inline-block;
-      margin: 8px 0;
-      word-break: break-all;
-    }
-    .amount { font-size: 1.1rem; font-weight: 600; color: #1f2937; }
-    .status-badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.8rem;
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { 
+      color: #6b7280; 
+      font-size: 14px;
       font-weight: 500;
-      margin: 8px 0;
     }
-    .status-success { background: #d1fae5; color: #065f46; }
-    .status-error { background: #fee2e2; color: #991b1b; }
-    .status-warning { background: #fef3c7; color: #92400e; }
-    .status-pending { background: #e0e7ff; color: #3730a3; }
-    @media (max-width: 480px) {
-      .container { padding: 20px; margin: 12px; border-radius: 12px; }
-      h1 { font-size: 1.3rem; }
-      p { font-size: 0.9rem; }
-      .details, .highlight { padding: 14px; }
+    .detail-value { 
+      color: #1f2937; 
+      font-weight: 600; 
+      font-size: 14px;
+      text-align: right;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      background: ${config.color}15;
+      color: ${config.color};
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .footer {
+      font-size: 14px;
+      color: #9ca3af;
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .close-btn {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 12px 32px;
+      background: ${config.color};
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .close-btn:hover {
+      opacity: 0.9;
+      transform: translateY(-2px);
     }
   </style>
-`;
-
-const getHtmlTemplate = (title, content) => `
-  <!DOCTYPE html>
-  <html lang="fr">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#667eea">
-    <title>${title}</title>
-    ${getMobileOptimizedCSS()}
-  </head>
-  <body>
-    <div class="container">
-      ${content}
+</head>
+<body>
+  <div class="container">
+    <div class="icon">${config.icon}</div>
+    <h1>${config.title}</h1>
+    <p class="message">${config.message}</p>
+    
+    ${details ? `
+      <div class="details">
+        <div class="detail-row">
+          <span class="detail-label">Reference</span>
+          <span class="detail-value">${details.transactionId}</span>
+        </div>
+        ${details.amount ? `
+        <div class="detail-row">
+          <span class="detail-label">Amount</span>
+          <span class="detail-value">${details.amount.toLocaleString()} ${details.currency}</span>
+        </div>` : ''}
+        ${details.package?.name ? `
+        <div class="detail-row">
+          <span class="detail-label">Package</span>
+          <span class="detail-value">${details.package.name.en || details.package.name.fr}</span>
+        </div>` : ''}
+        ${details.paymentMethod ? `
+        <div class="detail-row">
+          <span class="detail-label">Payment Method</span>
+          <span class="detail-value">${details.paymentMethod.replace('_', ' ').toUpperCase()}</span>
+        </div>` : ''}
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <span class="detail-value"><span class="badge">${status}</span></span>
+        </div>
+      </div>
+    ` : ''}
+    
+    <div class="footer">
+      <p>You can close this window now.</p>
+      ${status === 'SUCCESS' ? '<p style="margin-top: 8px;">Your subscription is active!</p>' : ''}
     </div>
-  </body>
-  </html>
-`;
+  </div>
+</body>
+</html>
+  `;
+}
 
-module.exports = {
-  initiatePayment: exports.initiatePayment,
-  initiateMobileMoneyPayment: exports.initiateMobileMoneyPayment,
-  checkStatus: exports.checkStatus,
-  webhook: exports.webhook,
-  paymentCallback: exports.paymentCallback
-};
+module.exports = exports;

@@ -184,7 +184,7 @@ async function initiatePayment(
 
     // 5. Générer un ID de transaction unique
     const transactionId = `KPY_TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
-    const reference = `${appId}_${transactionId}`;
+    const reference = `${transactionId}`;
     console.log(`[KoraPay-5] TransactionId généré: ${transactionId}, Reference: ${reference}`);
 
     // 6. Générer les URLs
