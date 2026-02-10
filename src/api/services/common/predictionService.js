@@ -1,31 +1,29 @@
 // src/api/services/common/predictionService.js
 
 const Prediction = require('../../models/common/Prediction');
+const Ticket = require('../../models/common/Ticket');
+const Category = require('../../models/common/Category');
 
 /**
  * PredictionService
  * =================
  * 
- * GESTION DES PREDICTIONS PARTAGÉES :
- * - Toutes les méthodes de lecture incluent automatiquement les predictions avec appId = "shared"
- * - Exemple : getPredictions("app1") retourne les predictions de app1 + les predictions shared
- * - Les predictions partagées sont généralement liées à des tickets partagés
- * - Les méthodes de modification ne peuvent PAS modifier les predictions shared (sécurité)
+ * GESTION DES PREDICTIONS AVEC CATÉGORIES PARTAGÉES :
+ * - Les predictions sont filtrées par TICKETS accessibles
+ * - Un ticket est accessible si sa catégorie est accessible (app + shared)
  */
 
 class PredictionService {
   
   /**
    * Créer une nouvelle prédiction
-   * @param {String} appId - ID de l'application (ou "shared" pour prediction partagée)
+   * @param {String} appId - ID de l'application
    */
   async createPrediction(appId, data) {
-    // ⭐ Ajouter appId aux données
     const prediction = new Prediction({ ...data, appId });
     
     if (prediction.ticket) {
       const ticketService = require('./ticketService'); 
-      // ⭐ Passer appId au service
       await ticketService.updateClosingTime(appId, prediction.ticket);
     }
     
@@ -33,15 +31,41 @@ class PredictionService {
   }
 
   /**
-   * Récupérer toutes les prédictions avec pagination (inclut les predictions partagées)
+   * Récupérer toutes les prédictions avec pagination (filtrées par tickets accessibles)
    * @param {String} appId - ID de l'application
    */
   async getPredictions(appId, { offset = 0, limit = 10, ticket = null, sport = null, status = null }) {
-    // ⭐ MODIFIÉ : Inclure les predictions partagées
-    const filter = { appId: { $in: [appId, "shared"] } };
+    // ⭐ ÉTAPE 1 : Récupérer les catégories accessibles
+    const accessibleCategories = await Category.find({
+      appId: { $in: [appId, "shared"] },
+      isActive: true
+    }).select('_id');
+    
+    const categoryIds = accessibleCategories.map(cat => cat._id);
+    
+    // ⭐ ÉTAPE 2 : Récupérer les tickets de ces catégories
+    const accessibleTickets = await Ticket.find({
+      category: { $in: categoryIds }
+    }).select('_id');
+    
+    const ticketIds = accessibleTickets.map(t => t._id);
+    
+    // ⭐ ÉTAPE 3 : Filtrer les predictions par ces tickets
+    const filter = { 
+      ticket: { $in: ticketIds } // ✅ Filtre par tickets accessibles
+    };
     
     if (ticket) {
-      filter.ticket = ticket;
+      // Si un ticket spécifique est demandé, vérifier qu'il est accessible
+      if (ticketIds.some(id => id.toString() === ticket.toString())) {
+        filter.ticket = ticket;
+      } else {
+        // Ticket non accessible, retourner vide
+        return {
+          data: [],
+          pagination: { offset, limit, total: 0, hasNext: false }
+        };
+      }
     }
 
     if (sport) {
@@ -58,7 +82,6 @@ class PredictionService {
       .limit(limit)
       .sort({ createdAt: -1 });
 
-    // ⭐ Compter avec appId
     const total = await Prediction.countDocuments(filter);
 
     return {
@@ -73,38 +96,57 @@ class PredictionService {
   }
 
   /**
-   * Récupérer une prédiction par ID (inclut les predictions partagées)
+   * Récupérer une prédiction par ID (si son ticket est accessible)
    * @param {String} appId - ID de l'application
    */
   async getPredictionById(appId, id) {
-    // ⭐ MODIFIÉ : Inclure les predictions partagées
-    return await Prediction.findOne({ 
-      _id: id, 
-      appId: { $in: [appId, "shared"] } 
-    }).populate('ticket');
+    const prediction = await Prediction.findOne({ _id: id }).populate('ticket');
+    
+    if (!prediction) return null;
+    
+    // Vérifier que le ticket est accessible
+    const ticket = await Ticket.findOne({ _id: prediction.ticket._id });
+    if (!ticket) return null;
+    
+    const categoryAccessible = await Category.findOne({
+      _id: ticket.category,
+      appId: { $in: [appId, "shared"] },
+      isActive: true
+    });
+    
+    if (!categoryAccessible) return null;
+    
+    return prediction;
   }
 
   /**
-   * Récupérer les prédictions d'un ticket (inclut les predictions partagées)
+   * Récupérer les prédictions d'un ticket (si le ticket est accessible)
    * @param {String} appId - ID de l'application
    */
   async getPredictionsByTicket(appId, ticketId) {
-    // ⭐ MODIFIÉ : Inclure les predictions partagées
-    return await Prediction.find({ 
-      ticket: ticketId, 
-      appId: { $in: [appId, "shared"] } 
+    // Vérifier que le ticket est accessible
+    const ticket = await Ticket.findOne({ _id: ticketId });
+    if (!ticket) return [];
+    
+    const categoryAccessible = await Category.findOne({
+      _id: ticket.category,
+      appId: { $in: [appId, "shared"] },
+      isActive: true
     });
+    
+    if (!categoryAccessible) return [];
+    
+    return await Prediction.find({ ticket: ticketId });
   }
 
   /**
    * Mettre à jour une prédiction
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut mettre à jour que les predictions de son app (pas les shared)
+   * ⚠️ NOTE : Ne peut mettre à jour que les predictions de son app
    */
   async updatePrediction(appId, id, data) {
-    // ⭐ SÉCURITÉ : On ne modifie QUE les predictions de l'app (pas les shared)
     return await Prediction.findOneAndUpdate(
-      { _id: id, appId }, // Pas de $in ici pour éviter modification des shared
+      { _id: id, appId },
       data, 
       { new: true }
     );
@@ -113,37 +155,31 @@ class PredictionService {
   /**
    * Supprimer une prédiction
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut supprimer que les predictions de son app (pas les shared)
+   * ⚠️ NOTE : Ne peut supprimer que les predictions de son app
    */
   async deletePrediction(appId, id) {
-    // ⭐ SÉCURITÉ : On ne supprime QUE les predictions de l'app (pas les shared)
-    return await Prediction.findOneAndDelete({ _id: id, appId }); // Pas de $in
+    return await Prediction.findOneAndDelete({ _id: id, appId });
   }
 
   /**
    * Mettre à jour le statut d'une prédiction
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut mettre à jour que les predictions de son app (pas les shared)
    */
   async updatePredictionStatus(appId, id, status) {
     return await this.updatePrediction(appId, id, { status });
   }
 
   /**
-   * Vérifier si une prédiction existe (inclut les predictions partagées)
+   * Vérifier si une prédiction existe et est accessible
    * @param {String} appId - ID de l'application
    */
   async predictionExists(appId, id) {
-    // ⭐ MODIFIÉ : Inclure les predictions partagées
-    const prediction = await Prediction.findOne({ 
-      _id: id, 
-      appId: { $in: [appId, "shared"] } 
-    });
+    const prediction = await this.getPredictionById(appId, id);
     return !!prediction;
   }
 
   /**
-   * Récupérer les prédictions par statut (inclut les predictions partagées)
+   * Récupérer les prédictions par statut
    * @param {String} appId - ID de l'application
    */
   async getPredictionsByStatus(appId, status, { offset = 0, limit = 10 }) {
@@ -151,7 +187,7 @@ class PredictionService {
   }
 
   /**
-   * Récupérer les prédictions par sport (inclut les predictions partagées)
+   * Récupérer les prédictions par sport
    * @param {String} appId - ID de l'application
    */
   async getPredictionsBySport(appId, sport, { offset = 0, limit = 10 }) {
@@ -160,14 +196,13 @@ class PredictionService {
 
   /**
    * Ajouter plusieurs prédictions à un ticket
-   * @param {String} appId - ID de l'application (ou "shared" pour predictions partagées)
+   * @param {String} appId - ID de l'application
    */
   async addPredictionsToTicket(appId, ticketId, predictionsData) {
     const predictions = [];
     
     for (const data of predictionsData) {
       const predictionData = { ...data, ticket: ticketId };
-      // ⭐ Passer appId
       const prediction = await this.createPrediction(appId, predictionData);
       predictions.push(prediction);
     }

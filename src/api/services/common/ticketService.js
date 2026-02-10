@@ -2,24 +2,24 @@
 
 const Ticket = require('../../models/common/Ticket');
 const Prediction = require("../../models/common/Prediction");
+const Category = require('../../models/common/Category');
 const predictionService = require('./predictionService');
 
 /**
  * TicketService
  * =============
  * 
- * GESTION DES TICKETS PARTAGÉS :
- * - Toutes les méthodes de lecture incluent automatiquement les tickets avec appId = "shared"
- * - Exemple : getTickets("app1") retourne les tickets de app1 + les tickets shared
- * - Les tickets partagés sont visibles dans toutes les applications
- * - Les méthodes de modification ne peuvent PAS modifier les tickets shared (sécurité)
+ * GESTION DES TICKETS AVEC CATÉGORIES PARTAGÉES :
+ * - Les tickets sont filtrés par CATÉGORIES accessibles (pas par appId du ticket)
+ * - Si une catégorie est shared, TOUS les tickets de cette catégorie sont visibles (peu importe leur appId)
+ * - Exemple : Ticket bigwin dans catégorie LIVE (shared) → Visible dans wisetips aussi
  */
 
 class TicketService {
   
   /**
    * Créer un ticket
-   * @param {String} appId - ID de l'application (ou "shared" pour ticket partagé)
+   * @param {String} appId - ID de l'application
    */
   async createTicket(appId, data) {
     const ticket = new Ticket({ ...data, appId });
@@ -27,20 +27,39 @@ class TicketService {
   }
 
   /**
-   * Récupérer les tickets (inclut les tickets partagés)
+   * Récupérer les tickets (filtrés par catégories accessibles)
    * @param {String} appId - ID de l'application
    */
   async getTickets(appId, { offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
-    // ⭐ MODIFIÉ : Inclure les tickets partagés
-    const filter = { appId: { $in: [appId, "shared"] } };
+    // ⭐ ÉTAPE 1 : Récupérer les catégories accessibles (app + shared)
+    const accessibleCategories = await Category.find({
+      appId: { $in: [appId, "shared"] },
+      isActive: true
+    }).select('_id');
     
-    // ⭐ FIX : Vérifier !== null ET !== undefined
+    const categoryIds = accessibleCategories.map(cat => cat._id);
+    
+    // ⭐ ÉTAPE 2 : Filtrer les tickets par ces catégories (peu importe leur appId)
+    const filter = { 
+      category: { $in: categoryIds } // ✅ Filtre par catégories accessibles
+    };
+    
+    // Filtres additionnels
     if (isVisible !== null && isVisible !== undefined) {
       filter.isVisible = isVisible;
     }
     
     if (category) {
-      filter.category = category;
+      // Si une catégorie spécifique est demandée, vérifier qu'elle est accessible
+      if (categoryIds.some(id => id.toString() === category.toString())) {
+        filter.category = category;
+      } else {
+        // Catégorie non accessible, retourner vide
+        return {
+          data: [],
+          pagination: { offset, limit, total: 0, hasNext: false }
+        };
+      }
     }
 
     if (date) {
@@ -75,17 +94,23 @@ class TicketService {
   }
 
   /**
-   * Récupérer un ticket par ID (inclut les tickets partagés)
+   * Récupérer un ticket par ID (si sa catégorie est accessible)
    * @param {String} appId - ID de l'application
    */
   async getTicketById(appId, id) {
-    // ⭐ MODIFIÉ : Inclure les tickets partagés
-    const ticket = await Ticket.findOne({ 
-      _id: id, 
-      appId: { $in: [appId, "shared"] } 
-    }).populate('category');
+    // ⭐ ÉTAPE 1 : Récupérer le ticket
+    const ticket = await Ticket.findOne({ _id: id }).populate('category');
     
     if (!ticket) return null;
+    
+    // ⭐ ÉTAPE 2 : Vérifier que la catégorie est accessible
+    const categoryAccessible = await Category.findOne({
+      _id: ticket.category._id,
+      appId: { $in: [appId, "shared"] },
+      isActive: true
+    });
+    
+    if (!categoryAccessible) return null; // Catégorie non accessible
     
     const predictions = await predictionService.getPredictionsByTicket(appId, id);
     return { ...ticket.toObject(), predictions };
@@ -94,12 +119,12 @@ class TicketService {
   /**
    * Mettre à jour un ticket
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut mettre à jour que les tickets de son app (pas les shared)
+   * ⚠️ NOTE : Ne peut mettre à jour que les tickets de son app
    */
   async updateTicket(appId, id, data) {
-    // ⭐ SÉCURITÉ : On ne modifie QUE les tickets de l'app (pas les shared)
+    // Sécurité : On ne modifie QUE les tickets de l'app
     return await Ticket.findOneAndUpdate(
-      { _id: id, appId }, // Pas de $in ici pour éviter modification des shared
+      { _id: id, appId },
       data, 
       { new: true }
     );
@@ -108,15 +133,13 @@ class TicketService {
   /**
    * Supprimer un ticket
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut supprimer que les tickets de son app (pas les shared)
+   * ⚠️ NOTE : Ne peut supprimer que les tickets de son app
    */
   async deleteTicket(appId, id) {
-    // ⭐ SÉCURITÉ : On ne supprime QUE les tickets de l'app (pas les shared)
-    const ticket = await Ticket.findOne({ _id: id, appId }); // Pas de $in
+    const ticket = await Ticket.findOne({ _id: id, appId });
     if (!ticket) return null;
     
-    // Supprimer les predictions associées (même logique)
-    await Prediction.deleteMany({ ticket: id, appId });
+    await Prediction.deleteMany({ ticket: id });
     await Ticket.findByIdAndDelete(id);
     
     return { deletedTicket: ticket, message: 'Ticket and associated predictions deleted successfully' };
@@ -142,7 +165,6 @@ class TicketService {
   /**
    * Publier un ticket (rendre visible)
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut publier que les tickets de son app (pas les shared)
    */
   async publishTicket(appId, id) {
     return await this.updateTicket(appId, id, { isVisible: true });
@@ -151,7 +173,6 @@ class TicketService {
   /**
    * Masquer un ticket
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut masquer que les tickets de son app (pas les shared)
    */
   async hideTicket(appId, id) {
     return await this.updateTicket(appId, id, { isVisible: false });
@@ -160,23 +181,27 @@ class TicketService {
   /**
    * Fermer un ticket
    * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut fermer que les tickets de son app (pas les shared)
    */
   async closeTicket(appId, id) {
     return await this.updateTicket(appId, id, { status: 'closed' });
   }
 
   /**
-   * Vérifier si un ticket existe (inclut les tickets partagés)
+   * Vérifier si un ticket existe et est accessible
    * @param {String} appId - ID de l'application
    */
   async ticketExists(appId, id) {
-    // ⭐ MODIFIÉ : Inclure les tickets partagés
-    const ticket = await Ticket.findOne({ 
-      _id: id, 
-      appId: { $in: [appId, "shared"] } 
+    const ticket = await Ticket.findOne({ _id: id });
+    if (!ticket) return false;
+    
+    // Vérifier que la catégorie est accessible
+    const categoryAccessible = await Category.findOne({
+      _id: ticket.category,
+      appId: { $in: [appId, "shared"] },
+      isActive: true
     });
-    return !!ticket;
+    
+    return !!categoryAccessible;
   }
 }
 
