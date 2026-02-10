@@ -3,18 +3,18 @@
 const mongoose = require("mongoose");
 
 /**
- * TICKETS PARTAGÉS (Shared Tickets)
+ * TICKETS AVEC CATÉGORIES PARTAGÉES
  * ==================================
  * 
- * Les tickets peuvent être soit spécifiques à une application, soit partagés entre toutes les applications.
+ * Les tickets sont filtrés par catégories accessibles (pas par appId du ticket).
  * 
- * UTILISATION :
- * - appId = "app1", "app2", etc. → Ticket spécifique à une app
- * - appId = "shared" → Ticket partagé visible depuis toutes les apps
+ * LOGIQUE :
+ * - Ticket avec appId = "bigwin" dans catégorie shared → Visible dans toutes les apps
+ * - Ticket avec appId = "bigwin" dans catégorie bigwin → Visible uniquement dans bigwin
  * 
  * NOTIFICATIONS :
- * - Ticket spécifique : Notification envoyée uniquement à son app
- * - Ticket partagé : Notification envoyée à TOUTES les apps actives
+ * - Si la CATÉGORIE est shared → Notification envoyée à TOUTES les apps actives
+ * - Si la CATÉGORIE est spécifique → Notification envoyée uniquement à l'app du ticket
  */
 
 const TicketSchema = new mongoose.Schema({
@@ -83,6 +83,9 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         const Category = mongoose.model('Category');
         const category = await Category.findById(doc.category);
         const categoryName = category ? category.description : 'Catégorie inconnue';
+        
+        // ⭐ NOUVEAU : Vérifier si la CATÉGORIE est shared (pas le ticket)
+        const isCategoryShared = category && category.appId === "shared";
         
         const isLive = categoryName.toUpperCase().includes('LIVE');
         const isDailyCoupon = categoryName.toUpperCase().includes('COUPON DU JOUR') || 
@@ -163,15 +166,15 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
           };
         }
 
-        // ⭐ NOUVEAU : Gestion des tickets partagés
-        if (doc.appId === "shared") {
-          // Ticket partagé → Broadcaster à toutes les apps actives
-          console.log(`📢 [SHARED] Ticket partagé détecté - Broadcasting à toutes les apps`);
+        // ⭐ MODIFIÉ : Broadcaster si la CATÉGORIE est shared (pas le ticket)
+        if (isCategoryShared) {
+          // Catégorie partagée → Broadcaster à toutes les apps actives
+          console.log(`📢 [SHARED CATEGORY] Catégorie "${categoryName}" est partagée - Broadcasting à toutes les apps`);
           
           const App = mongoose.model('App');
           const activeApps = await App.find({ isActive: true }).select('appId');
           
-          console.log(`📊 [SHARED] ${activeApps.length} apps actives trouvées`);
+          console.log(`📊 [SHARED CATEGORY] ${activeApps.length} apps actives trouvées`);
           
           let successCount = 0;
           let errorCount = 0;
@@ -183,7 +186,9 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
               
               console.log(`✅ [${app.appId}] Notification envoyée`, {
                 notificationId: result.id,
-                recipients: result.recipients
+                recipients: result.recipients,
+                ticketAppId: doc.appId,
+                categoryAppId: category.appId
               });
             } catch (error) {
               errorCount++;
@@ -191,19 +196,20 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             }
           }
           
-          console.log(`📊 [SHARED] Résumé: ${successCount} succès, ${errorCount} erreurs`);
+          console.log(`📊 [SHARED CATEGORY] Résumé: ${successCount} succès, ${errorCount} erreurs`);
           
         } else {
-          // Ticket spécifique → Envoi normal à l'app
+          // Catégorie spécifique → Envoi normal à l'app du ticket
           const result = await notificationService.sendToAll(doc.appId, notification);
           
-          console.log(`✅ [${doc.appId}] Notification envoyée avec succès`);
+          console.log(`✅ [${doc.appId}] Notification envoyée avec succès (catégorie spécifique)`);
           console.log("📊 Statistiques:", {
             appId: doc.appId,
             notificationId: result.id,
             recipients: result.recipients,
             type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
-            category: categoryName
+            category: categoryName,
+            categoryAppId: category.appId
           });
         }
         
