@@ -1,4 +1,4 @@
-// controllers/user/packageController.js
+// src/api/controllers/user/packageController.js
 
 const Package = require('../../models/common/Package');
 const subscriptionService = require('../../services/user/subscriptionService');
@@ -6,7 +6,18 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 
 /**
+ * PackageController (User)
+ * ========================
+ * 
+ * GESTION DES PACKAGES PARTAGÉS :
+ * - Les méthodes incluent automatiquement les packages avec appId = "shared"
+ * - Exemple : getAvailablePackages("app1") retourne les packages de app1 + les packages shared
+ * - Les packages partagés sont visibles et souscriptibles depuis toutes les applications
+ */
+
+/**
  * Obtenir tous les packages disponibles (user)
+ * Inclut les packages de l'app + les packages partagés
  */
 exports.getAvailablePackages = catchAsync(async (req, res, next) => {
   const { currency, lang = 'fr' } = req.query;
@@ -14,8 +25,11 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
   
-  // ⭐ Filtrer par appId
-  const packages = await Package.find({ appId, isActive: true })
+  // ⭐ MODIFIÉ : Inclure les packages partagés
+  const packages = await Package.find({ 
+    appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
+    isActive: true 
+  })
     .populate('categories', 'name description isVip')
     .populate('formationId');
 
@@ -55,6 +69,7 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
 
 /**
  * Obtenir un package spécifique
+ * Inclut les packages de l'app + les packages partagés
  */
 exports.getPackage = catchAsync(async (req, res, next) => {
   const { currency, lang = 'fr' } = req.query;
@@ -62,10 +77,10 @@ exports.getPackage = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
   
-  // ⭐ Filtrer par appId
+  // ⭐ MODIFIÉ : Inclure les packages partagés
   const package = await Package.findOne({ 
     _id: req.params.id,
-    appId, // ⭐ AJOUT
+    appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
     isActive: true 
   }).populate('categories', 'name description isVip')
     .populate('formationId');
@@ -109,6 +124,7 @@ exports.getPackage = catchAsync(async (req, res, next) => {
 
 /**
  * Obtenir les packages par catégorie
+ * Inclut les packages de l'app + les packages partagés
  */
 exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   const { categoryId } = req.params;
@@ -117,9 +133,9 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
 
-  // ⭐ Filtrer par appId
+  // ⭐ MODIFIÉ : Inclure les packages partagés
   const packages = await Package.find({ 
-    appId, // ⭐ AJOUT
+    appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
     isActive: true,
     categories: categoryId
   }).populate('categories', 'name description isVip')

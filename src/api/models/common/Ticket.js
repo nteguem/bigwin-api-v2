@@ -2,6 +2,21 @@
 
 const mongoose = require("mongoose");
 
+/**
+ * TICKETS PARTAGÉS (Shared Tickets)
+ * ==================================
+ * 
+ * Les tickets peuvent être soit spécifiques à une application, soit partagés entre toutes les applications.
+ * 
+ * UTILISATION :
+ * - appId = "app1", "app2", etc. → Ticket spécifique à une app
+ * - appId = "shared" → Ticket partagé visible depuis toutes les apps
+ * 
+ * NOTIFICATIONS :
+ * - Ticket spécifique : Notification envoyée uniquement à son app
+ * - Ticket partagé : Notification envoyée à TOUTES les apps actives
+ */
+
 const TicketSchema = new mongoose.Schema({
   appId: {
     type: String,
@@ -148,19 +163,52 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
           };
         }
 
-        const result = await notificationService.sendToAll(doc.appId, notification);
-        
-        console.log(`✅ [${doc.appId}] Notification envoyée avec succès`);
-        console.log("📊 Statistiques:", {
-          appId: doc.appId,
-          notificationId: result.id,
-          recipients: result.recipients,
-          type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
-          category: categoryName
-        });
+        // ⭐ NOUVEAU : Gestion des tickets partagés
+        if (doc.appId === "shared") {
+          // Ticket partagé → Broadcaster à toutes les apps actives
+          console.log(`📢 [SHARED] Ticket partagé détecté - Broadcasting à toutes les apps`);
+          
+          const App = mongoose.model('App');
+          const activeApps = await App.find({ isActive: true }).select('appId');
+          
+          console.log(`📊 [SHARED] ${activeApps.length} apps actives trouvées`);
+          
+          let successCount = 0;
+          let errorCount = 0;
+          
+          for (const app of activeApps) {
+            try {
+              const result = await notificationService.sendToAll(app.appId, notification);
+              successCount++;
+              
+              console.log(`✅ [${app.appId}] Notification envoyée`, {
+                notificationId: result.id,
+                recipients: result.recipients
+              });
+            } catch (error) {
+              errorCount++;
+              console.error(`❌ [${app.appId}] Erreur envoi notification:`, error.message);
+            }
+          }
+          
+          console.log(`📊 [SHARED] Résumé: ${successCount} succès, ${errorCount} erreurs`);
+          
+        } else {
+          // Ticket spécifique → Envoi normal à l'app
+          const result = await notificationService.sendToAll(doc.appId, notification);
+          
+          console.log(`✅ [${doc.appId}] Notification envoyée avec succès`);
+          console.log("📊 Statistiques:", {
+            appId: doc.appId,
+            notificationId: result.id,
+            recipients: result.recipients,
+            type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
+            category: categoryName
+          });
+        }
         
       } catch (error) {
-        console.error(`❌ [${doc.appId}] Erreur envoi notification:`, error.message);
+        console.error(`❌ Erreur globale envoi notification:`, error.message);
         console.error('Détails erreur:', {
           ticketId: doc._id,
           appId: doc.appId,

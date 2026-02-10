@@ -1,16 +1,35 @@
-// services/common/categoryService.js
+// src/api/services/common/categoryService.js
 
 const Category = require('../../models/common/Category');
 
+/**
+ * CategoryService
+ * ===============
+ * 
+ * GESTION DES CATÉGORIES PARTAGÉES :
+ * - Toutes les méthodes incluent automatiquement les catégories avec appId = "shared"
+ * - Exemple : getCategories("app1") retourne les catégories de app1 + les catégories shared
+ * - Les catégories partagées sont visibles dans toutes les applications
+ */
+
 class CategoryService {
   
-  async createCategory(appId, data) { // ⭐ AJOUT appId
-    const category = new Category({ ...data, appId }); // ⭐ AJOUT appId
+  /**
+   * Créer une catégorie
+   * @param {String} appId - ID de l'application (ou "shared" pour catégorie partagée)
+   */
+  async createCategory(appId, data) {
+    const category = new Category({ ...data, appId });
     return await category.save();
   }
 
-  async getCategories(appId, { offset = 0, limit = 10, isVip = null, isActive = null }) { // ⭐ AJOUT appId
-    const filter = { appId }; // ⭐ AJOUT appId
+  /**
+   * Récupérer les catégories (inclut les catégories partagées)
+   * @param {String} appId - ID de l'application
+   */
+  async getCategories(appId, { offset = 0, limit = 10, isVip = null, isActive = null }) {
+    // ⭐ MODIFIÉ : Inclure les catégories partagées
+    const filter = { appId: { $in: [appId, "shared"] } };
     
     if (isActive !== null) {
       filter.isActive = isActive;
@@ -38,28 +57,78 @@ class CategoryService {
     };
   }
 
-  async getCategoryById(appId, id) { // ⭐ AJOUT appId
-    return await Category.findOne({ _id: id, appId }); // ⭐ AJOUT appId
+  /**
+   * Récupérer une catégorie par ID (inclut les catégories partagées)
+   * @param {String} appId - ID de l'application
+   */
+  async getCategoryById(appId, id) {
+    // ⭐ MODIFIÉ : Inclure les catégories partagées
+    return await Category.findOne({ 
+      _id: id, 
+      appId: { $in: [appId, "shared"] } 
+    });
   }
 
-  async getCategoryByName(appId, name) { // ⭐ AJOUT appId
-    return await Category.findOne({ name, appId, isActive: true }); // ⭐ AJOUT appId
+  /**
+   * Récupérer une catégorie par nom (inclut les catégories partagées)
+   * @param {String} appId - ID de l'application
+   */
+  async getCategoryByName(appId, name) {
+    // ⭐ MODIFIÉ : Inclure les catégories partagées
+    return await Category.findOne({ 
+      name, 
+      appId: { $in: [appId, "shared"] },
+      isActive: true 
+    });
   }
 
-  async updateCategory(appId, id, data) { // ⭐ AJOUT appId
-    return await Category.findOneAndUpdate({ _id: id, appId }, data, { new: true }); // ⭐ AJOUT appId
+  /**
+   * Mettre à jour une catégorie
+   * @param {String} appId - ID de l'application
+   * ⚠️ NOTE : Ne peut mettre à jour que les catégories de son app (pas les shared)
+   */
+  async updateCategory(appId, id, data) {
+    // ⭐ SÉCURITÉ : On ne modifie QUE les catégories de l'app (pas les shared)
+    return await Category.findOneAndUpdate(
+      { _id: id, appId }, // Pas de $in ici pour éviter modification des shared
+      data, 
+      { new: true }
+    );
   }
 
-  async deactivateCategory(appId, id) { // ⭐ AJOUT appId
-    return await Category.findOneAndUpdate({ _id: id, appId }, { isActive: false }, { new: true }); // ⭐ AJOUT appId
+  /**
+   * Désactiver une catégorie
+   * @param {String} appId - ID de l'application
+   * ⚠️ NOTE : Ne peut désactiver que les catégories de son app (pas les shared)
+   */
+  async deactivateCategory(appId, id) {
+    // ⭐ SÉCURITÉ : On ne désactive QUE les catégories de l'app (pas les shared)
+    return await Category.findOneAndUpdate(
+      { _id: id, appId }, // Pas de $in ici pour éviter désactivation des shared
+      { isActive: false }, 
+      { new: true }
+    );
   }
 
-  async getCategoriesByType(appId, isVip, { offset = 0, limit = 10 }) { // ⭐ AJOUT appId
-    return await this.getCategories(appId, { offset, limit, isVip, isActive: true }); // ⭐ AJOUT appId
+  /**
+   * Récupérer les catégories par type (inclut les catégories partagées)
+   * @param {String} appId - ID de l'application
+   */
+  async getCategoriesByType(appId, isVip, { offset = 0, limit = 10 }) {
+    return await this.getCategories(appId, { offset, limit, isVip, isActive: true });
   }
 
-  async categoryExists(appId, id) { // ⭐ AJOUT appId
-    const category = await Category.findOne({ _id: id, appId, isActive: true }); // ⭐ AJOUT appId
+  /**
+   * Vérifier si une catégorie existe (inclut les catégories partagées)
+   * @param {String} appId - ID de l'application
+   */
+  async categoryExists(appId, id) {
+    // ⭐ MODIFIÉ : Inclure les catégories partagées
+    const category = await Category.findOne({ 
+      _id: id, 
+      appId: { $in: [appId, "shared"] },
+      isActive: true 
+    });
     return !!category;
   }
 }

@@ -8,16 +8,26 @@ const GooglePlayTransaction = require('../../models/user/GooglePlayTransaction')
 const commissionService = require('../common/commissionService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
+/**
+ * SubscriptionService
+ * ===================
+ * 
+ * GESTION DES CATÉGORIES/PACKAGES PARTAGÉS :
+ * - Les utilisateurs ayant un package contenant une catégorie VIP partagée ont accès aux tickets de cette catégorie dans TOUTES les apps
+ * - Exemple : User de app1 avec package contenant catégorie LIVE (shared) → Accès aux tickets LIVE de app1, app2, app3...
+ * - Les packages peuvent être spécifiques (appId = "app1") ou partagés (appId = "shared")
+ */
+
 class SubscriptionService {
   /**
    * Créer un abonnement pour un utilisateur (Mobile Money)
    * @param {String} appId - ID de l'application
    */
   async createSubscription(appId, userId, packageId, currency, paymentReference = null) {
-    // Vérifier que le package existe et est actif POUR CETTE APP
+    // ⭐ MODIFIÉ : Chercher le package dans l'app OU dans les packages partagés
     const packageNew = await Package.findOne({ 
       _id: packageId, 
-      appId, 
+      appId: { $in: [appId, "shared"] }, // ← Inclure packages shared
       isActive: true 
     });
     
@@ -69,10 +79,10 @@ class SubscriptionService {
    * @param {String} appId - ID de l'application
    */
   async createGooglePlaySubscription(appId, userId, packageId, googleTransactionId, purchaseData) {
-    // Vérifier que le package existe POUR CETTE APP
+    // ⭐ MODIFIÉ : Chercher le package dans l'app OU dans les packages partagés
     const packageNew = await Package.findOne({ 
       _id: packageId, 
-      appId, 
+      appId: { $in: [appId, "shared"] }, // ← Inclure packages shared
       isActive: true 
     });
     
@@ -172,17 +182,18 @@ class SubscriptionService {
   }
 
   /**
-   * Vérifier si un utilisateur a accès à une catégorie
+   * Vérifier si un utilisateur a accès à une catégorie (inclut catégories partagées)
    * @param {String} appId - ID de l'application
    */
   async hasAccessToCategory(appId, userId, categoryId) {
     const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
     
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL avec ses catégories ACTUELLES POUR CETTE APP
+      // ⭐ MODIFIÉ : Ne pas filtrer par appId pour permettre l'accès aux packages/catégories partagés
+      // On récupère le package tel quel (peut être de l'app ou shared)
       const currentPackage = await Package.findOne({ 
-        _id: subscription.package._id, 
-        appId 
+        _id: subscription.package._id
+        // Pas de filtre appId ici - le package peut être de n'importe quelle app ou shared
       });
       
       if (currentPackage && currentPackage.categories.includes(categoryId)) {
@@ -194,7 +205,7 @@ class SubscriptionService {
   }
 
   /**
-   * Vérifier si un utilisateur a accès à au moins une catégorie VIP
+   * Vérifier si un utilisateur a accès à au moins une catégorie VIP (inclut VIP partagées)
    * @param {String} appId - ID de l'application
    */
   async hasAnyVipAccess(appId, userId) {
@@ -208,10 +219,10 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL POUR CETTE APP
+      // ⭐ MODIFIÉ : Ne pas filtrer par appId
       const currentPackage = await Package.findOne({ 
-        _id: subscription.package._id, 
-        appId 
+        _id: subscription.package._id
+        // Pas de filtre appId - le package peut contenir des catégories shared
       });
       
       if (currentPackage) {
@@ -226,9 +237,9 @@ class SubscriptionService {
       return false;
     }
 
-    // Vérifier si au moins une de ces catégories est VIP POUR CETTE APP
+    // ⭐ MODIFIÉ : Vérifier si au moins une catégorie est VIP (app OU shared)
     const vipCategories = await Category.find({
-      appId, // ⭐ AJOUT DE APPID
+      appId: { $in: [appId, "shared"] }, // ← Inclure catégories VIP shared
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
@@ -238,7 +249,7 @@ class SubscriptionService {
   }
 
   /**
-   * Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès
+   * Obtenir toutes les catégories VIP auxquelles l'utilisateur a accès (inclut VIP partagées)
    * @param {String} appId - ID de l'application
    */
   async getUserVipCategories(appId, userId) {
@@ -251,10 +262,10 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
-      // Récupérer le package ACTUEL POUR CETTE APP
+      // ⭐ MODIFIÉ : Ne pas filtrer par appId
       const currentPackage = await Package.findOne({ 
-        _id: subscription.package._id, 
-        appId 
+        _id: subscription.package._id
+        // Pas de filtre appId - le package peut contenir des catégories shared
       });
       
       if (currentPackage) {
@@ -269,9 +280,9 @@ class SubscriptionService {
       return [];
     }
 
-    // Récupérer toutes les catégories VIP POUR CETTE APP
+    // ⭐ MODIFIÉ : Récupérer toutes les catégories VIP (app OU shared)
     return await Category.find({
-      appId, // ⭐ AJOUT DE APPID
+      appId: { $in: [appId, "shared"] }, // ← Inclure catégories VIP shared
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
