@@ -68,6 +68,8 @@ const googlePlayRoutes = require('./user/googlePlayRoutes');
 const googlePlayWebhook = require('./user/googlePlayWebhook');
 const packageRoutes = require('./user/packageRoutes');
 const korapayRoutes = require('./user/korapayRoutes');
+const fedapayRoutes = require('./user/fedapayRoutes');
+
 
 // ===== ROUTES DE PAIEMENT =====
 // ⚠️ CRITIQUE: Routes de paiement AVANT la route générique /user
@@ -76,6 +78,7 @@ router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
 router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
 router.use('/payments/korapay', korapayRoutes);
+router.use('/payments/fedapay', fedapayRoutes);
 
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
