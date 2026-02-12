@@ -5,6 +5,7 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const User = require('../../models/user/User'); // ← Ajout
 
 /**
  * Initier un paiement FedaPay
@@ -36,16 +37,25 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Abonnement actif existant', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
-  const email = req.user.email || '';
+  // ← Récupérer l'user complet depuis la base
+  const fullUser = await User.findById(req.user._id).lean();
+  
+  if (!fullUser) {
+    return next(new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND));
+  }
+
+  console.log('=== USER COMPLET ===');
+  console.log('Email:', fullUser.email);
+  console.log('FirstName:', fullUser.firstName);
+  console.log('LastName:', fullUser.lastName);
+  console.log('Pseudo:', fullUser.pseudo);
 
   const result = await fedapayService.initiatePayment(
     appId,
     currentApp,
     req.user._id,
     packageId,
-    customerName,
-    email
+    fullUser // ← Passer l'user complet
   );
 
   res.status(201).json({
