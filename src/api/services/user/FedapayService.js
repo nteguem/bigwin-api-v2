@@ -56,6 +56,43 @@ function getApiUrl(config) {
 }
 
 /**
+ * Détecter le pays depuis le numéro de téléphone
+ */
+function detectCountryFromPhone(phoneNumber) {
+  const cleanPhone = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+  
+  // Bénin
+  if (cleanPhone.startsWith('229') || cleanPhone.startsWith('+229')) return 'bj';
+  
+  // Togo
+  if (cleanPhone.startsWith('228') || cleanPhone.startsWith('+228')) return 'tg';
+  
+  // Côte d'Ivoire
+  if (cleanPhone.startsWith('225') || cleanPhone.startsWith('+225')) return 'ci';
+  
+  // Sénégal
+  if (cleanPhone.startsWith('221') || cleanPhone.startsWith('+221')) return 'sn';
+  
+  // Mali
+  if (cleanPhone.startsWith('223') || cleanPhone.startsWith('+223')) return 'ml';
+  
+  // Burkina Faso
+  if (cleanPhone.startsWith('226') || cleanPhone.startsWith('+226')) return 'bf';
+  
+  // Niger
+  if (cleanPhone.startsWith('227') || cleanPhone.startsWith('+227')) return 'ne';
+  
+  // Guinée
+  if (cleanPhone.startsWith('224') || cleanPhone.startsWith('+224')) return 'gn';
+  
+  // Guinée-Bissau
+  if (cleanPhone.startsWith('245') || cleanPhone.startsWith('+245')) return 'gw';
+  
+  // Défaut: Bénin
+  return 'bj';
+}
+
+/**
  * Générer les URLs de notification et de retour
  */
 function generateUrls() {
@@ -117,11 +154,11 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       callback_url: return_url,
       customer: {
         firstname: customerName.split(' ')[0] || customerName,
-        lastname: customerName.split(' ')[1] || '',
+        lastname: customerName.split(' ').slice(1).join(' ') || customerName,
         email: email || `user_${userId}@temp.com`,
         phone_number: {
           number: phoneNumber.replace(/[\s\-\(\)\+]/g, ''),
-          country: 'bj'
+          country: detectCountryFromPhone(phoneNumber)
         }
       },
       custom_metadata: {
@@ -142,11 +179,11 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     console.log('[FedaPay] API Response:', response.data);
 
-if (!response.data?.['v1/transaction']?.id) {
-  throw new FedapayError('Réponse API invalide', 400, response.data);
-}
+    if (!response.data?.['v1/transaction']?.id) {
+      throw new FedapayError('Réponse API invalide', 400, response.data);
+    }
 
-const fedapayTransactionId = response.data['v1/transaction'].id;
+    const fedapayTransactionId = response.data['v1/transaction'].id;
 
     // Générer le token de paiement
     const tokenResponse = await axios.post(
@@ -222,7 +259,7 @@ async function checkTransactionStatus(appId, app, transactionId) {
     );
 
     const fedapayData = response.data['v1/transaction'];
-
+    
     transaction.status = fedapayData.status;
     transaction.paymentMethod = fedapayData.mode;
     
@@ -257,5 +294,6 @@ module.exports = {
   getConfig,
   initiatePayment,
   checkTransactionStatus,
+  detectCountryFromPhone,
   FedapayError
 };
