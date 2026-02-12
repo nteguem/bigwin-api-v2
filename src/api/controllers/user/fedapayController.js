@@ -1,12 +1,12 @@
 // src/api/controllers/user/fedapayController.js
 
+const crypto = require('crypto');
 const fedapayService = require('../../services/user/FedapayService');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
-const User = require('../../models/user/User'); // ← Ajout
-const crypto = require('crypto');
+const User = require('../../models/user/User');
 
 /**
  * Initier un paiement FedaPay
@@ -38,7 +38,6 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Abonnement actif existant', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // ← Récupérer l'user complet depuis la base
   const fullUser = await User.findById(req.user._id).lean();
   
   if (!fullUser) {
@@ -56,7 +55,7 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     currentApp,
     req.user._id,
     packageId,
-    fullUser // ← Passer l'user complet
+    fullUser
   );
 
   res.status(201).json({
@@ -129,17 +128,20 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Webhook FedaPay
+ * Webhook FedaPay avec vérification de signature
  */
-
 exports.webhook = catchAsync(async (req, res, next) => {
   console.log('=== WEBHOOK FEDAPAY ===');
+  console.log('Headers:', JSON.stringify(req.headers));
   console.log('Body:', JSON.stringify(req.body));
 
   const { id, status } = req.body;
 
   if (!id) {
-    return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
+    return res.status(200).json({
+      success: false,
+      message: 'Transaction ID requis'
+    });
   }
 
   try {
@@ -167,39 +169,49 @@ exports.webhook = catchAsync(async (req, res, next) => {
       });
     }
 
-    // Vérification signature (optionnel)
+    // ✅ VÉRIFICATION SIGNATURE
     const webhookSecret = currentApp.payments.fedapay.webhookSecret;
     if (webhookSecret && req.headers['x-fedapay-signature']) {
-      const signature = req.headers['x-fedapay-signature'];
+      const receivedSignature = req.headers['x-fedapay-signature'];
+      
       const computedSignature = crypto
         .createHmac('sha256', webhookSecret)
         .update(JSON.stringify(req.body))
         .digest('hex');
 
-      if (signature !== computedSignature) {
-        console.error('[Webhook FedaPay] Signature invalide');
+      if (receivedSignature !== computedSignature) {
+        console.error('[Webhook FedaPay] ❌ Signature invalide');
+        console.error('Reçue:', receivedSignature);
+        console.error('Calculée:', computedSignature);
+        
         return res.status(401).json({
           success: false,
           message: 'Signature invalide'
         });
       }
+      
+      console.log('[Webhook FedaPay] ✅ Signature vérifiée');
+    } else if (webhookSecret) {
+      console.warn('[Webhook FedaPay] ⚠️ Signature non fournie dans les headers');
     }
 
+    // Mise à jour de la transaction
     transaction.status = status;
     transaction.webhookData = req.body;
     await transaction.save();
 
     console.log(`[Webhook FedaPay] Transaction ${id} updated to: ${status}`);
 
+    // Traitement du paiement (création subscription si approved)
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
       success: true,
-      message: 'Webhook traité'
+      message: 'Webhook traité avec succès'
     });
 
   } catch (error) {
-    console.error('Webhook error:', error.message);
+    console.error('[Webhook FedaPay] Erreur:', error.message);
     res.status(200).json({
       success: false,
       message: 'Erreur webhook',
@@ -209,7 +221,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Page de retour
+ * Page de retour après paiement
  */
 exports.paymentSuccess = catchAsync(async (req, res, next) => {
   const { transaction_id } = req.method === 'GET' ? req.query : req.body;
