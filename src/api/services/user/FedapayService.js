@@ -142,11 +142,11 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     console.log('[FedaPay] API Response:', response.data);
 
-    if (!response.data?.v1_transaction?.id) {
-      throw new FedapayError('Réponse API invalide', 400, response.data);
-    }
+if (!response.data?.['v1/transaction']?.id) {
+  throw new FedapayError('Réponse API invalide', 400, response.data);
+}
 
-    const fedapayTransactionId = response.data.v1_transaction.id;
+const fedapayTransactionId = response.data['v1/transaction'].id;
 
     // Générer le token de paiement
     const tokenResponse = await axios.post(
@@ -221,8 +221,8 @@ async function checkTransactionStatus(appId, app, transactionId) {
       }
     );
 
-    const fedapayData = response.data.v1_transaction;
-    
+    const fedapayData = response.data['v1/transaction'];
+
     transaction.status = fedapayData.status;
     transaction.paymentMethod = fedapayData.mode;
     
