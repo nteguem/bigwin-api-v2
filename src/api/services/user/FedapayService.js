@@ -30,7 +30,7 @@ function getConfig(app) {
   };
 }
 
-async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email) {
+async function initiatePayment(appId, app, userId, packageId, customerName, email) {
   try {
     const config = getConfig(app);
     
@@ -43,7 +43,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     const amount = packageDoc.pricing.get(currency);
     
     if (!amount || amount <= 0) {
-      throw new AppError(`Prix non disponible`, 400, ErrorCodes.VALIDATION_ERROR);
+      throw new AppError('Prix non disponible', 400, ErrorCodes.VALIDATION_ERROR);
     }
 
     const transactionId = `FEDA_${Date.now()}_${uuidv4().substring(0, 8)}`;
@@ -55,7 +55,6 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       package: packageId,
       amount,
       currency,
-      phoneNumber,
       customerName,
       customerEmail: email,
       description: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,

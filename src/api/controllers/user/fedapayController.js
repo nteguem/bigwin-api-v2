@@ -10,7 +10,7 @@ const App = require('../../models/common/App');
  * Initier un paiement FedaPay
  */
 exports.initiatePayment = catchAsync(async (req, res, next) => {
-  const { packageId, phoneNumber } = req.body;
+  const { packageId } = req.body;
   const appId = req.appId;
   const currentApp = req.currentApp;
 
@@ -18,8 +18,8 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  if (!packageId || !phoneNumber) {
-    return next(new AppError('packageId et phoneNumber requis', 400, ErrorCodes.VALIDATION_ERROR));
+  if (!packageId) {
+    return next(new AppError('packageId requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   if (!currentApp?.payments?.fedapay?.enabled) {
@@ -44,7 +44,6 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     currentApp,
     req.user._id,
     packageId,
-    phoneNumber,
     customerName,
     email
   );
@@ -58,7 +57,6 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
         amount: result.transaction.amount,
         currency: result.transaction.currency,
         status: result.transaction.status,
-        phoneNumber: result.transaction.phoneNumber,
         customerName: result.transaction.customerName,
         package: result.transaction.package
       },
@@ -126,7 +124,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
   console.log('=== WEBHOOK FEDAPAY ===');
   console.log('Body:', JSON.stringify(req.body));
 
-  const { id, status, custom_metadata } = req.body;
+  const { id, status } = req.body;
 
   if (!id) {
     return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
