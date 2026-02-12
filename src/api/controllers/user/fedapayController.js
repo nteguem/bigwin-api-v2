@@ -6,6 +6,7 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
 const User = require('../../models/user/User'); // ← Ajout
+const crypto = require('crypto');
 
 /**
  * Initier un paiement FedaPay
@@ -130,6 +131,7 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 /**
  * Webhook FedaPay
  */
+
 exports.webhook = catchAsync(async (req, res, next) => {
   console.log('=== WEBHOOK FEDAPAY ===');
   console.log('Body:', JSON.stringify(req.body));
@@ -148,7 +150,10 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
     if (!transaction) {
       console.error(`[Webhook FedaPay] Transaction ${id} non trouvée`);
-      return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
+      return res.status(200).json({
+        success: false,
+        message: 'Transaction non trouvée'
+      });
     }
 
     const appId = transaction.appId;
@@ -156,7 +161,28 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
     if (!currentApp?.payments?.fedapay?.enabled) {
       console.error(`[Webhook FedaPay] FedaPay non activé pour ${appId}`);
-      return next(new AppError('FedaPay non activé', 400, ErrorCodes.VALIDATION_ERROR));
+      return res.status(200).json({
+        success: false,
+        message: 'FedaPay non activé'
+      });
+    }
+
+    // Vérification signature (optionnel)
+    const webhookSecret = currentApp.payments.fedapay.webhookSecret;
+    if (webhookSecret && req.headers['x-fedapay-signature']) {
+      const signature = req.headers['x-fedapay-signature'];
+      const computedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+
+      if (signature !== computedSignature) {
+        console.error('[Webhook FedaPay] Signature invalide');
+        return res.status(401).json({
+          success: false,
+          message: 'Signature invalide'
+        });
+      }
     }
 
     transaction.status = status;
