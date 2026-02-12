@@ -93,6 +93,65 @@ function detectCountryFromPhone(phoneNumber) {
 }
 
 /**
+ * Détecter l'opérateur depuis le numéro de téléphone
+ */
+function detectOperatorFromPhone(phoneNumber) {
+  const cleanPhone = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
+  
+  // Extraire les chiffres après l'indicatif pays
+  let localNumber = cleanPhone;
+  
+  // Niger (+227)
+  if (cleanPhone.startsWith('227') || cleanPhone.startsWith('+227')) {
+    localNumber = cleanPhone.replace(/^\+?227/, '');
+    if (localNumber.startsWith('9')) return 'airtel_ne';
+    if (localNumber.startsWith('8')) return 'moov_ne';
+  }
+  
+  // Bénin (+229)
+  if (cleanPhone.startsWith('229') || cleanPhone.startsWith('+229')) {
+    localNumber = cleanPhone.replace(/^\+?229/, '');
+    if (localNumber.startsWith('9') || localNumber.startsWith('6')) return 'mtn_bj';
+    if (localNumber.startsWith('5') || localNumber.startsWith('4')) return 'moov_bj';
+  }
+  
+  // Togo (+228)
+  if (cleanPhone.startsWith('228') || cleanPhone.startsWith('+228')) {
+    localNumber = cleanPhone.replace(/^\+?228/, '');
+    if (localNumber.startsWith('9')) return 'moov_tg';
+    if (localNumber.startsWith('7')) return 'togocel';
+  }
+  
+  // Côte d'Ivoire (+225)
+  if (cleanPhone.startsWith('225') || cleanPhone.startsWith('+225')) {
+    localNumber = cleanPhone.replace(/^\+?225/, '');
+    if (localNumber.startsWith('05') || localNumber.startsWith('07')) return 'mtn_ci';
+    if (localNumber.startsWith('01') || localNumber.startsWith('02')) return 'moov_ci';
+    if (localNumber.startsWith('07') || localNumber.startsWith('08') || localNumber.startsWith('09')) return 'orange_ci';
+  }
+  
+  // Sénégal (+221)
+  if (cleanPhone.startsWith('221') || cleanPhone.startsWith('+221')) {
+    localNumber = cleanPhone.replace(/^\+?221/, '');
+    if (localNumber.startsWith('77') || localNumber.startsWith('78')) return 'orange_sn';
+    if (localNumber.startsWith('76')) return 'free_sn';
+  }
+  
+  // Guinée (+224)
+  if (cleanPhone.startsWith('224') || cleanPhone.startsWith('+224')) {
+    return 'mtn_gn';
+  }
+  
+  // Mali (+223)
+  if (cleanPhone.startsWith('223') || cleanPhone.startsWith('+223')) {
+    localNumber = cleanPhone.replace(/^\+?223/, '');
+    if (localNumber.startsWith('7') || localNumber.startsWith('9')) return 'orange_ml';
+  }
+  
+  return null; // Pas de détection = laisse l'utilisateur choisir
+}
+
+/**
  * Générer les URLs de notification et de retour
  */
 function generateUrls() {
@@ -147,6 +206,9 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
 
     await fedapayTransaction.save();
 
+    const detectedOperator = detectOperatorFromPhone(phoneNumber);
+    console.log(`[FedaPay] Opérateur détecté: ${detectedOperator || 'aucun'}`);
+
     const paymentData = {
       description: fedapayTransaction.description,
       amount,
@@ -168,6 +230,11 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
         transaction_id: transactionId
       }
     };
+
+    // Ajouter le mode uniquement si détecté
+    if (detectedOperator) {
+      paymentData.mode = detectedOperator;
+    }
 
     const apiUrl = getApiUrl(config);
     const response = await axios.post(`${apiUrl}/transactions`, paymentData, {
@@ -295,5 +362,6 @@ module.exports = {
   initiatePayment,
   checkTransactionStatus,
   detectCountryFromPhone,
+  detectOperatorFromPhone,
   FedapayError
 };
