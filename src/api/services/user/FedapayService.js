@@ -51,7 +51,7 @@ async function initiatePayment(appId, app, userId, packageId, user) {
     // Récupération des informations du user
     const firstName = user.firstName || user.pseudo || 'Client';
     const lastName = user.lastName || 'BigWin';
-    const email = user.email || `user_${userId}@bigwin.app`;
+    const email = user.email ;
     const customerName = `${firstName} ${lastName}`;
 
     const fedapayTransaction = new FedapayTransaction({
