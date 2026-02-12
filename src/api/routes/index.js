@@ -78,8 +78,7 @@ router.use('/payments/cinetpay', identifyAppOptional, cinetpayRoutes);
 router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
 router.use('/payments/korapay', korapayRoutes);
-router.use('/payments/fedapay', fedapayRoutes);
-
+router.use('/payments/fedapay', identifyAppOptional, fedapayRoutes);
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
