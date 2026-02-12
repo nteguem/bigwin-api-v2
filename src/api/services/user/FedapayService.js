@@ -56,40 +56,48 @@ function getApiUrl(config) {
 }
 
 /**
- * Détecter le pays depuis le numéro de téléphone
+ * Détecter l'opérateur depuis le numéro de téléphone
  */
-function detectCountryFromPhone(phoneNumber) {
+function detectOperatorFromPhone(phoneNumber) {
   const cleanPhone = phoneNumber.replace(/[\s\-\(\)\+]/g, '');
   
-  // Bénin
-  if (cleanPhone.startsWith('229') || cleanPhone.startsWith('+229')) return 'bj';
+  // Niger (+227)
+  if (cleanPhone.startsWith('227') || cleanPhone.startsWith('+227')) {
+    if (cleanPhone.includes('9')) return 'airtel_ne'; // Airtel Niger commence par 9
+    if (cleanPhone.includes('8')) return 'moov_ne';   // Moov Niger commence par 8
+  }
   
-  // Togo
-  if (cleanPhone.startsWith('228') || cleanPhone.startsWith('+228')) return 'tg';
+  // Bénin (+229)
+  if (cleanPhone.startsWith('229') || cleanPhone.startsWith('+229')) {
+    if (cleanPhone.includes('9')) return 'mtn_bj';
+    if (cleanPhone.includes('6') || cleanPhone.includes('5')) return 'moov_bj';
+  }
   
-  // Côte d'Ivoire
-  if (cleanPhone.startsWith('225') || cleanPhone.startsWith('+225')) return 'ci';
+  // Togo (+228)
+  if (cleanPhone.startsWith('228') || cleanPhone.startsWith('+228')) {
+    if (cleanPhone.includes('9')) return 'moov_tg';
+    if (cleanPhone.includes('7')) return 'togocel';
+  }
   
-  // Sénégal
-  if (cleanPhone.startsWith('221') || cleanPhone.startsWith('+221')) return 'sn';
+  // Côte d'Ivoire (+225)
+  if (cleanPhone.startsWith('225') || cleanPhone.startsWith('+225')) {
+    if (cleanPhone.includes('0') || cleanPhone.includes('4') || cleanPhone.includes('5')) return 'mtn_ci';
+    if (cleanPhone.includes('0') || cleanPhone.includes('7')) return 'moov_ci';
+    if (cleanPhone.includes('0')) return 'orange_ci';
+  }
   
-  // Mali
-  if (cleanPhone.startsWith('223') || cleanPhone.startsWith('+223')) return 'ml';
+  // Sénégal (+221)
+  if (cleanPhone.startsWith('221') || cleanPhone.startsWith('+221')) {
+    if (cleanPhone.includes('7')) return 'orange_sn';
+    if (cleanPhone.includes('7')) return 'free_sn';
+  }
   
-  // Burkina Faso
-  if (cleanPhone.startsWith('226') || cleanPhone.startsWith('+226')) return 'bf';
+  // Guinée (+224)
+  if (cleanPhone.startsWith('224') || cleanPhone.startsWith('+224')) {
+    return 'mtn_gn';
+  }
   
-  // Niger
-  if (cleanPhone.startsWith('227') || cleanPhone.startsWith('+227')) return 'ne';
-  
-  // Guinée
-  if (cleanPhone.startsWith('224') || cleanPhone.startsWith('+224')) return 'gn';
-  
-  // Guinée-Bissau
-  if (cleanPhone.startsWith('245') || cleanPhone.startsWith('+245')) return 'gw';
-  
-  // Défaut: Bénin
-  return 'bj';
+  return null; // Pas de détection = laisse l'utilisateur choisir
 }
 
 /**
@@ -152,6 +160,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       amount,
       currency: { iso: currency },
       callback_url: return_url,
+      mode: detectOperatorFromPhone(phoneNumber),
       customer: {
         firstname: customerName.split(' ')[0] || customerName,
         lastname: customerName.split(' ').slice(1).join(' ') || customerName,
