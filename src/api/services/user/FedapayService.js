@@ -30,7 +30,7 @@ function getConfig(app) {
   };
 }
 
-async function initiatePayment(appId, app, userId, packageId, customerName, email) {
+async function initiatePayment(appId, app, userId, packageId, user) {
   try {
     const config = getConfig(app);
     
@@ -47,6 +47,12 @@ async function initiatePayment(appId, app, userId, packageId, customerName, emai
     }
 
     const transactionId = `FEDA_${Date.now()}_${uuidv4().substring(0, 8)}`;
+
+    // Récupération des informations du user
+    const firstName = user.firstName || user.pseudo || 'Client';
+    const lastName = user.lastName || 'BigWin';
+    const email = user.email || `user_${userId}@bigwin.app`;
+    const customerName = `${firstName} ${lastName}`;
 
     const fedapayTransaction = new FedapayTransaction({
       appId,
@@ -68,11 +74,14 @@ async function initiatePayment(appId, app, userId, packageId, customerName, emai
       amount,
       currency: { iso: currency },
       customer: {
-        firstname: customerName.split(' ')[0] || customerName,
-        lastname: customerName.split(' ').slice(1).join(' ') || '',
-        email: email || `user_${userId}@temp.com`
+        firstname: firstName,
+        lastname: lastName,
+        email: email
       }
     };
+
+    console.log('=== PAYLOAD ENVOYÉ À FEDAPAY ===');
+    console.log(JSON.stringify(paymentData, null, 2));
 
     const createResponse = await axios.post(`${config.apiUrl}/transactions`, paymentData, {
       headers: {
