@@ -44,9 +44,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
   // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const subscriptionService = require('../../services/user/subscriptionService');
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
-  const hasActivePackage = activeSubscriptions.some(sub => 
-    sub.package._id.toString() === packageId
-  );
+ const hasActivePackage = activeSubscriptions.some(sub => 
+  sub.package && sub.package._id.toString() === packageId
+);
 
   if (hasActivePackage) {
     return next(new AppError(

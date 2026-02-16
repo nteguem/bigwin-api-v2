@@ -20,8 +20,8 @@ exports.purchasePackage = catchAsync(async (req, res, next) => {
   // ⭐ Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
   const hasActivePackage = activeSubscriptions.some(sub => 
-    sub.package._id.toString() === packageId
-  );
+  sub.package && sub.package._id.toString() === packageId
+);
 
   if (hasActivePackage) {
     return next(new AppError('Vous avez déjà un abonnement actif pour ce package', 400, ErrorCodes.VALIDATION_ERROR));

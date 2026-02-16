@@ -30,9 +30,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
 
   const subscriptionService = require('../../services/user/subscriptionService');
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
-  const hasActivePackage = activeSubscriptions.some(sub => 
-    sub.package._id.toString() === packageId
-  );
+const hasActivePackage = activeSubscriptions.some(sub => 
+  sub.package && sub.package._id.toString() === packageId
+);
 
   if (hasActivePackage) {
     return next(new AppError('Abonnement actif existant', 400, ErrorCodes.VALIDATION_ERROR));
