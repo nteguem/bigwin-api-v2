@@ -219,13 +219,15 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber) {
   } catch (error) {
     console.error('[CinetPay] Erreur init:', error.message, error.responseData || '');
     if (error instanceof CinetpayError || error instanceof AppError) throw error;
-    if (error.response) {
-      throw new CinetpayError(
-        error.response.data?.message || error.message,
-        error.response.status,
-        error.response.data
-      );
-    }
+ if (error.response) {
+  console.error('[CinetPay] Reponse erreur:', JSON.stringify(error.response.data));
+  console.error('[CinetPay] Payload envoye:', JSON.stringify(payload || 'payload hors scope'));
+  throw new CinetpayError(
+    error.response.data?.message || error.message,
+    error.response.status,
+    error.response.data
+  );
+}
     throw error;
   }
 }
@@ -270,13 +272,15 @@ async function checkTransactionStatus(appId, app, transactionId) {
   } catch (error) {
     console.error('[CinetPay] Erreur check statut:', error.message);
     if (error instanceof CinetpayError || error instanceof AppError) throw error;
-    if (error.response) {
-      throw new CinetpayError(
-        error.response.data?.message || error.message,
-        error.response.status,
-        error.response.data
-      );
-    }
+ if (error.response) {
+  console.error('[CinetPay] Reponse erreur:', JSON.stringify(error.response.data));
+  console.error('[CinetPay] Payload envoye:', JSON.stringify(payload || 'payload hors scope'));
+  throw new CinetpayError(
+    error.response.data?.message || error.message,
+    error.response.status,
+    error.response.data
+  );
+}
     throw error;
   }
 }
