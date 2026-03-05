@@ -130,7 +130,7 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber) {
     const accessToken = await getAccessToken(config.apiKey, config.apiPassword, config.baseUrl);
 
     // 6. merchant_transaction_id unique (max 30 chars)
-    const merchantTransactionId = `BW_${Date.now()}_${uuidv4().substring(0, 6)}`.substring(0, 30);
+    const merchantTransactionId = `BW-${Date.now()}-${uuidv4().substring(0, 6)}`.substring(0, 30);
 
     // 7. URLs
     const { notify_url, success_url, failed_url } = generateUrls();
