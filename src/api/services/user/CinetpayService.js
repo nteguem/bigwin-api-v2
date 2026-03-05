@@ -6,7 +6,7 @@ const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 // ---------------------------------------------
-//  Erreur personnalisée
+//  Erreur personnalisee
 // ---------------------------------------------
 class CinetpayError extends Error {
   constructor(message, statusCode, responseData) {
@@ -22,14 +22,10 @@ class CinetpayError extends Error {
 // ---------------------------------------------
 const tokenCache = {};
 
-/**
- * Obtenir (ou renouveler) le JWT pour un compte CinetPay
- */
 async function getAccessToken(apiKey, apiPassword, baseUrl) {
   const cached = tokenCache[apiKey];
   const now = Date.now();
 
-  // Réutiliser si encore valide (marge de 5 min)
   if (cached && cached.expiresAt > now + 5 * 60 * 1000) {
     return cached.token;
   }
@@ -47,7 +43,7 @@ async function getAccessToken(apiKey, apiPassword, baseUrl) {
 
   tokenCache[apiKey] = {
     token:     data.access_token,
-    expiresAt: now + data.expires_in * 1000   // expires_in = 86400s
+    expiresAt: now + data.expires_in * 1000
   };
 
   console.log('[CinetPay] Nouveau token JWT obtenu');
@@ -80,12 +76,12 @@ function getConfig(app) {
 function detectCurrencyFromPhone(phoneNumber) {
   const clean = phoneNumber.replace(/[\s\-\(\)]/g, '');
   const xafPrefixes = [
-    '+237', '237',  // Cameroun
-    '+241', '241',  // Gabon
-    '+236', '236',  // RCA
-    '+242', '242',  // Congo-Brazzaville
-    '+235', '235',  // Tchad
-    '+240', '240'   // Guinee Equatoriale
+    '+237', '237',
+    '+241', '241',
+    '+236', '236',
+    '+242', '242',
+    '+235', '235',
+    '+240', '240'
   ];
   return xafPrefixes.some(p => clean.startsWith(p)) ? 'XAF' : 'XOF';
 }
@@ -106,6 +102,8 @@ function generateUrls() {
 //  INITIER UN PAIEMENT
 // ---------------------------------------------
 async function initiatePayment(appId, app, user, packageId, phoneNumber) {
+  let payload = {};
+
   try {
     console.log(`[CinetPay] Init — user=${user._id}, package=${packageId}, phone=${phoneNumber}`);
 
@@ -138,49 +136,52 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber) {
     const { notify_url, success_url, failed_url } = generateUrls();
 
     // 8. Noms client
-    const nameParts    = (user.pseudo || user.name || user.username || 'Utilisateur').split(' ');
-    const firstName    = nameParts[0] || 'Utilisateur';
-    const lastName     = nameParts.slice(1).join(' ') || firstName;
-    const email        = user.email || `user_${user._id}@bigwin.app`;
-    const designation  = `${packageDoc.name?.fr || packageDoc.name} - ${packageDoc.duration}j`;
+    const nameParts   = (user.pseudo || user.name || user.username || 'Utilisateur').split(' ');
+    const firstName   = nameParts[0] || 'Utilisateur';
+    const lastName    = nameParts.slice(1).join(' ') || firstName;
+    const email       = user.email || `user_${user._id}@bigwin.app`;
+    const designation = `${packageDoc.name?.fr || packageDoc.name} - ${packageDoc.duration}j`;
 
     // 9. Sauvegarder en base avant l'appel API
     const transaction = new CinetpayTransaction({
       appId,
-      transactionId:    merchantTransactionId,
-      user:             user._id,
-      package:          packageId,
+      transactionId:     merchantTransactionId,
+      user:              user._id,
+      package:           packageId,
       amount,
       currency,
-      status:           'PENDING',
+      status:            'PENDING',
       phoneNumber,
       customerFirstName: firstName,
       customerLastName:  lastName,
       customerEmail:     email,
       designation,
-      notifyUrl:   notify_url,
-      successUrl:  success_url,
-      failedUrl:   failed_url
+      notifyUrl:         notify_url,
+      successUrl:        success_url,
+      failedUrl:         failed_url
     });
     await transaction.save();
     console.log(`[CinetPay] Transaction sauvegardee: ${merchantTransactionId}`);
 
-    // 10. Appel API CinetPay — POST /v1/payment
-    const payload = {
+    // 10. Payload pour CinetPay
+    payload = {
       currency,
       merchant_transaction_id: merchantTransactionId,
       amount,
-      lang:               'fr',
+      lang:                'fr',
       designation,
-      client_email:       email,
+      client_email:        email,
       client_phone_number: phoneNumber,
-      client_first_name:  firstName,
-      client_last_name:   lastName,
+      client_first_name:   firstName,
+      client_last_name:    lastName,
       success_url,
       failed_url,
       notify_url
     };
 
+    console.log(`[CinetPay] Payload:`, JSON.stringify(payload));
+
+    // 11. Appel API CinetPay — POST /v1/payment
     const response = await axios.post(
       `${config.baseUrl}/v1/payment`,
       payload,
@@ -192,15 +193,19 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber) {
       }
     );
 
-    console.log(`[CinetPay] Reponse init:`, response.data);
+    console.log(`[CinetPay] Reponse init:`, JSON.stringify(response.data));
     const data = response.data;
 
     if (data.code !== 200) {
       await CinetpayTransaction.findByIdAndDelete(transaction._id);
-      throw new CinetpayError(data.message || 'Echec initialisation paiement', 400, data);
+      throw new CinetpayError(
+        data.description || data.message || 'Echec initialisation paiement',
+        400,
+        data
+      );
     }
 
-    // 11. Mettre a jour la transaction avec les tokens CinetPay
+    // 12. Mettre a jour la transaction avec les tokens CinetPay
     transaction.paymentToken          = data.payment_token;
     transaction.cinetpayTransactionId = data.transaction_id;
     transaction.notifyToken           = data.notify_token;
@@ -217,17 +222,16 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber) {
     };
 
   } catch (error) {
-    console.error('[CinetPay] Erreur init:', error.message, error.responseData || '');
+    console.error('[CinetPay] Erreur init:', error.message);
     if (error instanceof CinetpayError || error instanceof AppError) throw error;
- if (error.response) {
-  console.error('[CinetPay] Reponse erreur:', JSON.stringify(error.response.data));
-  console.error('[CinetPay] Payload envoye:', JSON.stringify(payload || 'payload hors scope'));
-  throw new CinetpayError(
-    error.response.data?.message || error.message,
-    error.response.status,
-    error.response.data
-  );
-}
+    if (error.response) {
+      const cinetpayMessage =
+        error.response.data?.description ||
+        error.response.data?.message     ||
+        error.message;
+      console.error('[CinetPay] Reponse erreur CinetPay:', JSON.stringify(error.response.data));
+      throw new CinetpayError(cinetpayMessage, error.response.status, error.response.data);
+    }
     throw error;
   }
 }
@@ -253,10 +257,10 @@ async function checkTransactionStatus(appId, app, transactionId) {
       { headers: { 'Authorization': `Bearer ${accessToken}` } }
     );
 
-    console.log(`[CinetPay] Statut pour ${transactionId}:`, response.data);
+    console.log(`[CinetPay] Statut pour ${transactionId}:`, JSON.stringify(response.data));
     const data = response.data;
 
-    // 4. Mapper le statut de la nouvelle API
+    // 4. Mapper le statut
     const validStatuses = ['PENDING', 'INITIATED', 'SUCCESS', 'FAILED', 'EXPIRED'];
     if (validStatuses.includes(data.status)) {
       transaction.status = data.status;
@@ -272,15 +276,14 @@ async function checkTransactionStatus(appId, app, transactionId) {
   } catch (error) {
     console.error('[CinetPay] Erreur check statut:', error.message);
     if (error instanceof CinetpayError || error instanceof AppError) throw error;
- if (error.response) {
-  console.error('[CinetPay] Reponse erreur:', JSON.stringify(error.response.data));
-  console.error('[CinetPay] Payload envoye:', JSON.stringify(payload || 'payload hors scope'));
-  throw new CinetpayError(
-    error.response.data?.message || error.message,
-    error.response.status,
-    error.response.data
-  );
-}
+    if (error.response) {
+      const cinetpayMessage =
+        error.response.data?.description ||
+        error.response.data?.message     ||
+        error.message;
+      console.error('[CinetPay] Reponse erreur CinetPay:', JSON.stringify(error.response.data));
+      throw new CinetpayError(cinetpayMessage, error.response.status, error.response.data);
+    }
     throw error;
   }
 }
