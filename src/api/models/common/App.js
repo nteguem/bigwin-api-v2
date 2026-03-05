@@ -11,245 +11,188 @@ const appSchema = new mongoose.Schema({
     trim: true,
     match: /^[a-z0-9-]+$/
   },
-  
+
   name: {
     type: String,
     required: true,
     trim: true
   },
-  
+
   displayName: {
-    fr: {
-      type: String,
-      required: true
-    },
-    en: {
-      type: String,
-      required: true
-    }
+    fr: { type: String, required: true },
+    en: { type: String, required: true }
   },
-  
+
   description: {
     fr: String,
     en: String
   },
-  
+
   googlePlay: {
-    packageName: {
-      type: String,
-      sparse: true,
-      unique: true
-    },
+    packageName: { type: String, sparse: true, unique: true },
     serviceAccountKeyPath: String
   },
-  
+
   oneSignal: {
     appId: String,
     restApiKey: String
   },
-  
+
   payments: {
     smobilpay: {
-      apiUrl: String,
-      apiKey: String,
+      apiUrl:    String,
+      apiKey:    String,
       apiSecret: String,
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      enabled:   { type: Boolean, default: false }
     },
+
+    // CinetPay - Nouvelle API v1 (JWT)
     cinetpay: {
-      apiUrl: String,
-      xof: {
-        siteId: String,
-        secretKey: String,
-      },
-      xaf: {
-        siteId: String,
-        secretKey: String,
-      },
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      baseUrl:     { type: String, default: 'https://api.cinetpay.net' },
+      apiKey:      { type: String, trim: true },
+      apiPassword: { type: String, trim: true },
+      enabled:     { type: Boolean, default: false }
     },
+
     afribapay: {
-      apiUrl: String,
-      apiUser: String,
-      apiKey: String,
+      apiUrl:      String,
+      apiUser:     String,
+      apiKey:      String,
       merchantKey: String,
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      enabled:     { type: Boolean, default: false }
     },
+
     dpopay: {
       companyToken: String,
-      serviceType: String,
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      serviceType:  String,
+      enabled:      { type: Boolean, default: false }
     },
+
     flutterwave: {
-      apiUrl: String,
-      publicKey: String,
-      secretKey: String,
+      apiUrl:        String,
+      publicKey:     String,
+      secretKey:     String,
       encryptionKey: String,
-      webhookHash: String,
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      webhookHash:   String,
+      enabled:       { type: Boolean, default: false }
     },
-    // ⭐ NOUVEAU : Configuration KoraPay
+
     korapay: {
-      apiUrl: {
-        type: String,
-        default: 'https://api.korapay.com/merchant'
-      },
-      publicKey: {
-        type: String,
-        trim: true
-      },
-      secretKey: {
-        type: String,
-        trim: true
-      },
-      encryptionKey: {
-        type: String,
-        trim: true
-      },
-      enabled: {
-        type: Boolean,
-        default: false
-      }
+      apiUrl:        { type: String, default: 'https://api.korapay.com/merchant' },
+      publicKey:     { type: String, trim: true },
+      secretKey:     { type: String, trim: true },
+      encryptionKey: { type: String, trim: true },
+      enabled:       { type: Boolean, default: false }
+    },
+
+    fedapay: {
+      environment:   String,
+      publicKey:     String,
+      secretKey:     String,
+      apiUrl:        String,
+      sandboxApiUrl: String,
+      webhookSecret: String,
+      enabled:       { type: Boolean, default: false }
     }
   },
-  
+
   googleAuth: {
-    clientId: {
-      type: String,
-      default: null,
-      trim: true,
-      comment: 'Google OAuth Client ID (Web ou Android) pour cette app'
-    },
-    webClientId: {
-      type: String,
-      default: null,
-      trim: true,
-      comment: 'Google Web Client ID (souvent partagé entre apps)'
-    },
-    enabled: {
-      type: Boolean,
-      default: false,
-      comment: 'Activer/désactiver Google Sign-In pour cette app'
-    }
+    clientId:    { type: String, default: null, trim: true },
+    webClientId: { type: String, default: null, trim: true },
+    enabled:     { type: Boolean, default: false }
   },
-  
+
   branding: {
     primaryColor: String,
-    logo: String,
-    icon: String
+    logo:         String,
+    icon:         String
   },
-  
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
+
+  isActive:  { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
 });
 
 // Indexes
 appSchema.index({ isActive: 1 });
 
 // Methods
-appSchema.methods.getGooglePlayConfig = function() {
+appSchema.methods.getGooglePlayConfig = function () {
   return {
-    packageName: this.googlePlay?.packageName,
+    packageName:           this.googlePlay?.packageName,
     serviceAccountKeyPath: this.googlePlay?.serviceAccountKeyPath
   };
 };
 
-appSchema.methods.getOneSignalConfig = function() {
+appSchema.methods.getOneSignalConfig = function () {
   return {
-    appId: this.oneSignal?.appId,
+    appId:      this.oneSignal?.appId,
     restApiKey: this.oneSignal?.restApiKey
   };
 };
 
-appSchema.methods.getPaymentConfig = function(provider) {
+appSchema.methods.getPaymentConfig = function (provider) {
   return this.payments?.[provider] || null;
 };
 
-appSchema.methods.getGoogleAuthConfig = function() {
+appSchema.methods.getGoogleAuthConfig = function () {
   return {
-    clientId: this.googleAuth?.clientId,
+    clientId:    this.googleAuth?.clientId,
     webClientId: this.googleAuth?.webClientId,
-    enabled: this.googleAuth?.enabled || false
+    enabled:     this.googleAuth?.enabled || false
   };
 };
 
-// ⭐ NOUVEAU : Méthode pour récupérer la config KoraPay
-appSchema.methods.getKorapayConfig = function() {
+appSchema.methods.getKorapayConfig = function () {
   return {
-    apiUrl: this.payments?.korapay?.apiUrl || 'https://api.korapay.com/merchant',
-    publicKey: this.payments?.korapay?.publicKey,
-    secretKey: this.payments?.korapay?.secretKey,
+    apiUrl:        this.payments?.korapay?.apiUrl || 'https://api.korapay.com/merchant',
+    publicKey:     this.payments?.korapay?.publicKey,
+    secretKey:     this.payments?.korapay?.secretKey,
     encryptionKey: this.payments?.korapay?.encryptionKey,
-    enabled: this.payments?.korapay?.enabled || false
+    enabled:       this.payments?.korapay?.enabled || false
   };
 };
 
-appSchema.methods.toJSON = function() {
+appSchema.methods.getCinetpayConfig = function () {
+  const c = this.payments?.cinetpay;
+  return {
+    enabled:     c?.enabled || false,
+    baseUrl:     c?.baseUrl || 'https://api.cinetpay.net',
+    apiKey:      c?.apiKey,
+    apiPassword: c?.apiPassword
+  };
+};
+
+// toJSON - masquer les champs sensibles
+appSchema.methods.toJSON = function () {
   const app = this.toObject();
-  
-  if (app.googlePlay) {
-    delete app.googlePlay.serviceAccountKeyPath;
-  }
-  if (app.oneSignal) {
-    delete app.oneSignal.restApiKey;
-  }
+
+  if (app.googlePlay) delete app.googlePlay.serviceAccountKeyPath;
+  if (app.oneSignal)  delete app.oneSignal.restApiKey;
+
   if (app.payments) {
     Object.keys(app.payments).forEach(provider => {
       if (app.payments[provider]) {
-        delete app.payments[provider].apiKey;
-        delete app.payments[provider].apiSecret;
-        delete app.payments[provider].secretKey;
-        delete app.payments[provider].merchantKey;
-        delete app.payments[provider].companyToken;
-        // ⭐ NOUVEAU : Masquer les clés sensibles KoraPay
-        if (provider === 'korapay') {
-          delete app.payments[provider].secretKey;
-          delete app.payments[provider].encryptionKey;
-        }
+        ['apiKey', 'apiSecret', 'apiPassword', 'secretKey',
+         'merchantKey', 'companyToken', 'encryptionKey',
+         'webhookHash', 'webhookSecret'].forEach(field => {
+          delete app.payments[provider][field];
+        });
       }
     });
   }
-  
-  // Les Client IDs Google ne sont pas sensibles (publics dans les apps)
-  // Donc pas besoin de les masquer
-  
+
   delete app.__v;
   return app;
 };
 
 // Hooks
-appSchema.pre('save', function(next) {
+appSchema.pre('save', function (next) {
   this.updatedAt = new Date();
   next();
 });
 
-appSchema.pre('findOneAndUpdate', function(next) {
+appSchema.pre('findOneAndUpdate', function (next) {
   this.set({ updatedAt: new Date() });
   next();
 });

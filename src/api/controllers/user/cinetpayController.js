@@ -4,130 +4,85 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
 
-/**
- * Initier un paiement CinetPay
- */
+// ---------------------------------------------
+//  INITIER UN PAIEMENT
+// ---------------------------------------------
 exports.initiatePayment = catchAsync(async (req, res, next) => {
   const { packageId, phoneNumber } = req.body;
+  const { appId, currentApp } = req;
 
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  // Vérifier que appId est présent (obligatoire pour initier un paiement)
   if (!appId || !currentApp) {
-    return next(new AppError(
-      'Header X-App-Id requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-
-  // Validation
   if (!packageId || !phoneNumber) {
-    return next(new AppError(
-      'packageId et phoneNumber sont requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+    return next(new AppError('packageId et phoneNumber sont requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-
-  // Vérifier que CinetPay est activé pour cette app
   if (!currentApp?.payments?.cinetpay?.enabled) {
-    return next(new AppError(
-      'CinetPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+    return next(new AppError('CinetPay non active pour cette application', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // Vérifier si l'utilisateur a déjà un abonnement actif pour ce package DANS CETTE APP
+  // Verifier abonnement actif
   const subscriptionService = require('../../services/user/subscriptionService');
-  const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
- const hasActivePackage = activeSubscriptions.some(sub => 
-  sub.package && sub.package._id.toString() === packageId
-);
-
-  if (hasActivePackage) {
-    return next(new AppError(
-      'Vous avez déjà un abonnement actif pour ce package',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+  const activeSubs = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
+  const hasActive  = activeSubs.some(sub => sub.package?._id.toString() === packageId);
+  if (hasActive) {
+    return next(new AppError('Vous avez deja un abonnement actif pour ce package', 400, ErrorCodes.VALIDATION_ERROR));
   }
-
-  // Récupérer automatiquement les données utilisateur
-  const customerName = req.user.pseudo || req.user.name || req.user.username || 'Utilisateur';
-  const email = req.user.email || '';
 
   const result = await cinetpayService.initiatePayment(
     appId,
     currentApp,
-    req.user._id,
+    req.user,
     packageId,
-    phoneNumber,
-    customerName,
-    email
+    phoneNumber
   );
 
   res.status(201).json({
     success: true,
-    message: 'Paiement initié avec succès',
+    message: 'Paiement initie avec succes',
     data: {
       transaction: {
         transactionId: result.transaction.transactionId,
-        amount: result.transaction.amount,
-        currency: result.transaction.currency,
-        status: result.transaction.status,
-        phoneNumber: result.transaction.phoneNumber,
-        customerName: result.transaction.customerName,
-        package: result.transaction.package
+        amount:        result.transaction.amount,
+        currency:      result.transaction.currency,
+        status:        result.transaction.status,
+        phoneNumber:   result.transaction.phoneNumber,
+        package:       result.transaction.package
       },
       paymentUrl: result.paymentUrl
     }
   });
 });
 
-/**
- * Vérifier le statut d'un paiement
- */
+// ---------------------------------------------
+//  VERIFIER LE STATUT
+// ---------------------------------------------
 exports.checkStatus = catchAsync(async (req, res, next) => {
   const { transactionId } = req.params;
+  const { appId, currentApp } = req;
 
-  const appId = req.appId;
-  const currentApp = req.currentApp;
-
-  // Vérifier que appId est présent
   if (!appId || !currentApp) {
-    return next(new AppError(
-      'Header X-App-Id requis',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-
-  // Vérifier que CinetPay est activé pour cette app
   if (!currentApp?.payments?.cinetpay?.enabled) {
-    return next(new AppError(
-      'CinetPay n\'est pas activé pour cette application',
-      400,
-      ErrorCodes.VALIDATION_ERROR
-    ));
+    return next(new AppError('CinetPay non active pour cette application', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
   const transaction = await cinetpayService.checkTransactionStatus(appId, currentApp, transactionId);
 
-  // Vérifier que la transaction appartient à l'utilisateur
+  // Verifier que la transaction appartient a l'utilisateur
   if (transaction.user._id.toString() !== req.user._id.toString()) {
-    return next(new AppError('Transaction non autorisée', 403, ErrorCodes.UNAUTHORIZED));
+    return next(new AppError('Transaction non autorisee', 403, ErrorCodes.UNAUTHORIZED));
   }
 
-  // Traiter la transaction si le statut a changé
+  // Activer l'abonnement si SUCCESS
   let subscription = null;
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
-  } catch (error) {
-    console.error('Error processing transaction update:', error.message);
+  } catch (err) {
+    console.error('[CinetPay] Erreur processTransactionUpdate:', err.message);
   }
 
   res.status(200).json({
@@ -135,363 +90,228 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
     data: {
       transaction: {
         transactionId: transaction.transactionId,
-        status: transaction.status,
-        amount: transaction.amount,
-        currency: transaction.currency,
+        status:        transaction.status,
+        amount:        transaction.amount,
+        currency:      transaction.currency,
         paymentMethod: transaction.paymentMethod,
-        processed: transaction.processed,
-        createdAt: transaction.createdAt,
-        package: transaction.package
+        processed:     transaction.processed,
+        createdAt:     transaction.createdAt,
+        package:       transaction.package
       },
       subscription: subscription ? {
-        id: subscription._id,
+        id:        subscription._id,
         startDate: subscription.startDate,
-        endDate: subscription.endDate,
-        status: subscription.status
+        endDate:   subscription.endDate,
+        status:    subscription.status
       } : null
     }
   });
 });
 
-/**
- * Webhook CinetPay
- */
+// ---------------------------------------------
+//  WEBHOOK (notify_url)
+// ---------------------------------------------
 exports.webhook = catchAsync(async (req, res, next) => {
-  const receivedToken = req.headers['x-token'];
-  const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
-
-  console.log('=== WEBHOOK CINETPAY REÇU ===');
+  console.log('=== WEBHOOK CINETPAY RECU ===');
   console.log('Body:', JSON.stringify(req.body));
 
-  if (!transactionId) {
-    return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
+  const { notify_token, merchant_transaction_id } = req.body;
+
+  if (!notify_token || !merchant_transaction_id) {
+    console.error('[Webhook] Champs manquants:', req.body);
+    return res.status(200).json({ success: false, message: 'Champs manquants' });
   }
 
   try {
-    const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
-    
-    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
-    const transaction = await CinetpayTransaction.findOne({ transactionId })
+    // 1. Trouver la transaction
+    const transaction = await CinetpayTransaction.findOne({ transactionId: merchant_transaction_id })
       .populate(['package', 'user']);
 
     if (!transaction) {
-      console.error(`[Webhook CinetPay] Transaction ${transactionId} non trouvée`);
-      return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
+      console.error(`[Webhook] Transaction ${merchant_transaction_id} non trouvee`);
+      return res.status(200).json({ success: false, message: 'Transaction non trouvee' });
     }
 
-    // Récupérer l'appId depuis la transaction
-    const appId = transaction.appId;
-    console.log(`[Webhook CinetPay] AppId récupéré depuis transaction: ${appId}`);
+    // 2. Valider le notify_token (securite anti-fraude)
+    if (transaction.notifyToken !== notify_token) {
+      console.error(`[Webhook] notify_token invalide pour ${merchant_transaction_id}`);
+      return res.status(200).json({ success: false, message: 'Token invalide' });
+    }
 
-    // Récupérer l'app depuis la base de données
-    const currentApp = await App.findOne({ appId, isActive: true }).lean();
+    // 3. Eviter le double traitement
+    if (transaction.processed) {
+      console.log(`[Webhook] ${merchant_transaction_id} deja traite`);
+      return res.status(200).json({ success: true, message: 'Deja traite' });
+    }
 
+    // 4. Recuperer l'app
+    const currentApp = await App.findOne({ appId: transaction.appId, isActive: true }).lean();
     if (!currentApp) {
-      console.error(`[Webhook CinetPay] App ${appId} non trouvée`);
-      return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
+      console.error(`[Webhook] App ${transaction.appId} non trouvee`);
+      return res.status(200).json({ success: false, message: 'App non trouvee' });
     }
 
-    // Vérifier que CinetPay est activé pour cette app
-    if (!currentApp?.payments?.cinetpay?.enabled) {
-      console.error(`[Webhook CinetPay] CinetPay non activé pour app ${appId}`);
-      return next(new AppError(
-        'CinetPay n\'est pas activé pour cette application',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      ));
+    // 5. Verifier le statut final via l'API (ne jamais faire confiance au webhook seul)
+    const updatedTransaction = await cinetpayService.checkTransactionStatus(
+      transaction.appId,
+      currentApp,
+      transaction.transactionId
+    );
+
+    console.log(`[Webhook] Statut final: ${updatedTransaction.status}`);
+
+    // 6. Activer l'abonnement si SUCCESS
+    if (updatedTransaction.status === 'SUCCESS') {
+      await paymentMiddleware.processTransactionUpdate(transaction.appId, updatedTransaction);
     }
 
-    // Mettre à jour la transaction avec les données webhook
-    transaction.cpmTransDate = req.body.cpm_trans_date;
-    transaction.cpmErrorMessage = cpm_error_message;
-    transaction.paymentMethod = req.body.payment_method;
-    transaction.cpmPhonePrefix = req.body.cpm_phone_prefixe;
-    transaction.cpmLanguage = req.body.cpm_language;
-    transaction.cpmVersion = req.body.cpm_version;
-    transaction.cmpPaymentConfig = req.body.cpm_payment_config;
-    transaction.cmpPageAction = req.body.cpm_page_action;
-    transaction.cmpCustom = req.body.cpm_custom;
-    transaction.cmpDesignation = req.body.cpm_designation;
-    transaction.webhookSignature = req.body.signature;
-
-    // Déterminer le statut
-    if (cpm_error_message === 'SUCCES') {
-      transaction.status = 'ACCEPTED';
-    } else if (cpm_error_message === 'PAYMENT_FAILED') {
-      transaction.status = 'REFUSED';
-    } else if (cpm_error_message === 'TRANSACTION_CANCEL') {
-      transaction.status = 'CANCELED';
-    } else {
-      transaction.status = 'REFUSED';
-    }
-
-    await transaction.save();
-    console.log(`[Webhook CinetPay] Transaction ${transactionId} updated to status: ${transaction.status}`);
-
-    await paymentMiddleware.processTransactionUpdate(appId, transaction);
-
-    res.status(200).json({
-      success: true,
-      message: 'Webhook traité avec succès'
-    });
+    return res.status(200).json({ success: true, message: 'Webhook traite' });
 
   } catch (error) {
-    console.error('Webhook processing error:', error.message);
-    console.error('Error stack:', error.stack);
-    
-    res.status(200).json({
-      success: false,
-      message: 'Erreur lors du traitement du webhook',
-      error: error.message
-    });
+    console.error('[Webhook] Erreur:', error.message);
+    // Toujours repondre 200 a CinetPay pour eviter les relances infinies
+    return res.status(200).json({ success: false, message: error.message });
   }
 });
 
-/**
- * Page de retour après paiement (return_url)
- */
+// ---------------------------------------------
+//  PAGE RETOUR SUCCESS (success_url)
+// ---------------------------------------------
 exports.paymentSuccess = catchAsync(async (req, res, next) => {
-  const { token, transaction_id } = req.method === 'GET' ? req.query : req.body;
+  const { transaction_id } = req.method === 'GET' ? req.query : req.body;
 
   if (!transaction_id) {
-    const errorContent = `
+    return res.status(400).send(renderPage('Erreur', `
       <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Paramètres de transaction manquants.</p>
-      <p>Veuillez réessayer ou contacter le support.</p>
-    `;
-    return res.status(400).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+      <h1 class="error">Parametres manquants</h1>
+      <p>Veuillez reessayer ou contacter le support.</p>
+    `));
   }
 
-  // Récupérer la transaction pour obtenir l'appId
-  const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
-  const transactionForApp = await CinetpayTransaction.findOne({ transactionId: transaction_id });
-
-  if (!transactionForApp) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Transaction non trouvée.</p>
-    `;
-    return res.status(404).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+  const transactionDoc = await CinetpayTransaction.findOne({ transactionId: transaction_id });
+  if (!transactionDoc) {
+    return res.status(404).send(renderPage('Erreur', `
+      <div class="icon">❌</div><h1 class="error">Transaction introuvable</h1>
+    `));
   }
 
-  const appId = transactionForApp.appId;
-
-  // Récupérer l'app depuis la base de données
-  const currentApp = await App.findOne({ appId, isActive: true }).lean();
-
+  const currentApp = await App.findOne({ appId: transactionDoc.appId, isActive: true }).lean();
   if (!currentApp) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>Application non trouvée.</p>
-    `;
-    return res.status(404).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
+    return res.status(404).send(renderPage('Erreur', `
+      <div class="icon">❌</div><h1 class="error">Application introuvable</h1>
+    `));
   }
 
-  // Vérifier que CinetPay est activé pour cette app
-  if (!currentApp?.payments?.cinetpay?.enabled) {
-    const errorContent = `
-      <div class="icon">❌</div>
-      <h1 class="error">Erreur</h1>
-      <p>CinetPay n'est pas activé pour cette application.</p>
-    `;
-    return res.status(400).send(getHtmlTemplate('CinetPay - Erreur', errorContent));
-  }
-
-  let transactionStatus;
-  let errorOccurred = false;
-
+  let tx;
   try {
-    transactionStatus = await cinetpayService.checkTransactionStatus(appId, currentApp, transaction_id);
-    
-    await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
-  } catch (error) {
-    console.error('CinetPay - Erreur lors de la vérification:', error.message);
-    errorOccurred = true;
+    tx = await cinetpayService.checkTransactionStatus(transactionDoc.appId, currentApp, transaction_id);
+    await paymentMiddleware.processTransactionUpdate(transactionDoc.appId, tx);
+  } catch (err) {
+    console.error('[Success] Erreur verification:', err.message);
   }
 
-  // Générer le contenu HTML selon le statut
+  const status = tx?.status || transactionDoc.status;
   let content;
 
-  if (errorOccurred) {
-    content = `
-      <div class="icon">⏳</div>
-      <h1 class="warning">Vérification en cours</h1>
-      <p>Nous vérifions le statut de votre paiement...</p>
-      <p>Vous recevrez une notification dès que le traitement sera terminé.</p>
-      <div class="transaction-id">${transaction_id}</div>
-    `;
-  } else if (transactionStatus.status === 'ACCEPTED') {
+  if (status === 'SUCCESS') {
     content = `
       <div class="icon">🎉</div>
-      <h1 class="success">Paiement Réussi !</h1>
-      <div class="status-badge status-success">✅ Confirmé</div>
-      <p>Votre abonnement <strong>${transactionStatus.package.name}</strong> a été activé avec succès.</p>
-      
+      <h1 class="success">Paiement Reussi !</h1>
+      <div class="badge badge-success">✅ Confirme</div>
+      <p>Votre abonnement <strong>${tx?.package?.name?.fr || ''}</strong> est maintenant actif.</p>
       <div class="details">
-        <p><strong>Transaction:</strong> <span class="transaction-id">${transaction_id}</span></p>
-        <p><strong>Montant:</strong> <span class="amount">${transactionStatus.amount} ${transactionStatus.currency}</span></p>
-        <p><strong>Méthode:</strong> ${transactionStatus.paymentMethod || 'CinetPay'}</p>
-        <p><strong>Durée:</strong> ${transactionStatus.package.duration} jours</p>
+        <p><strong>Transaction:</strong> <span class="txid">${transaction_id}</span></p>
+        <p><strong>Montant:</strong> <span class="amount">${tx?.amount} ${tx?.currency}</span></p>
       </div>
-      
-      <p>✅ Notification de confirmation envoyée</p>
-      <p>✅ Accès premium maintenant actif</p>
+      <p>Vous pouvez retourner sur l'application.</p>
     `;
-  } else if (transactionStatus.status === 'REFUSED' || transactionStatus.status === 'CANCELED') {
-    let failureReason = 'Paiement refusé';
-    if (transactionStatus.errorCode === '600') {
-      failureReason = 'Fonds insuffisants';
-    } else if (transactionStatus.errorCode === '627') {
-      failureReason = 'Transaction annulée';
-    }
-    
+  } else if (status === 'FAILED') {
     content = `
       <div class="icon">❌</div>
-      <h1 class="error">Paiement Échoué</h1>
-      <div class="status-badge status-error">❌ Refusé</div>
-      <p><strong>${failureReason}</strong></p>
-      <div class="transaction-id">${transaction_id}</div>
-      <p>Veuillez réessayer ou contacter le support.</p>
-    `;
-  } else if (transactionStatus.status === 'WAITING_FOR_CUSTOMER') {
-    content = `
-      <div class="icon">📱</div>
-      <h1 class="warning">Confirmation Requise</h1>
-      <div class="status-badge status-warning">⏳ En attente</div>
-      <p>Votre demande de paiement a été envoyée.</p>
-      
-      <div class="highlight">
-        <p><strong>📲 Vérifiez votre téléphone</strong></p>
-        <p>Notification envoyée au <strong>${transactionStatus.phoneNumber}</strong></p>
-        <p>Composez votre code PIN pour confirmer.</p>
-      </div>
-      
-      <p>Vous recevrez une notification de confirmation.</p>
+      <h1 class="error">Paiement Echoue</h1>
+      <div class="badge badge-error">❌ Refuse</div>
+      <p>Votre paiement n'a pas pu etre traite.</p>
+      <div class="txid">${transaction_id}</div>
+      <p>Veuillez reessayer ou contacter le support.</p>
     `;
   } else {
     content = `
       <div class="icon">⏳</div>
       <h1 class="pending">Paiement En Attente</h1>
-      <div class="status-badge status-pending">⏳ En cours</div>
+      <div class="badge badge-pending">⏳ En cours</div>
       <p>Votre paiement est en cours de traitement.</p>
-      <div class="transaction-id">${transaction_id}</div>
-      <p>Veuillez patienter quelques instants.</p>
+      <div class="txid">${transaction_id}</div>
+      <p>Vous recevrez une notification des confirmation.</p>
     `;
   }
 
-  return res.send(getHtmlTemplate(`CinetPay - ${transactionStatus?.status || 'Statut'}`, content));
+  return res.send(renderPage(`CinetPay - ${status}`, content));
 });
 
-// CSS et HTML template helpers
-const getMobileOptimizedCSS = () => `
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      line-height: 1.6;
-    }
-    .container {
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-      width: 100%;
-      max-width: 400px;
-      padding: 24px;
-      text-align: center;
-      animation: slideUp 0.3s ease-out;
-    }
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    h1 { font-size: 1.5rem; margin-bottom: 16px; font-weight: 600; }
-    p { font-size: 0.95rem; color: #666; margin-bottom: 12px; }
-    .success { color: #10b981; }
-    .error { color: #ef4444; }
-    .warning { color: #f59e0b; }
-    .pending { color: #6366f1; }
-    .details {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 16px;
-      margin: 20px 0;
-      text-align: left;
-    }
-    .details p { margin-bottom: 8px; font-size: 0.9rem; color: #374151; }
-    .details p:last-child { margin-bottom: 0; }
-    .highlight {
-      background: #fef3c7;
-      border: 1px solid #fbbf24;
-      border-radius: 12px;
-      padding: 16px;
-      margin: 20px 0;
-      border-left: 4px solid #f59e0b;
-    }
-    .highlight p { color: #92400e; font-size: 0.9rem; }
-    .icon { font-size: 2rem; margin-bottom: 12px; }
-    .transaction-id {
-      font-family: 'Courier New', monospace;
-      background: #f1f5f9;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      color: #475569;
-      display: inline-block;
-      margin: 8px 0;
-    }
-    .amount { font-size: 1.1rem; font-weight: 600; color: #1f2937; }
-    .status-badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      margin: 8px 0;
-    }
-    .status-success { background: #d1fae5; color: #065f46; }
-    .status-error { background: #fee2e2; color: #991b1b; }
-    .status-warning { background: #fef3c7; color: #92400e; }
-    .status-pending { background: #e0e7ff; color: #3730a3; }
-    @media (max-width: 480px) {
-      .container { padding: 20px; margin: 12px; border-radius: 12px; }
-      h1 { font-size: 1.3rem; }
-      p { font-size: 0.9rem; }
-      .details, .highlight { padding: 14px; }
-    }
-  </style>
-`;
+// ---------------------------------------------
+//  PAGE RETOUR FAILED (failed_url)
+// ---------------------------------------------
+exports.paymentFailed = catchAsync(async (req, res, next) => {
+  const { transaction_id } = req.method === 'GET' ? req.query : req.body;
 
-const getHtmlTemplate = (title, content) => `
-  <!DOCTYPE html>
-  <html lang="fr">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#667eea">
-    <title>${title}</title>
-    ${getMobileOptimizedCSS()}
-  </head>
-  <body>
-    <div class="container">
-      ${content}
-    </div>
-  </body>
-  </html>
-`;
+  return res.send(renderPage('CinetPay - Echec', `
+    <div class="icon">❌</div>
+    <h1 class="error">Paiement Echoue</h1>
+    <div class="badge badge-error">❌ Refuse</div>
+    <p>Votre paiement n'a pas abouti.</p>
+    ${transaction_id ? `<div class="txid">${transaction_id}</div>` : ''}
+    <p>Veuillez reessayer ou contacter le support.</p>
+  `));
+});
+
+// ---------------------------------------------
+//  HTML helper
+// ---------------------------------------------
+function renderPage(title, content) {
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+      background:linear-gradient(135deg,#667eea,#764ba2);
+      min-height:100vh;display:flex;align-items:center;
+      justify-content:center;padding:16px}
+    .container{background:#fff;border-radius:16px;
+      box-shadow:0 8px 32px rgba(0,0,0,.15);
+      width:100%;max-width:400px;padding:24px;text-align:center}
+    h1{font-size:1.5rem;margin-bottom:16px;font-weight:600}
+    p{font-size:.95rem;color:#666;margin-bottom:12px}
+    .success{color:#10b981}.error{color:#ef4444}
+    .pending{color:#6366f1}
+    .details{background:#f8fafc;border:1px solid #e2e8f0;
+      border-radius:12px;padding:16px;margin:20px 0;text-align:left}
+    .details p{margin-bottom:8px;font-size:.9rem;color:#374151}
+    .icon{font-size:2rem;margin-bottom:12px}
+    .txid{font-family:monospace;background:#f1f5f9;
+      padding:6px 12px;border-radius:6px;font-size:.85rem;
+      color:#475569;display:inline-block;margin:8px 0}
+    .amount{font-size:1.1rem;font-weight:600;color:#1f2937}
+    .badge{display:inline-block;padding:4px 12px;
+      border-radius:20px;font-size:.8rem;font-weight:500;margin:8px 0}
+    .badge-success{background:#d1fae5;color:#065f46}
+    .badge-error{background:#fee2e2;color:#991b1b}
+    .badge-pending{background:#e0e7ff;color:#3730a3}
+  </style>
+</head>
+<body>
+  <div class="container">${content}</div>
+</body>
+</html>`;
+}
 
 module.exports = {
   initiatePayment: exports.initiatePayment,
-  checkStatus: exports.checkStatus,
-  webhook: exports.webhook,
-  paymentSuccess: exports.paymentSuccess
+  checkStatus:     exports.checkStatus,
+  webhook:         exports.webhook,
+  paymentSuccess:  exports.paymentSuccess,
+  paymentFailed:   exports.paymentFailed
 };
