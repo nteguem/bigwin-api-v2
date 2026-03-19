@@ -388,6 +388,12 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
 
     const userIds = users.map(u => u._id);
 
+    // Debug: vérifier les données devices
+    const totalDevices = await Device.countDocuments({ appId: appId });
+    const sampleDevice = await Device.findOne({ appId: appId }).lean();
+    const sampleDeviceNoFilter = await Device.findOne({}).select('appId isActive playerId user').lean();
+    logger.info(`[${appId}] DEBUG - Devices avec appId="${appId}": ${totalDevices}, Sample device: ${JSON.stringify(sampleDevice?._id)}, Sample sans filtre: ${JSON.stringify(sampleDeviceNoFilter)}`);
+
     // Étape 2: Récupérer les devices actifs avec playerId pour ces utilisateurs
     const baseDeviceQuery = {
       appId: appId,
