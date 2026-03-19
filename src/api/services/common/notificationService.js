@@ -389,25 +389,41 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
     const userIds = users.map(u => u._id);
 
     // Étape 2: Récupérer les devices actifs avec playerId pour ces utilisateurs
-    const deviceQuery = {
+    const baseDeviceQuery = {
       appId: appId,
       isActive: true,
       playerId: { $exists: true, $nin: [null, ''] }
     };
 
-    if (includeGuests) {
-      // Inclure les devices des users ciblés + les devices sans user (guests)
-      deviceQuery.$or = [
-        { user: { $in: userIds } },
-        { user: null }
-      ];
-    } else {
-      deviceQuery.user = { $in: userIds };
+    // D'abord essayer avec les devices liés aux users
+    let devices = await Device.find({
+      ...baseDeviceQuery,
+      user: { $in: userIds }
+    }).select('playerId user userType').lean();
+
+    logger.info(`[${appId}] ${devices.length} devices liés aux users trouvés`);
+
+    // Si aucun device lié, fallback: chercher TOUS les devices actifs de l'app
+    // car les devices ne sont probablement pas liés aux users
+    if (devices.length === 0 && users.length > 0) {
+      // Debug: compter les devices de cette app
+      const totalAppDevices = await Device.countDocuments(baseDeviceQuery);
+      const linkedDevices = await Device.countDocuments({ ...baseDeviceQuery, user: { $ne: null } });
+      const unlinkedDevices = await Device.countDocuments({ ...baseDeviceQuery, user: null });
+
+      logger.warn(`[${appId}] Aucun device lié aux users. Debug: ${totalAppDevices} devices total (${linkedDevices} liés, ${unlinkedDevices} non-liés)`);
+
+      // Fallback: envoyer à TOUS les devices actifs de l'app avec playerId
+      // puisque les devices ne sont pas liés aux users
+      devices = await Device.find(baseDeviceQuery).select('playerId user userType').lean();
+
+      logger.info(`[${appId}] Fallback: utilisation de ${devices.length} devices (tous les devices actifs de l'app)`);
     }
 
-    const devices = await Device.find(deviceQuery).select('playerId user userType').lean();
-
-    logger.info(`[${appId}] ${devices.length} devices trouvés`);
+    if (includeGuests && devices.length === 0) {
+      // Si includeGuests, inclure aussi les devices sans user
+      devices = await Device.find(baseDeviceQuery).select('playerId user userType').lean();
+    }
 
     if (!devices || devices.length === 0) {
       logger.warn(`[${appId}] Aucun device trouvé pour les pays:`, normalizedCodes);
@@ -416,7 +432,7 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         recipients: 0,
         successful: 0,
         failed: 0,
-        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')} (${users.length} users, 0 devices)`,
+        message: `Aucun device trouvé pour les pays: ${normalizedCodes.join(', ')} (${users.length} users, 0 devices)`,
         details: {
           targetCountries: normalizedCodes,
           totalUsers: users.length,
