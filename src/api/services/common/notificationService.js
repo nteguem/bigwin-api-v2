@@ -366,61 +366,48 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
 
     logger.info(`[${appId}] Récupération des playerIds pour les pays:`, normalizedCodes);
 
-    // Récupérer les playerIds via agrégation MongoDB
+    // Étape 1: Récupérer les utilisateurs du/des pays ciblés
+    const User = require('../../models/user/User');
     const Device = require('../../models/common/Device');
 
-    // Construire les regex pour match case-insensitive des codes pays
+    // Regex case-insensitive pour matcher les codes pays
     const countryRegexes = normalizedCodes.map(code => new RegExp(`^${code}$`, 'i'));
 
-    const pipeline = [
-      // Étape 1: Filtrer les devices actifs de l'app avec playerId valide
-      {
-        $match: {
-          appId: appId,
-          isActive: true,
-          playerId: { $exists: true, $nin: [null, ''] }
-        }
-      },
-      // Étape 2: Joindre avec la collection User
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'user',
-          foreignField: '_id',
-          as: 'userData'
-        }
-      },
-      // Étape 3: Dérouler le tableau userData
-      {
-        $unwind: {
-          path: '$userData',
-          preserveNullAndEmptyArrays: includeGuests
-        }
-      },
-      // Étape 4: Filtrer par countryCode (case-insensitive)
-      {
-        $match: includeGuests
-          ? {
-              $or: [
-                { 'userData.countryCode': { $in: countryRegexes } },
-                { userData: { $exists: false } }
-              ]
-            }
-          : { 'userData.countryCode': { $in: countryRegexes } }
-      },
-      // Étape 5: Projeter les infos nécessaires
-      {
-        $project: {
-          _id: 1,
-          playerId: 1,
-          countryCode: { $toUpper: '$userData.countryCode' },
-          userType: 1,
-          userId: '$user'
-        }
-      }
-    ];
+    const users = await User.find({
+      appId: appId,
+      countryCode: { $in: countryRegexes }
+    }).select('_id countryCode').lean();
 
-    const devices = await Device.aggregate(pipeline);
+    logger.info(`[${appId}] ${users.length} utilisateurs trouvés pour les pays: ${normalizedCodes.join(', ')}`);
+
+    // Map userId -> countryCode pour les stats
+    const userCountryMap = {};
+    for (const u of users) {
+      userCountryMap[u._id.toString()] = (u.countryCode || '').toUpperCase();
+    }
+
+    const userIds = users.map(u => u._id);
+
+    // Étape 2: Récupérer les devices actifs avec playerId pour ces utilisateurs
+    const deviceQuery = {
+      appId: appId,
+      isActive: true,
+      playerId: { $exists: true, $nin: [null, ''] }
+    };
+
+    if (includeGuests) {
+      // Inclure les devices des users ciblés + les devices sans user (guests)
+      deviceQuery.$or = [
+        { user: { $in: userIds } },
+        { user: null }
+      ];
+    } else {
+      deviceQuery.user = { $in: userIds };
+    }
+
+    const devices = await Device.find(deviceQuery).select('playerId user userType').lean();
+
+    logger.info(`[${appId}] ${devices.length} devices trouvés`);
 
     if (!devices || devices.length === 0) {
       logger.warn(`[${appId}] Aucun device trouvé pour les pays:`, normalizedCodes);
@@ -429,17 +416,16 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         recipients: 0,
         successful: 0,
         failed: 0,
-        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')}`,
+        message: `Aucun utilisateur trouvé pour les pays: ${normalizedCodes.join(', ')} (${users.length} users, 0 devices)`,
         details: {
           targetCountries: normalizedCodes,
+          totalUsers: users.length,
           statsByCountry: {}
         }
       };
     }
 
-    logger.info(`[${appId}] ${devices.length} devices trouvés`);
-
-    // Extraire les playerIds
+    // Extraire les playerIds valides
     const playerIds = devices.map(d => d.playerId).filter(Boolean);
 
     if (playerIds.length === 0) {
@@ -452,6 +438,7 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
         message: `Aucun playerId OneSignal trouvé pour les pays: ${normalizedCodes.join(', ')}`,
         details: {
           targetCountries: normalizedCodes,
+          totalUsers: users.length,
           totalDevices: devices.length,
           validPlayerIds: 0,
           statsByCountry: {}
@@ -463,7 +450,8 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
 
     // Statistiques par pays
     const statsByCountry = devices.reduce((acc, device) => {
-      const country = device.countryCode || 'unknown';
+      const userId = device.user ? device.user.toString() : null;
+      const country = (userId && userCountryMap[userId]) || 'unknown';
       acc[country] = (acc[country] || 0) + 1;
       return acc;
     }, {});
