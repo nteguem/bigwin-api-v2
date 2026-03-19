@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find '/c/DEV/ROLAND/bigwin v2' -type f -name *.md)",
+      "Bash(grep -r notification '/c/DEV/ROLAND/bigwin v2' --include=*.md)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"admin\\\\|Admin\" '/c/DEV/ROLAND/bigwin v2/src/api/middlewares' --include=*.js)"
+    ]
+  }
+}

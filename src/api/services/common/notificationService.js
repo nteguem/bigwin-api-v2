@@ -369,13 +369,16 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
     // Récupérer les playerIds via agrégation MongoDB
     const Device = require('../../models/common/Device');
 
+    // Construire les regex pour match case-insensitive des codes pays
+    const countryRegexes = normalizedCodes.map(code => new RegExp(`^${code}$`, 'i'));
+
     const pipeline = [
       // Étape 1: Filtrer les devices actifs de l'app avec playerId valide
       {
         $match: {
           appId: appId,
           isActive: true,
-          playerId: { $exists: true, $ne: null, $ne: '' }
+          playerId: { $exists: true, $nin: [null, ''] }
         }
       },
       // Étape 2: Joindre avec la collection User
@@ -391,26 +394,26 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
       {
         $unwind: {
           path: '$userData',
-          preserveNullAndEmptyArrays: !includeGuests
+          preserveNullAndEmptyArrays: includeGuests
         }
       },
-      // Étape 4: Filtrer par countryCode
+      // Étape 4: Filtrer par countryCode (case-insensitive)
       {
-        $match: includeGuests 
+        $match: includeGuests
           ? {
               $or: [
-                { 'userData.countryCode': { $in: normalizedCodes } },
-                { 'userData': { $exists: false } }
+                { 'userData.countryCode': { $in: countryRegexes } },
+                { userData: { $exists: false } }
               ]
             }
-          : { 'userData.countryCode': { $in: normalizedCodes } }
+          : { 'userData.countryCode': { $in: countryRegexes } }
       },
       // Étape 5: Projeter les infos nécessaires
       {
         $project: {
           _id: 1,
           playerId: 1,
-          countryCode: '$userData.countryCode',
+          countryCode: { $toUpper: '$userData.countryCode' },
           userType: 1,
           userId: '$user'
         }
