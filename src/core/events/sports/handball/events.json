@@ -1,0 +1,448 @@
+{
+  "staticEvents": [
+    {
+      "id": "home_win",
+      "position": 1,
+      "priority": "high",
+      "label": {
+        "fr": "Victoire equipe domicile",
+        "en": "Home team wins"
+      },
+      "expression": "score.home > score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe qui joue a domicile gagne le match",
+        "en": "The home team wins the match"
+      }
+    },
+    {
+      "id": "away_win",
+      "position": 2,
+      "priority": "high",
+      "label": {
+        "fr": "Victoire equipe exterieur",
+        "en": "Away team wins"
+      },
+      "expression": "score.away > score.home",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe qui joue a l'exterieur gagne le match",
+        "en": "The away team wins the match"
+      }
+    },
+    {
+      "id": "draw",
+      "position": 3,
+      "priority": "high",
+      "label": {
+        "fr": "Match nul",
+        "en": "Draw"
+      },
+      "expression": "score.home === score.away",
+      "category": "result",
+      "description": {
+        "fr": "Le match se termine par un score de parite",
+        "en": "The match ends in a tie"
+      }
+    },
+    {
+      "id": "double_chance_1x",
+      "position": 4,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance 1X",
+        "en": "Double chance 1X"
+      },
+      "expression": "score.home >= score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe domicile gagne ou match nul",
+        "en": "Home team wins or draw"
+      }
+    },
+    {
+      "id": "double_chance_x2",
+      "position": 5,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance X2",
+        "en": "Double chance X2"
+      },
+      "expression": "score.away >= score.home",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe exterieur gagne ou match nul",
+        "en": "Away team wins or draw"
+      }
+    },
+    {
+      "id": "double_chance_12",
+      "position": 6,
+      "priority": "high",
+      "label": {
+        "fr": "Double chance 12",
+        "en": "Double chance 12"
+      },
+      "expression": "score.home !== score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'une des deux equipes gagne (pas de nul)",
+        "en": "Either team wins (no draw)"
+      }
+    },
+    {
+      "id": "both_teams_score",
+      "position": 7,
+      "priority": "medium",
+      "label": {
+        "fr": "Les deux equipes marquent",
+        "en": "Both teams score"
+      },
+      "expression": "bothTeamsScore === true",
+      "category": "goals",
+      "description": {
+        "fr": "Chaque equipe marque au moins un but",
+        "en": "Each team scores at least one goal"
+      }
+    },
+    {
+      "id": "more_goals_first_half",
+      "position": 8,
+      "priority": "medium",
+      "label": {
+        "fr": "Plus de buts en 1ere mi-temps",
+        "en": "More goals in 1st half"
+      },
+      "expression": "firstHalfTotal > secondHalfTotal",
+      "category": "halftime",
+      "description": {
+        "fr": "Il y a plus de buts marques en premiere mi-temps qu'en deuxieme",
+        "en": "More goals are scored in the first half than in the second"
+      }
+    },
+    {
+      "id": "more_goals_second_half",
+      "position": 9,
+      "priority": "medium",
+      "label": {
+        "fr": "Plus de buts en 2eme mi-temps",
+        "en": "More goals in 2nd half"
+      },
+      "expression": "secondHalfTotal > firstHalfTotal",
+      "category": "halftime",
+      "description": {
+        "fr": "Il y a plus de buts marques en deuxieme mi-temps qu'en premiere",
+        "en": "More goals are scored in the second half than in the first"
+      }
+    },
+    {
+      "id": "equal_goals_both_halves",
+      "position": 10,
+      "priority": "low",
+      "label": {
+        "fr": "Meme nombre de buts par mi-temps",
+        "en": "Equal goals in both halves"
+      },
+      "expression": "firstHalfTotal === secondHalfTotal",
+      "category": "halftime",
+      "description": {
+        "fr": "Le meme nombre de buts est marque dans chaque mi-temps",
+        "en": "The same number of goals is scored in each half"
+      }
+    }
+  ],
+  "parametricEvents": [
+    {
+      "id": "total_goals",
+      "position": 1,
+      "priority": "high",
+      "labelTemplate": {
+        "fr": "{{direction}} de {{value}} buts au total",
+        "en": "{{direction}} {{value}} total goals"
+      },
+      "expressionTemplate": "totalGoals {{operator}} {{value}}",
+      "category": "goals",
+      "description": {
+        "fr": "Prediction sur le nombre total de buts dans le match",
+        "en": "Prediction on the total number of goals in the match"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de buts",
+            "en": "Number of goals"
+          },
+          "min": 30,
+          "max": 80,
+          "step": 0.5,
+          "default": 50.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "home_goals",
+      "position": 2,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Equipe domicile {{direction}} de {{value}} buts",
+        "en": "Home team {{direction}} {{value}} goals"
+      },
+      "expressionTemplate": "score.home {{operator}} {{value}}",
+      "category": "team_goals",
+      "description": {
+        "fr": "Prediction sur le nombre de buts de l'equipe domicile",
+        "en": "Prediction on the number of goals by home team"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de buts",
+            "en": "Number of goals"
+          },
+          "min": 10,
+          "max": 45,
+          "step": 0.5,
+          "default": 25.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "away_goals",
+      "position": 3,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Equipe exterieur {{direction}} de {{value}} buts",
+        "en": "Away team {{direction}} {{value}} goals"
+      },
+      "expressionTemplate": "score.away {{operator}} {{value}}",
+      "category": "team_goals",
+      "description": {
+        "fr": "Prediction sur le nombre de buts de l'equipe exterieur",
+        "en": "Prediction on the number of goals by away team"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de buts",
+            "en": "Number of goals"
+          },
+          "min": 10,
+          "max": 45,
+          "step": 0.5,
+          "default": 25.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "first_half_goals",
+      "position": 4,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "{{direction}} de {{value}} buts en 1ere mi-temps",
+        "en": "{{direction}} {{value}} goals in 1st half"
+      },
+      "expressionTemplate": "firstHalfTotal {{operator}} {{value}}",
+      "category": "halftime",
+      "description": {
+        "fr": "Prediction sur le nombre total de buts en premiere mi-temps",
+        "en": "Prediction on the total number of goals in first half"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de buts",
+            "en": "Number of goals"
+          },
+          "min": 10,
+          "max": 40,
+          "step": 0.5,
+          "default": 25.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "goal_margin",
+      "position": 5,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Ecart {{direction}} de {{value}} buts",
+        "en": "Margin {{direction}} {{value}} goals"
+      },
+      "expressionTemplate": "(score.home > score.away ? score.home - score.away : score.away - score.home) {{operator}} {{value}}",
+      "category": "margin",
+      "description": {
+        "fr": "Prediction sur l'ecart de buts entre les deux equipes",
+        "en": "Prediction on the goal margin between the two teams"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Ecart de buts",
+            "en": "Goal margin"
+          },
+          "min": 0.5,
+          "max": 15,
+          "step": 0.5,
+          "default": 3.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    }
+  ],
+  "categories": {
+    "result": {
+      "fr": "Resultat du match",
+      "en": "Match result"
+    },
+    "goals": {
+      "fr": "Nombre de buts",
+      "en": "Number of goals"
+    },
+    "team_goals": {
+      "fr": "Buts par equipe",
+      "en": "Goals by team"
+    },
+    "halftime": {
+      "fr": "Mi-temps",
+      "en": "Halftime"
+    },
+    "margin": {
+      "fr": "Ecart de buts",
+      "en": "Goal margin"
+    }
+  }
+}

@@ -225,7 +225,7 @@ const sendToCountries = catchAsync(async (req, res) => {
   res.status(200).json({
     success: true,
     data: result,
-    message: `Notification envoyée à ${result.recipients} utilisateur(s) dans ${countryCodes.length} pays`
+    message: `Notification envoyée à ${result.details?.validPlayerIds || result.recipients} utilisateur(s) dans ${countryCodes.length} pays`
   });
 });
 

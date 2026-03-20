@@ -1,0 +1,437 @@
+{
+  "staticEvents": [
+    {
+      "id": "home_win",
+      "position": 1,
+      "priority": "high",
+      "label": {
+        "fr": "Victoire equipe domicile",
+        "en": "Home team wins"
+      },
+      "expression": "score.home > score.away",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe qui joue a domicile gagne le match",
+        "en": "The home team wins the match"
+      }
+    },
+    {
+      "id": "away_win",
+      "position": 2,
+      "priority": "high",
+      "label": {
+        "fr": "Victoire equipe exterieur",
+        "en": "Away team wins"
+      },
+      "expression": "score.away > score.home",
+      "category": "result",
+      "description": {
+        "fr": "L'equipe qui joue a l'exterieur gagne le match",
+        "en": "The away team wins the match"
+      }
+    },
+    {
+      "id": "both_teams_score",
+      "position": 3,
+      "priority": "high",
+      "label": {
+        "fr": "Les deux equipes marquent",
+        "en": "Both teams score"
+      },
+      "expression": "bothTeamsScore === true",
+      "category": "runs",
+      "description": {
+        "fr": "Chaque equipe marque au moins un run",
+        "en": "Each team scores at least one run"
+      }
+    },
+    {
+      "id": "both_teams_score_no",
+      "position": 4,
+      "priority": "low",
+      "label": {
+        "fr": "Une equipe ne marque pas",
+        "en": "One team doesn't score"
+      },
+      "expression": "bothTeamsScore === false",
+      "category": "runs",
+      "description": {
+        "fr": "Au moins une des deux equipes ne marque aucun run",
+        "en": "At least one of the teams doesn't score any run"
+      }
+    },
+    {
+      "id": "home_shutout",
+      "position": 5,
+      "priority": "medium",
+      "label": {
+        "fr": "Blanchissage domicile",
+        "en": "Home shutout"
+      },
+      "expression": "score.home > 0 && score.away === 0",
+      "category": "runs",
+      "description": {
+        "fr": "L'equipe domicile gagne sans encaisser de run",
+        "en": "Home team wins without conceding any run"
+      }
+    },
+    {
+      "id": "away_shutout",
+      "position": 6,
+      "priority": "medium",
+      "label": {
+        "fr": "Blanchissage exterieur",
+        "en": "Away shutout"
+      },
+      "expression": "score.away > 0 && score.home === 0",
+      "category": "runs",
+      "description": {
+        "fr": "L'equipe exterieur gagne sans encaisser de run",
+        "en": "Away team wins without conceding any run"
+      }
+    },
+    {
+      "id": "no_errors",
+      "position": 7,
+      "priority": "low",
+      "label": {
+        "fr": "Aucune erreur dans le match",
+        "en": "No errors in the match"
+      },
+      "expression": "totalErrors === 0",
+      "category": "special",
+      "description": {
+        "fr": "Aucune erreur defensive n'est commise par les deux equipes",
+        "en": "No defensive errors are committed by either team"
+      }
+    },
+    {
+      "id": "high_scoring",
+      "position": 8,
+      "priority": "medium",
+      "label": {
+        "fr": "Match a gros score (+10 runs)",
+        "en": "High-scoring game (+10 runs)"
+      },
+      "expression": "totalRuns > 10",
+      "category": "runs",
+      "description": {
+        "fr": "Le total des runs depasse 10",
+        "en": "The total runs exceed 10"
+      }
+    },
+    {
+      "id": "low_scoring",
+      "position": 9,
+      "priority": "medium",
+      "label": {
+        "fr": "Match a petit score (-5 runs)",
+        "en": "Low-scoring game (-5 runs)"
+      },
+      "expression": "totalRuns < 5",
+      "category": "runs",
+      "description": {
+        "fr": "Le total des runs est inferieur a 5",
+        "en": "The total runs are less than 5"
+      }
+    }
+  ],
+  "parametricEvents": [
+    {
+      "id": "total_runs",
+      "position": 1,
+      "priority": "high",
+      "labelTemplate": {
+        "fr": "{{direction}} de {{value}} runs au total",
+        "en": "{{direction}} {{value}} total runs"
+      },
+      "expressionTemplate": "totalRuns {{operator}} {{value}}",
+      "category": "runs",
+      "description": {
+        "fr": "Prediction sur le nombre total de runs dans le match",
+        "en": "Prediction on the total number of runs in the match"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de runs",
+            "en": "Number of runs"
+          },
+          "min": 1,
+          "max": 25,
+          "step": 0.5,
+          "default": 8.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "home_runs",
+      "position": 2,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Equipe domicile {{direction}} de {{value}} runs",
+        "en": "Home team {{direction}} {{value}} runs"
+      },
+      "expressionTemplate": "score.home {{operator}} {{value}}",
+      "category": "team_runs",
+      "description": {
+        "fr": "Prediction sur le nombre de runs de l'equipe domicile",
+        "en": "Prediction on the number of runs by home team"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de runs",
+            "en": "Number of runs"
+          },
+          "min": 0,
+          "max": 15,
+          "step": 0.5,
+          "default": 4.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "away_runs",
+      "position": 3,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Equipe exterieur {{direction}} de {{value}} runs",
+        "en": "Away team {{direction}} {{value}} runs"
+      },
+      "expressionTemplate": "score.away {{operator}} {{value}}",
+      "category": "team_runs",
+      "description": {
+        "fr": "Prediction sur le nombre de runs de l'equipe exterieur",
+        "en": "Prediction on the number of runs by away team"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de runs",
+            "en": "Number of runs"
+          },
+          "min": 0,
+          "max": 15,
+          "step": 0.5,
+          "default": 4.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "total_hits",
+      "position": 4,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "{{direction}} de {{value}} hits au total",
+        "en": "{{direction}} {{value}} total hits"
+      },
+      "expressionTemplate": "totalHits {{operator}} {{value}}",
+      "category": "hits",
+      "description": {
+        "fr": "Prediction sur le nombre total de hits dans le match",
+        "en": "Prediction on the total number of hits in the match"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Nombre de hits",
+            "en": "Number of hits"
+          },
+          "min": 5,
+          "max": 30,
+          "step": 0.5,
+          "default": 16.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    },
+    {
+      "id": "run_margin",
+      "position": 5,
+      "priority": "medium",
+      "labelTemplate": {
+        "fr": "Ecart {{direction}} de {{value}} runs",
+        "en": "Margin {{direction}} {{value}} runs"
+      },
+      "expressionTemplate": "(score.home > score.away ? score.home - score.away : score.away - score.home) {{operator}} {{value}}",
+      "category": "margin",
+      "description": {
+        "fr": "Prediction sur l'ecart de runs entre les deux equipes",
+        "en": "Prediction on the run margin between the two teams"
+      },
+      "paramFields": [
+        {
+          "name": "value",
+          "type": "number",
+          "label": {
+            "fr": "Ecart de runs",
+            "en": "Run margin"
+          },
+          "min": 0.5,
+          "max": 10,
+          "step": 0.5,
+          "default": 1.5
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "label": {
+            "fr": "Plus ou moins",
+            "en": "Over or under"
+          },
+          "options": [
+            {
+              "value": "over",
+              "label": {
+                "fr": "Plus",
+                "en": "Over"
+              }
+            },
+            {
+              "value": "under",
+              "label": {
+                "fr": "Moins",
+                "en": "Under"
+              }
+            }
+          ],
+          "default": "over"
+        }
+      ]
+    }
+  ],
+  "categories": {
+    "result": {
+      "fr": "Resultat du match",
+      "en": "Match result"
+    },
+    "runs": {
+      "fr": "Nombre de runs",
+      "en": "Number of runs"
+    },
+    "team_runs": {
+      "fr": "Runs par equipe",
+      "en": "Runs by team"
+    },
+    "hits": {
+      "fr": "Nombre de hits",
+      "en": "Number of hits"
+    },
+    "margin": {
+      "fr": "Ecart de runs",
+      "en": "Run margin"
+    },
+    "special": {
+      "fr": "Evenements speciaux",
+      "en": "Special events"
+    }
+  }
+}
