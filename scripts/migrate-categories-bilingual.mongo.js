@@ -1,10 +1,3 @@
-// ============================================================
-// Migration MongoDB Shell - Categories bilingue (fr/en)
-// Usage: mongosh "mongodb+srv://..." --file migrate-categories-bilingual.mongo.js
-// Ou copier/coller dans MongoDB Compass > mongosh
-// ============================================================
-
-db = db.getSiblingDB('bigwin-dev');
 
 // D'abord, supprimer l'ancien index
 try {

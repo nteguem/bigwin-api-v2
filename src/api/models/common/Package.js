@@ -221,7 +221,16 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
     description: packageObj.description ? (packageObj.description[lang] || packageObj.description.fr) : null,
     pricing: packageObj.pricing instanceof Map ? Object.fromEntries(packageObj.pricing) : packageObj.pricing,
     duration: packageObj.duration,
-    categories: packageObj.categories,
+    categories: (packageObj.categories || []).map(cat => {
+      if (cat && typeof cat === 'object' && cat.name) {
+        return {
+          ...cat,
+          name: cat.name[lang] || cat.name.fr || cat.name,
+          description: cat.description ? (cat.description[lang] || cat.description.fr || cat.description) : null
+        };
+      }
+      return cat;
+    }),
     badge: packageObj.badge ? (packageObj.badge[lang] || packageObj.badge.fr) : null,
     economy: packageObj.economy instanceof Map ? Object.fromEntries(packageObj.economy) : packageObj.economy,
     formation: formation,
