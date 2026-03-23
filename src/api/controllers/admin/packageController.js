@@ -166,7 +166,7 @@ exports.createPackage = catchAsync(async (req, res, next) => {
     success: true,
     message: 'Package créé avec succès',
     data: {
-      package
+      package: package.formatForLanguage(lang)
     }
   });
 });
@@ -221,11 +221,13 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
     { new: true, runValidators: true }
   ).populate('categories', 'name isVip').populate('formationId');
 
+  const { lang = 'fr' } = req.query;
+
   res.status(200).json({
     success: true,
     message: 'Package mis à jour avec succès',
     data: {
-      package
+      package: package.formatForLanguage(lang)
     }
   });
 });

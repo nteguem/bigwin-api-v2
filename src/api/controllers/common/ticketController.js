@@ -9,8 +9,8 @@ class TicketController {
   async getTickets(req, res) {
     try {
       const appId = req.appId; // ⭐ AJOUT
-      const { offset = 0, limit = 10, category, date, isVisible } = req.query;
-      
+      const { offset = 0, limit = 10, category, date, isVisible, lang = 'fr' } = req.query;
+
       const result = await ticketService.getTickets(appId, { // ⭐ AJOUT appId
         offset: parseInt(offset),
         limit: parseInt(limit),
@@ -19,8 +19,23 @@ class TicketController {
         isVisible: isVisible !== undefined ? isVisible === 'true' : null
       });
 
+      // Formater les catégories pour la langue demandée
+      const data = result.data.map(ticket => {
+        if (ticket.category && ticket.category.name && typeof ticket.category.name === 'object') {
+          return {
+            ...ticket,
+            category: {
+              ...ticket.category,
+              name: ticket.category.name[lang] || ticket.category.name.fr || ticket.category.name,
+              description: ticket.category.description ? (ticket.category.description[lang] || ticket.category.description.fr || ticket.category.description) : null
+            }
+          };
+        }
+        return ticket;
+      });
+
       formatSuccess(res, {
-        data: result.data,
+        data,
         pagination: result.pagination,
         message: 'Tickets retrieved successfully'
       });
@@ -33,14 +48,28 @@ class TicketController {
     try {
       const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
+      const { lang = 'fr' } = req.query;
       const ticket = await ticketService.getTicketById(appId, id); // ⭐ AJOUT appId
 
       if (!ticket) {
         return formatError(res, 'Ticket not found', 404);
       }
 
+      // Formater la catégorie pour la langue demandée
+      let data = ticket;
+      if (ticket.category && ticket.category.name && typeof ticket.category.name === 'object') {
+        data = {
+          ...ticket,
+          category: {
+            ...ticket.category,
+            name: ticket.category.name[lang] || ticket.category.name.fr || ticket.category.name,
+            description: ticket.category.description ? (ticket.category.description[lang] || ticket.category.description.fr || ticket.category.description) : null
+          }
+        };
+      }
+
       formatSuccess(res, {
-        data: ticket,
+        data,
         message: 'Ticket retrieved successfully'
       });
     } catch (error) {
