@@ -126,9 +126,9 @@ class SubscriptionService {
    * Obtenir les informations complètes d'abonnement d'un utilisateur
    * @param {String} appId - ID de l'application
    */
-  async getUserSubscriptionInfo(appId, userId) {
+  async getUserSubscriptionInfo(appId, userId, lang = 'fr') {
     const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
-    
+
     const activePackages = activeSubscriptions.map(subscription => ({
       id: subscription.package._id,
       name: subscription.package.name,
@@ -142,7 +142,16 @@ class SubscriptionService {
         amount: subscription.pricing.amount,
         currency: subscription.pricing.currency
       },
-      categories: subscription.package.categories || [],
+      categories: (subscription.package.categories || []).map(cat => {
+        if (cat && cat.name && typeof cat.name === 'object') {
+          return {
+            ...(cat.toObject ? cat.toObject() : cat),
+            name: cat.name[lang] || cat.name.fr || cat.name,
+            description: cat.description ? (cat.description[lang] || cat.description.fr || cat.description) : null
+          };
+        }
+        return cat;
+      }),
       subscriptionId: subscription._id,
       paymentProvider: subscription.paymentProvider,
       autoRenewing: subscription.autoRenewing || false

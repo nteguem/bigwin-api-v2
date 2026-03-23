@@ -142,7 +142,8 @@ exports.checkCategoryAccess = catchAsync(async (req, res, next) => {
 exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
-  
+  const { lang = 'fr' } = req.query;
+
   // ⭐ Passer appId au service
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
 
@@ -152,9 +153,19 @@ exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
     accessibleCategories.push(...subscription.package.categories);
   }
 
-  // Supprimer les doublons
+  // Supprimer les doublons et formater pour la langue
   const uniqueCategories = [...new Set(accessibleCategories.map(cat => cat._id.toString()))]
-    .map(id => accessibleCategories.find(cat => cat._id.toString() === id));
+    .map(id => {
+      const cat = accessibleCategories.find(c => c._id.toString() === id);
+      if (cat && cat.name && typeof cat.name === 'object') {
+        return {
+          ...cat.toObject ? cat.toObject() : cat,
+          name: cat.name[lang] || cat.name.fr || cat.name,
+          description: cat.description ? (cat.description[lang] || cat.description.fr || cat.description) : null
+        };
+      }
+      return cat;
+    });
 
   res.status(200).json({
     success: true,

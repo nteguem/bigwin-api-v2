@@ -74,7 +74,7 @@ exports.register = catchAsync(async (req, res, next) => {
   }
   
   // Vérifier s'il a un abonnement actif (normalement false pour un nouveau user)
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id, req.query?.lang || 'fr');
   
   // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Inscription réussie');
@@ -145,7 +145,7 @@ exports.login = catchAsync(async (req, res, next) => {
   }
   
   // Vérifier s'il a un abonnement actif
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id, req.query?.lang || 'fr');
   
   // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
@@ -212,7 +212,7 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     }
     
     // 7. Vérifier l'abonnement
-    const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id);
+    const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id, req.query?.lang || 'fr');
     
     // 8. Préparer la réponse
     const message = isNewUser 
@@ -308,7 +308,7 @@ exports.refresh = catchAsync(async (req, res, next) => {
   await req.user.save();
   
   // Vérifier s'il a un abonnement actif lors du refresh
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id, req.query?.lang || 'fr');
   
   res.status(200).json({
     success: true,
@@ -333,7 +333,7 @@ exports.getMe = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id).populate('referredBy', 'firstName lastName affiliateCode');
   
   // Vérifier s'il a un abonnement actif
-  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id);
+  const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id, req.query?.lang || 'fr');
   
   res.status(200).json({
     success: true,
