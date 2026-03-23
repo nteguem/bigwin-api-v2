@@ -9,31 +9,40 @@ const Device = require('../../models/common/Device');
  */
 async function handleSuccessfulTransaction(appId, transaction) {
   try {
-    if (transaction.isSuccessful() && !transaction.processed) {
-      console.log(`[${appId}] Processing successful transaction: ${transaction._id}`);
-      
-      const subscription = await subscriptionService.createSubscription(
-        appId,
-        transaction.user,
-        transaction.package,
-        transaction.currency,
-        transaction._id
-      );
-      
-      console.log(`[${appId}] Subscription created: ${subscription._id}`);
-      
-      transaction.processed = true;
-      await transaction.save();
-      
-      console.log(`[${appId}] Transaction ${transaction._id} marked as processed`);
-      
-      // Envoyer notification de succès
-      await sendPaymentSuccessNotification(appId, transaction);
-      
-      return subscription;
+    if (!transaction.isSuccessful()) {
+      return null;
     }
-    
-    return null;
+
+    // ⭐ Opération atomique pour éviter les doublons de souscription
+    // Si deux webhooks arrivent en même temps, seul le premier réussira ce update
+    const claimed = await transaction.constructor.findOneAndUpdate(
+      { _id: transaction._id, processed: { $ne: true } },
+      { $set: { processed: true } },
+      { new: true }
+    );
+
+    if (!claimed) {
+      console.log(`[${appId}] Transaction ${transaction._id} already processed, skipping`);
+      return null;
+    }
+
+    console.log(`[${appId}] Processing successful transaction: ${transaction._id}`);
+
+    const subscription = await subscriptionService.createSubscription(
+      appId,
+      transaction.user,
+      transaction.package,
+      transaction.currency,
+      transaction._id
+    );
+
+    console.log(`[${appId}] Subscription created: ${subscription._id}`);
+    console.log(`[${appId}] Transaction ${transaction._id} marked as processed`);
+
+    // Envoyer notification de succès
+    await sendPaymentSuccessNotification(appId, transaction);
+
+    return subscription;
   } catch (error) {
     console.error(`[${appId}] Error processing transaction ${transaction._id}:`, error.message);
     throw error;

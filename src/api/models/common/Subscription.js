@@ -102,6 +102,8 @@ subscriptionSchema.index({ appId: 1, user: 1, endDate: -1 });
 subscriptionSchema.index({ user: 1, status: 1 });
 subscriptionSchema.index({ endDate: 1 });
 subscriptionSchema.index({ status: 1 });
+// ⭐ Index unique sur paymentReference pour éviter les doublons de souscription (ignore les null)
+subscriptionSchema.index({ paymentReference: 1 }, { unique: true, sparse: true });
 
 // Methods
 subscriptionSchema.methods.isActive = function() {
