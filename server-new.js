@@ -7,8 +7,7 @@ const logger = require('./src/utils/logger');
 const { connectDB } = require('./config/database');
 
 // Services CRON
-const PredictionCronService = require('./src/api/services/common/predictionCorrectionService');
-const DataRefreshService = require('./src/api/services/common/dataRefreshService');
+const PredictionCorrectionService = require('./src/api/services/common/predictionCorrectionService');
 const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
 
 // Chargement des variables d'environnement
@@ -17,8 +16,7 @@ dotenv.config();
 const PORT = process.env.PORT || 4000;
 
 // Instances des services
-let cronService = null;
-let refreshService = null;
+let correctionService = null;
 
 /**
  * Démarre le serveur après initialisation
@@ -28,13 +26,9 @@ const startServer = async () => {
     // Connexion à la base de données
     await connectDB();
 
-    // Service de correction des prédictions
-    cronService = new PredictionCronService();
-    await cronService.start();
-
-    // Service de mise à jour des données sportives
-    refreshService = new DataRefreshService();
-    await refreshService.start();
+    // Service unifié de correction des prédictions (18h, 21h, 00h UTC)
+    correctionService = new PredictionCorrectionService();
+    await correctionService.start();
 
     await googlePlayJobs.start();
 
@@ -54,11 +48,8 @@ const startServer = async () => {
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully...');
 
-  if (cronService) {
-    await cronService.stop();
-  }
-  if (refreshService) {
-    await refreshService.stop();
+  if (correctionService) {
+    await correctionService.stop();
   }
 
   process.exit(0);
@@ -67,11 +58,8 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully...');
 
-  if (cronService) {
-    await cronService.stop();
-  }
-  if (refreshService) {
-    await refreshService.stop();
+  if (correctionService) {
+    await correctionService.stop();
   }
 
   process.exit(0);

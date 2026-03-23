@@ -41,6 +41,14 @@ const PredictionSchema = new mongoose.Schema({
     id: String,
     name: String,
     icon: String
+  },
+
+  correctionMetadata: {
+    correctedAt: Date,
+    correctionSource: String,
+    confidence: String,
+    expression: String,
+    reason: String
   }
 }, {
   timestamps: true

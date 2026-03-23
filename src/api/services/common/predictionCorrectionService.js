@@ -1,164 +1,241 @@
 /**
- * @fileoverview Service de correction automatique des prédictions via CRON à heures fixes
+ * @fileoverview Service unifié de correction des prédictions
+ *
+ * 3 fenêtres par jour : 18h, 21h, 00h GMT
+ * À chaque fenêtre :
+ *   1. Trouver les prédictions pending du jour
+ *   2. Grouper par sport
+ *   3. Pour chaque sport : 1 appel API (refresh du fichier cache)
+ *   4. Corriger toutes les prédictions avec les données fraîches
+ *   5. À 00h : marquer void les matchs commencés il y a +5h sans résultat
  */
 
 const cron = require('node-cron');
 const logger = require('../../../utils/logger');
 const Corrector = require('../../../core/events/Corrector');
-const { findMatch } = require('../../../core/sports/providers/initService');
+const { fetchAndStoreData } = require('../../../core/sports/providers/initService');
 const Prediction = require('../../models/common/Prediction');
 
-class PredictionCronService {
+class PredictionCorrectionService {
   constructor() {
     this.corrector = new Corrector();
     this.cronJobs = [];
     this.isRunning = false;
-    this.retryAttempts = 3;
-    
-    // Heures de correction fixes (24h format)
-    this.correctionHours = [0, 3, 8, 11, 13, 15, 16, 18, 19, 20, 22];
-    
+
+    // 3 fenêtres de correction (heures UTC)
+    this.correctionWindows = [18, 21, 0];
+
     // Statistiques
     this.stats = {
       totalProcessed: 0,
       totalCorrected: 0,
+      totalVoid: 0,
       totalErrors: 0,
-      lastRun: null
+      lastRun: null,
+      apiCallsMade: 0
     };
   }
 
   /**
-   * Démarre le service CRON
+   * Démarre le service
    */
   async start() {
     try {
-      logger.info('Starting Prediction CRON Service...');
-      
-      // Vérifier que le modèle Prediction est disponible
-      if (!Prediction) {
-        throw new Error('Prediction model not available');
-      }
+      logger.info('Starting Prediction Correction Service...');
 
-      // Créer les tâches CRON pour chaque heure
-      this.correctionHours.forEach(hour => {
-        const cronExpression = `0 ${hour} * * *`; // À l'heure pile
-        
+      this.correctionWindows.forEach(hour => {
+        const cronExpression = `0 ${hour} * * *`;
+
         const job = cron.schedule(cronExpression, async () => {
-          await this.runCorrectionCycle(hour);
+          await this.runCorrectionWindow(hour);
         }, {
-          scheduled: false, // Ne pas démarrer automatiquement
-          timezone: 'UTC' // Utiliser UTC pour éviter les problèmes de timezone
+          scheduled: false,
+          timezone: 'UTC'
         });
-        
+
         this.cronJobs.push({ hour, job, expression: cronExpression });
       });
 
       // Démarrer tous les jobs
       this.cronJobs.forEach(({ hour, job }) => {
         job.start();
-        logger.info(`CRON job scheduled for ${hour}:00 UTC`);
+        logger.info(`Correction window scheduled at ${hour}:00 UTC`);
       });
 
       this.isRunning = true;
-      logger.info(`Prediction CRON Service started with ${this.correctionHours.length} scheduled times`);
-      logger.info(`Correction hours (UTC): ${this.correctionHours.join('h, ')}h`);
-      
+      logger.info(`Prediction Correction Service started — windows: ${this.correctionWindows.map(h => h + 'h').join(', ')} UTC`);
+
     } catch (error) {
-      logger.error(`Failed to start Prediction CRON Service: ${error.message}`);
+      logger.error(`Failed to start Prediction Correction Service: ${error.message}`);
       throw error;
     }
   }
 
   /**
-   * Exécute un cycle de correction
+   * Exécute une fenêtre de correction
    */
-  async runCorrectionCycle(triggerHour) {
+  async runCorrectionWindow(windowHour) {
     const startTime = Date.now();
-    logger.info(`Starting correction cycle at ${triggerHour}:00 UTC`);
+    const isLastWindow = windowHour === 0;
+    logger.info(`=== Correction window ${windowHour}h UTC started ===`);
 
     try {
-      // Calculer les bornes de la journée en cours (UTC)
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      // 1. Trouver toutes les prédictions pending
+      const pendingPredictions = await this.getPendingPredictions();
 
-      const predictionsToProcess = await Prediction.find({
-        status: 'pending',
-        // Match de la journée en cours ET déjà passé
-        'matchData.date': { 
-          $gte: startOfDay,   // Après le début de la journée (00:00 UTC)
-          $lt: now            // Mais avant maintenant (match passé)
-        },
-        $or: [
-          { 'correctionMetadata.attempts': { $exists: false } },
-          { 'correctionMetadata.attempts': { $lt: this.retryAttempts } }
-        ]
-      }).limit(200);
-
-      if (predictionsToProcess.length === 0) {
-        logger.info(`No predictions to process at ${triggerHour}:00`);
+      if (pendingPredictions.length === 0) {
+        logger.info('No pending predictions to process');
         return;
       }
 
-      logger.info(`Found ${predictionsToProcess.length} predictions to process`);
+      logger.info(`Found ${pendingPredictions.length} pending predictions`);
 
-      let processed = 0;
-      let corrected = 0;
-      let errors = 0;
+      // 2. Grouper par sport + date
+      const groups = this.groupBySportAndDate(pendingPredictions);
+      logger.info(`Grouped into ${Object.keys(groups).length} sport/date combinations`);
 
-      // Traiter chaque prédiction
-      for (const prediction of predictionsToProcess) {
+      // 3. Pour chaque groupe : refresh API + correction
+      let totalCorrected = 0;
+      let totalVoid = 0;
+      let totalErrors = 0;
+      let apiCalls = 0;
+
+      for (const [key, group] of Object.entries(groups)) {
+        const { sport, date, predictions } = group;
+
         try {
-          await this.processPrediction(prediction);
-          processed++;
-          corrected++;
+          // Un seul appel API par sport/date
+          logger.info(`Refreshing ${sport} data for ${date} (${predictions.length} predictions)...`);
+          const freshData = await fetchAndStoreData(sport, date, true);
+          apiCalls++;
+
+          if (!freshData || !freshData.matches) {
+            logger.error(`No data returned for ${sport} on ${date}`);
+            totalErrors += predictions.length;
+            continue;
+          }
+
+          logger.info(`Got ${freshData.matches.length} matches for ${sport} on ${date}`);
+
+          // Corriger chaque prédiction du groupe
+          for (const prediction of predictions) {
+            try {
+              const result = await this.correctPrediction(prediction, freshData, isLastWindow);
+
+              if (result === 'corrected') totalCorrected++;
+              else if (result === 'void') totalVoid++;
+              // result === 'skipped' → on ne fait rien, retry à la prochaine fenêtre
+
+            } catch (error) {
+              logger.error(`Error correcting prediction ${prediction._id}: ${error.message}`);
+              totalErrors++;
+            }
+          }
+
         } catch (error) {
-          logger.error(`Error processing prediction ${prediction._id}: ${error.message}`);
-          await this.handlePredictionError(prediction, error);
-          processed++;
-          errors++;
+          logger.error(`Error refreshing ${sport} on ${date}: ${error.message}`);
+          totalErrors += predictions.length;
         }
-        
-        // Petite pause pour éviter la surcharge
-        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Mise à jour des statistiques
-      this.stats.totalProcessed += processed;
-      this.stats.totalCorrected += corrected;
-      this.stats.totalErrors += errors;
+      // 4. Mise à jour des stats
+      this.stats.totalProcessed += pendingPredictions.length;
+      this.stats.totalCorrected += totalCorrected;
+      this.stats.totalVoid += totalVoid;
+      this.stats.totalErrors += totalErrors;
+      this.stats.apiCallsMade += apiCalls;
       this.stats.lastRun = new Date();
 
       const duration = Date.now() - startTime;
-      logger.info(`Correction cycle completed in ${duration}ms: ${corrected} corrected, ${errors} errors`);
-      
+      logger.info(`=== Window ${windowHour}h completed in ${duration}ms — corrected: ${totalCorrected}, void: ${totalVoid}, errors: ${totalErrors}, API calls: ${apiCalls} ===`);
+
     } catch (error) {
-      logger.error(`Error in correction cycle: ${error.message}`);
+      logger.error(`Critical error in correction window ${windowHour}h: ${error.message}`);
     }
   }
 
   /**
-   * Traite une prédiction individuelle
+   * Récupère les prédictions pending du jour
    */
-  async processPrediction(prediction) {
-    const { matchData, sport } = prediction;
-    
-    logger.debug(`Processing prediction ${prediction._id} for match ${matchData.id}`);
+  async getPendingPredictions() {
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
-    // 1. Récupérer les données actualisées du match
-    const currentMatchData = await this.fetchMatchData(sport.id, matchData.id, matchData.date);
-    
-    if (!currentMatchData) {
-      throw new Error(`Match data not found for ${matchData.id}`);
+    return Prediction.find({
+      status: 'pending',
+      'matchData.date': {
+        $gte: startOfDay,
+        $lt: endOfDay
+      }
+    }).lean();
+  }
+
+  /**
+   * Groupe les prédictions par sport + date
+   */
+  groupBySportAndDate(predictions) {
+    const groups = {};
+
+    for (const prediction of predictions) {
+      const sport = prediction.sport?.id || 'football';
+      const matchDate = prediction.matchData?.date;
+      if (!matchDate) continue;
+
+      const dateStr = new Date(matchDate).toISOString().split('T')[0];
+      const key = `${sport}_${dateStr}`;
+
+      if (!groups[key]) {
+        groups[key] = { sport, date: dateStr, predictions: [] };
+      }
+      groups[key].predictions.push(prediction);
     }
 
-    // 2. Vérifier si le match est terminé
-    if (currentMatchData.status !== 'FINISHED' && currentMatchData.status !== 'FT') {
-      logger.debug(`Match ${matchData.id} not finished yet (${currentMatchData.status})`);
-      await this.incrementAttempts(prediction._id);
-      return;
+    return groups;
+  }
+
+  /**
+   * Corrige une prédiction individuelle
+   * @returns {'corrected'|'void'|'skipped'}
+   */
+  async correctPrediction(prediction, freshData, isLastWindow) {
+    const matchId = prediction.matchData?.id;
+    if (!matchId) {
+      logger.warn(`Prediction ${prediction._id} has no matchData.id`);
+      return 'skipped';
     }
 
-    // 3. Utiliser le Corrector pour évaluer la prédiction
+    // Chercher le match dans les données fraîches
+    const currentMatch = freshData.matches.find(m => m.id === matchId);
+
+    if (!currentMatch) {
+      logger.warn(`Match ${matchId} not found in fresh data`);
+      if (isLastWindow) {
+        await this.markVoid(prediction._id, 'Match introuvable dans les données API');
+        return 'void';
+      }
+      return 'skipped';
+    }
+
+    // Vérifier si le match est terminé
+    if (currentMatch.status !== 'FINISHED' && currentMatch.status !== 'FT') {
+      // Match pas encore terminé
+      if (isLastWindow) {
+        // Fenêtre de minuit : vérifier le délai depuis le début du match
+        const matchStart = new Date(prediction.matchData.date);
+        const hoursElapsed = (Date.now() - matchStart.getTime()) / (1000 * 60 * 60);
+
+        if (hoursElapsed > 5) {
+          await this.markVoid(prediction._id, `Match non terminé après ${Math.round(hoursElapsed)}h (statut: ${currentMatch.status})`);
+          return 'void';
+        }
+      }
+
+      logger.debug(`Match ${matchId} not finished yet (${currentMatch.status}), will retry next window`);
+      return 'skipped';
+    }
+
+    // Match terminé → évaluer la prédiction
     const predictionData = {
       id: prediction._id.toString(),
       event: prediction.event,
@@ -168,136 +245,74 @@ class PredictionCronService {
     };
 
     const correctionResult = this.corrector.correctPrediction(
-      predictionData, 
-      currentMatchData, 
-      sport.id
+      predictionData,
+      currentMatch,
+      prediction.sport?.id || 'football'
     );
 
     if (!correctionResult.success || !correctionResult.correction.canCorrect) {
-      throw new Error(`Correction failed: ${correctionResult.correction.reason}`);
+      logger.warn(`Cannot correct prediction ${prediction._id}: ${correctionResult.correction.reason}`);
+      if (isLastWindow) {
+        await this.markVoid(prediction._id, correctionResult.correction.reason);
+        return 'void';
+      }
+      return 'skipped';
     }
 
-    // 4. Mettre à jour la prédiction en base
+    // Mettre à jour en base : statut + score + metadata
     const newStatus = correctionResult.correction.result ? 'won' : 'lost';
-    await this.updatePredictionStatus(prediction._id, newStatus, correctionResult);
-    
-    logger.info(`Prediction ${prediction._id} corrected: ${newStatus} (${correctionResult.correction.reason})`);
-  }
 
-  /**
-   * Récupère les données actualisées d'un match
-   */
-  async fetchMatchData(sport, matchId, originalDate) {
-    try {
-      // Convertir la date au format YYYY-MM-DD
-      const dateStr = new Date(originalDate).toISOString().split('T')[0];
-      
-      // Utiliser findMatch du initService
-      const matchData = await findMatch(sport, matchId, dateStr, false); // forceUpdate = true
-      
-      return matchData;
-    } catch (error) {
-      logger.error(`Error fetching match data ${sport}/${matchId}: ${error.message}`);
-      return null;
-    }
-  }
-
-  /**
-   * Met à jour le statut d'une prédiction en base
-   */
-  async updatePredictionStatus(predictionId, newStatus, correctionResult) {
-    try {
-      const updateData = {
+    await Prediction.findByIdAndUpdate(prediction._id, {
+      $set: {
         status: newStatus,
+        'matchData.status': currentMatch.status,
+        'matchData.score': currentMatch.score,
+        'matchData.teams': currentMatch.teams,
+        'matchData.league': currentMatch.league,
         'correctionMetadata.correctedAt': new Date(),
         'correctionMetadata.correctionSource': 'auto-cron',
         'correctionMetadata.confidence': correctionResult.correction.confidence,
         'correctionMetadata.expression': correctionResult.correction.expression,
         'correctionMetadata.reason': correctionResult.correction.reason
-      };
-
-      const result = await Prediction.findByIdAndUpdate(
-        predictionId,
-        { $set: updateData },
-        { new: true }
-      );
-
-      if (!result) {
-        throw new Error(`Prediction ${predictionId} not found for update`);
       }
+    });
 
-      return result;
-      
-    } catch (error) {
-      logger.error(`Error updating prediction ${predictionId}: ${error.message}`);
-      throw error;
-    }
+    logger.info(`Prediction ${prediction._id} → ${newStatus} (${correctionResult.correction.reason})`);
+    return 'corrected';
   }
 
   /**
-   * Incrémente le compteur de tentatives
+   * Marque une prédiction comme void
    */
-  async incrementAttempts(predictionId) {
-    try {
-      await Prediction.findByIdAndUpdate(predictionId, {
-        $inc: { 'correctionMetadata.attempts': 1 },
-        $set: { 'correctionMetadata.lastAttempt': new Date() }
-      });
-      
-    } catch (error) {
-      logger.error(`Error incrementing attempts for prediction ${predictionId}: ${error.message}`);
-    }
-  }
-
-  /**
-   * Gère les erreurs de prédiction
-   */
-  async handlePredictionError(prediction, error) {
-    const attempts = prediction.correctionMetadata?.attempts || 0;
-    
-    if (attempts >= this.retryAttempts) {
-      // Trop de tentatives, marquer comme void
-      await this.updatePredictionStatus(prediction._id, 'void', {
-        correction: {
-          reason: `Max retry attempts reached: ${error.message}`,
-          confidence: 'low'
-        }
-      });
-      
-      logger.warn(`Prediction ${prediction._id} marked as void after ${this.retryAttempts} failed attempts`);
-    } else {
-      // Incrémenter le compteur d'erreurs
-      await this.incrementAttempts(prediction._id);
-      
-      // Enregistrer l'erreur
-      try {
-        await Prediction.findByIdAndUpdate(prediction._id, {
-          $push: { 'correctionMetadata.errors': error.message },
-          $set: { 'correctionMetadata.lastAttempt': new Date() }
-        });
-      } catch (updateError) {
-        logger.error(`Error updating error log: ${updateError.message}`);
+  async markVoid(predictionId, reason) {
+    await Prediction.findByIdAndUpdate(predictionId, {
+      $set: {
+        status: 'void',
+        'correctionMetadata.correctedAt': new Date(),
+        'correctionMetadata.correctionSource': 'auto-cron',
+        'correctionMetadata.confidence': 'low',
+        'correctionMetadata.reason': reason
       }
-    }
+    });
+
+    logger.info(`Prediction ${predictionId} → void (${reason})`);
   }
 
   /**
-   * Arrête le service CRON
+   * Arrête le service
    */
   async stop() {
-    logger.info('Stopping Prediction CRON Service...');
-    
-    this.isRunning = false;
-    
-    // Arrêter tous les jobs CRON
+    logger.info('Stopping Prediction Correction Service...');
+
     this.cronJobs.forEach(({ hour, job }) => {
       job.stop();
-      logger.info(`CRON job stopped for ${hour}:00`);
+      logger.info(`Window ${hour}h stopped`);
     });
-    
+
     this.cronJobs = [];
-    
-    logger.info('Prediction CRON Service stopped');
+    this.isRunning = false;
+
+    logger.info('Prediction Correction Service stopped');
   }
 
   /**
@@ -306,68 +321,39 @@ class PredictionCronService {
   getStatus() {
     return {
       isRunning: this.isRunning,
-      activeJobs: this.cronJobs.length,
-      correctionHours: this.correctionHours,
+      windows: this.correctionWindows.map(h => `${h}:00 UTC`),
       stats: this.stats,
       nextRuns: this.getNextRuns()
     };
   }
 
   /**
-   * Calcule les prochaines exécutions
+   * Prochaines exécutions
    */
   getNextRuns() {
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-    
-    const nextRuns = [];
-    
-    this.correctionHours.forEach(hour => {
-      const todayRun = new Date(today.getTime() + hour * 60 * 60 * 1000);
-      const tomorrowRun = new Date(tomorrow.getTime() + hour * 60 * 60 * 1000);
-      
-      if (todayRun > now) {
-        nextRuns.push(todayRun);
-      } else {
-        nextRuns.push(tomorrowRun);
+    const runs = [];
+
+    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+      for (const hour of this.correctionWindows) {
+        const run = new Date(Date.UTC(
+          now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + dayOffset,
+          hour, 0, 0
+        ));
+        if (run > now) runs.push(run);
       }
-    });
-    
-    return nextRuns.sort().slice(0, 3); // Retourner les 3 prochaines
-  }
-
-  /**
-   * Force l'exécution manuelle d'un cycle de correction
-   */
-  async runManualCycle() {
-    logger.info('Running manual correction cycle...');
-    await this.runCorrectionCycle('manual');
-  }
-
-  /**
-   * Corrige manuellement une prédiction spécifique
-   */
-  async manualCorrection(predictionId) {
-    try {
-      const prediction = await Prediction.findById(predictionId);
-      
-      if (!prediction) {
-        throw new Error(`Prediction ${predictionId} not found`);
-      }
-
-      if (prediction.status !== 'pending') {
-        throw new Error(`Prediction ${predictionId} is not pending (status: ${prediction.status})`);
-      }
-
-      await this.processPrediction(prediction);
-      return { success: true, message: `Prediction ${predictionId} corrected manually` };
-      
-    } catch (error) {
-      logger.error(`Manual correction failed for ${predictionId}: ${error.message}`);
-      return { success: false, error: error.message };
     }
+
+    return runs.sort((a, b) => a - b).slice(0, 3);
+  }
+
+  /**
+   * Force une exécution manuelle (pour les tests)
+   */
+  async runManualCycle(windowHour = 0) {
+    logger.info(`Running manual correction cycle (simulating window ${windowHour}h)...`);
+    await this.runCorrectionWindow(windowHour);
   }
 }
 
-module.exports = PredictionCronService;
+module.exports = PredictionCorrectionService;
