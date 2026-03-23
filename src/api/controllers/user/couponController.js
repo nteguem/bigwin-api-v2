@@ -60,17 +60,17 @@ class CouponController {
         if (!categoriesMap.has(categoryId)) {
           categoriesMap.set(categoryId, {
             id: ticket.category._id,
-            name: ticket.category.name,
+            name: ticket.category.name?.[lang] || ticket.category.name?.fr || ticket.category.name,
             icon: ticket.category.icon,
             successRate: ticket.category.successRate,
-            description: ticket.category.description || null,
+            description: ticket.category.description?.[lang] || ticket.category.description?.fr || ticket.category.description || null,
             isVip: ticket.category.isVip,
             isActive: ticket.category.isActive,
             totalCoupons: 0,
             coupons: []
           });
         }
-        
+
         const category = categoriesMap.get(categoryId);
         category.totalCoupons++;
         
@@ -217,10 +217,10 @@ class CouponController {
       const couponWithCategory = {
         category: {
           id: ticket.category._id,
-          name: ticket.category.name,
+          name: ticket.category.name?.[lang] || ticket.category.name?.fr || ticket.category.name,
           icon: ticket.category.icon,
           successRate: ticket.category.successRate,
-          description: ticket.category.description || null,
+          description: ticket.category.description?.[lang] || ticket.category.description?.fr || ticket.category.description || null,
           isVip: ticket.category.isVip,
           isActive: ticket.category.isActive
         },
@@ -378,8 +378,8 @@ class CouponController {
           if (!categoriesMap.has(categoryId)) {
             categoriesMap.set(categoryId, {
               id: ticket.category._id,
-              name: ticket.category.name,
-              description: ticket.category.description || null,
+              name: ticket.category.name?.[lang] || ticket.category.name?.fr || ticket.category.name,
+              description: ticket.category.description?.[lang] || ticket.category.description?.fr || ticket.category.description || null,
               icon: ticket.category.icon,
               successRate: ticket.category.successRate,
               isVip: ticket.category.isVip,

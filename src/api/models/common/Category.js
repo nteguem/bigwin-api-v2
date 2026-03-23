@@ -49,11 +49,14 @@ const CategorySchema = new mongoose.Schema({
   },
   
   name: {
-    type: String,
-    required: true
+    fr: { type: String, required: true },
+    en: { type: String, required: true }
   },
-  
-  description: String,
+
+  description: {
+    fr: { type: String, default: '' },
+    en: { type: String, default: '' }
+  },
   
   icon: {
     type: String,
@@ -87,8 +90,8 @@ const CategorySchema = new mongoose.Schema({
 });
 
 // Indexes
-// ⭐ Index unique maintenu : permet { appId: "shared", name: "LIVE" } ET { appId: "app1", name: "LIVE" }
-CategorySchema.index({ appId: 1, name: 1 }, { unique: true });
+// ⭐ Index unique sur name.fr (clé de référence principale)
+CategorySchema.index({ appId: 1, 'name.fr': 1 }, { unique: true });
 CategorySchema.index({ appId: 1, isActive: 1 });
 CategorySchema.index({ appId: 1, isVip: 1 });
 CategorySchema.index({ isActive: 1 });
@@ -107,6 +110,18 @@ CategorySchema.methods.isShared = function() {
  */
 CategorySchema.methods.getAccessibleApps = function() {
   return this.appId === "shared" ? ["*"] : [this.appId];
+};
+
+/**
+ * Méthode helper : Formater la catégorie pour une langue donnée
+ * @param {String} lang - 'fr' ou 'en' (défaut: 'fr')
+ * @returns {Object} Catégorie avec name et description en string simple
+ */
+CategorySchema.methods.formatForLanguage = function(lang = 'fr') {
+  const obj = this.toObject();
+  obj.name = obj.name?.[lang] || obj.name?.fr || '';
+  obj.description = obj.description?.[lang] || obj.description?.fr || '';
+  return obj;
 };
 
 module.exports = mongoose.model("Category", CategorySchema);

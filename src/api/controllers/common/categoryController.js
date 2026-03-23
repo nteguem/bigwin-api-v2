@@ -7,10 +7,10 @@ class CategoryController {
 
   async getCategories(req, res) {
     try {
-    
+
     const appId = req.appId;
-    const { offset = 0, limit = 10, isVip, isActive } = req.query;
-        
+    const { offset = 0, limit = 10, isVip, isActive, lang = 'fr' } = req.query;
+
     const result = await categoryService.getCategories(appId, {
       offset: parseInt(offset),
       limit: parseInt(limit),
@@ -19,7 +19,7 @@ class CategoryController {
     });
 
       formatSuccess(res, {
-        data: result.data,
+        data: result.data.map(cat => cat.formatForLanguage(lang)),
         pagination: result.pagination,
         message: 'Categories retrieved successfully'
       });
@@ -33,6 +33,7 @@ class CategoryController {
     try {
       const appId = req.appId; // ⭐ AJOUT
       const { id } = req.params;
+      const { lang = 'fr' } = req.query;
       const category = await categoryService.getCategoryById(appId, id); // ⭐ AJOUT appId
 
       if (!category) {
@@ -40,7 +41,7 @@ class CategoryController {
       }
 
       formatSuccess(res, {
-        data: category,
+        data: category.formatForLanguage(lang),
         message: 'Category retrieved successfully'
       });
     } catch (error) {
@@ -53,8 +54,8 @@ class CategoryController {
       const appId = req.appId; // ⭐ AJOUT
       const { name, description, icon, successRate, isVip, isActive } = req.body;
 
-      if (!name) {
-        return formatError(res, 'Name is required', 400);
+      if (!name || !name.fr || !name.en) {
+        return formatError(res, 'Name is required with both fr and en translations (e.g. { "fr": "...", "en": "..." })', 400);
       }
 
       if (successRate !== undefined && (successRate < 0 || successRate > 100)) {

@@ -82,14 +82,19 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
       try {
         const Category = mongoose.model('Category');
         const category = await Category.findById(doc.category);
-        const categoryName = category ? category.description : 'Catégorie inconnue';
-        
+        // ⭐ Support bilingue : description et name sont désormais { fr, en }
+        const categoryDescFr = category?.description?.fr || category?.description || '';
+        const categoryDescEn = category?.description?.en || category?.description || '';
+        const categoryNameFr = category?.name?.fr || category?.name || '';
+        const categoryNameEn = category?.name?.en || category?.name || '';
+
         // ⭐ NOUVEAU : Vérifier si la CATÉGORIE est shared (pas le ticket)
         const isCategoryShared = category && category.appId === "shared";
-        
-        const isLive = categoryName.toUpperCase().includes('LIVE');
-        const isDailyCoupon = categoryName.toUpperCase().includes('COUPON DU JOUR') || 
-                             category?.name === 'CDJ';
+
+        const isLive = categoryDescFr.toUpperCase().includes('LIVE') || categoryDescEn.toUpperCase().includes('LIVE');
+        const isDailyCoupon = categoryDescFr.toUpperCase().includes('COUPON DU JOUR') ||
+                             categoryDescEn.toUpperCase().includes('DAILY') ||
+                             categoryNameFr === 'CDJ';
                 
         const notificationService = require("../../services/common/notificationService");
         
@@ -108,7 +113,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             data: {
               type: "daily_coupon",
               ticket_id: doc._id.toString(),
-              category_name: categoryName,
+              category_name: categoryDescFr,
               action: "view_daily_coupon",
               guaranteed_odds: "2.00",
               success_rate: "99%"
@@ -127,13 +132,13 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
               fr: "🔴 EN DIRECT!"
             },
             contents: {
-              en: `⚡ Live coupon available! Don't miss out - ${categoryName}`,
-              fr: `⚡ Coupon live disponible ! Ne ratez pas - ${categoryName}`
+              en: `⚡ Live coupon available! Don't miss out - ${categoryDescEn}`,
+              fr: `⚡ Coupon live disponible ! Ne ratez pas - ${categoryDescFr}`
             },
             data: {
               type: "live",
               ticket_id: doc._id.toString(),
-              category_name: categoryName,
+              category_name: categoryDescFr,
               action: "view_live"
             },
             options: {
@@ -149,13 +154,13 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
               fr: "💰 Nouveau Coupon!"
             },
             contents: {
-              en: `🎯 Fresh coupon just dropped in ${categoryName} - Check it now!`,
-              fr: `🎯 Nouveau coupon disponible dans ${categoryName} - Découvrez-le !`
+              en: `🎯 Fresh coupon just dropped in ${categoryDescEn} - Check it now!`,
+              fr: `🎯 Nouveau coupon disponible dans ${categoryDescFr} - Découvrez-le !`
             },
             data: {
               type: "ticket",
               ticket_id: doc._id.toString(),
-              category_name: categoryName,
+              category_name: categoryDescFr,
               action: "view_ticket"
             },
             options: {
@@ -169,7 +174,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
         // ⭐ MODIFIÉ : Broadcaster si la CATÉGORIE est shared (pas le ticket)
         if (isCategoryShared) {
           // Catégorie partagée → Broadcaster à toutes les apps actives
-          console.log(`📢 [SHARED CATEGORY] Catégorie "${categoryName}" est partagée - Broadcasting à toutes les apps`);
+          console.log(`📢 [SHARED CATEGORY] Catégorie "${categoryNameFr}" est partagée - Broadcasting à toutes les apps`);
           
           const App = mongoose.model('App');
           const activeApps = await App.find({ isActive: true }).select('appId');
@@ -208,7 +213,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             notificationId: result.id,
             recipients: result.recipients,
             type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
-            category: categoryName,
+            category: categoryNameFr,
             categoryAppId: category.appId
           });
         }

@@ -75,10 +75,11 @@ class CategoryService {
    */
   async getCategoryByName(appId, name) {
     // ⭐ MODIFIÉ : Inclure les catégories partagées
-    return await Category.findOne({ 
-      name, 
+    // Recherche sur name.fr ou name.en
+    return await Category.findOne({
+      $or: [{ 'name.fr': name }, { 'name.en': name }],
       appId: { $in: [appId, "shared"] },
-      isActive: true 
+      isActive: true
     });
   }
 
