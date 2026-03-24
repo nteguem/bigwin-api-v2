@@ -159,8 +159,8 @@ class CouponController {
       // Vérifier si c'est un jour off quand il n'y a pas de coupons
       let dayOff = null;
       if (categories.length === 0) {
-        const today = new Date().toISOString().split('T')[0];
-        const dayOffRecord = await DayOff.findOne({ appId, date: today }).populate('message').lean();
+        const checkDate = date || new Date().toISOString().split('T')[0];
+        const dayOffRecord = await DayOff.findOne({ appId, date: checkDate }).populate('message').lean();
         if (dayOffRecord?.message) {
           dayOff = {
             active: true,
