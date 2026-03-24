@@ -171,38 +171,32 @@ class PredictionCorrectionService {
 
   /**
    * Récupère les prédictions pending des N derniers jours
+   * Note: matchData.date est stocké comme string ISO (Mixed schema)
+   * donc on utilise $regex pour matcher par préfixe de date
    */
   async getPendingPredictions() {
     const now = new Date();
-    const lookbackStart = new Date(Date.UTC(
-      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - LOOKBACK_DAYS
-    ));
-    const endOfToday = new Date(Date.UTC(
-      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1
-    ));
+    const dates = [];
+    for (let i = 0; i <= LOOKBACK_DAYS; i++) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+      dates.push(d.toISOString().split('T')[0]);
+    }
 
     return Prediction.find({
       status: 'pending',
-      'matchData.date': {
-        $gte: lookbackStart,
-        $lt: endOfToday
-      }
+      'matchData.date': { $regex: `^(${dates.join('|')})` }
     }).lean();
   }
 
   /**
    * Récupère les prédictions pending pour une date spécifique
+   * matchData.date est une string ISO comme "2026-03-23T17:00:00+00:00"
    */
   async getPendingPredictionsByDate(date) {
-    const startOfDay = new Date(date + 'T00:00:00.000Z');
-    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-
+    // date = "2026-03-23", matchData.date = "2026-03-23T17:00:00+00:00"
     return Prediction.find({
       status: 'pending',
-      'matchData.date': {
-        $gte: startOfDay,
-        $lt: endOfDay
-      }
+      'matchData.date': { $regex: `^${date}` }
     }).lean();
   }
 
