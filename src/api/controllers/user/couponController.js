@@ -2,6 +2,7 @@
 
 const TicketService = require('../../services/common/ticketService');
 const subscriptionService = require('../../services/user/subscriptionService');
+const DayOff = require('../../models/common/DayOff');
 
 class CouponController {
   
@@ -155,11 +156,25 @@ class CouponController {
 
       const typeMessage = isVip === 'true' ? 'VIP' : isVip === 'false' ? 'gratuits' : '';
 
+      // Vérifier si c'est un jour off quand il n'y a pas de coupons
+      let dayOff = null;
+      if (categories.length === 0) {
+        const today = new Date().toISOString().split('T')[0];
+        const dayOffRecord = await DayOff.findOne({ appId, date: today }).populate('message').lean();
+        if (dayOffRecord?.message) {
+          dayOff = {
+            active: true,
+            message: dayOffRecord.message.message?.[lang] || dayOffRecord.message.message?.fr
+          };
+        }
+      }
+
       return res.status(200).json({
         success: true,
         message: `Liste des coupons ${typeMessage} récupérée avec succès`.trim(),
         data: {
-          categories
+          categories,
+          ...(dayOff && { dayOff })
         }
       });
 
