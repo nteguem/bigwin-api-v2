@@ -182,21 +182,19 @@ const fetchAndStoreData = async (sport, date, forceRefresh = false) => {
   } catch (error) {
     logger.error(`Error fetching/storing data for ${sport} on ${date}: ${error.message}`);
     
-    // AJOUT : Tentative de récupération des données cachées en cas d'erreur API
-    if (!forceRefresh) {
-      try {
-        const exists = await storageManager.dataExists(sport, date);
-        if (exists) {
-          logger.warn(`API failed, attempting to use cached data for ${sport} on ${date}`);
-          const cachedData = await storageManager.getData(sport, date);
-          if (cachedData && cachedData.matches) {
-            logger.info(`Successfully recovered from cache: ${cachedData.matches.length} matches`);
-            return cachedData;
-          }
+    // Tentative de récupération des données cachées en cas d'erreur API
+    try {
+      const exists = await storageManager.dataExists(sport, date);
+      if (exists) {
+        logger.warn(`API failed, attempting to use cached data for ${sport} on ${date}`);
+        const cachedData = await storageManager.getData(sport, date);
+        if (cachedData && cachedData.matches) {
+          logger.info(`Successfully recovered from cache: ${cachedData.matches.length} matches`);
+          return cachedData;
         }
-      } catch (cacheError) {
-        logger.error(`Cache recovery also failed: ${cacheError.message}`);
       }
+    } catch (cacheError) {
+      logger.error(`Cache recovery also failed: ${cacheError.message}`);
     }
     
     throw error;

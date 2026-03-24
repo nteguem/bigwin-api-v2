@@ -9,7 +9,9 @@
       "Bash(node:*)",
       "Bash(ls -la \"C:/DEV/bigwin-api-v2.categories\"*)",
       "Bash(ls -la \"C:/DEV/bigwin-api-v2\"*)",
-      "Bash(find 'C:\\\\DEV\\\\ROLAND\\\\bigwin v2' -name *Package* -type f)"
+      "Bash(find 'C:\\\\DEV\\\\ROLAND\\\\bigwin v2' -name *Package* -type f)",
+      "Bash(ls:*)",
+      "Bash(find src/core/events/sports -type f -name *.json)"
     ]
   }
 }

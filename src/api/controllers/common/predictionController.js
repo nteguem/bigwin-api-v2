@@ -2,7 +2,11 @@
 
 const predictionService = require('../../services/common/predictionService');
 const ticketService = require('../../services/common/ticketService');
+const PredictionCorrectionService = require('../../services/common/predictionCorrectionService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
+
+// Instance partagée pour les corrections manuelles
+const correctionService = new PredictionCorrectionService();
 
 class PredictionController {
 
@@ -162,6 +166,33 @@ class PredictionController {
       formatSuccess(res, {
         data: null,
         message: 'Prediction deleted successfully'
+      });
+    } catch (error) {
+      formatError(res, error.message, 500);
+    }
+  }
+
+  // POST /predictions/correct/:date - Corriger les prédictions pour une date
+  async correctByDate(req, res) {
+    try {
+      const { date } = req.params;
+
+      // Validation du format de date YYYY-MM-DD
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return formatError(res, 'Invalid date format. Use YYYY-MM-DD', 400);
+      }
+
+      const forceApi = req.query.forceApi === 'true';
+
+      const result = await correctionService.correctByDate(date, forceApi);
+
+      formatSuccess(res, {
+        data: result,
+        message: result.predictions.corrected > 0
+          ? `${result.predictions.corrected} prediction(s) corrected successfully`
+          : result.predictions.total === 0
+            ? `No pending predictions found for ${date}`
+            : `${result.predictions.skipped} prediction(s) skipped (matches not finished yet)`
       });
     } catch (error) {
       formatError(res, error.message, 500);

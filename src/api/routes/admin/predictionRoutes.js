@@ -18,6 +18,11 @@ router.route('/')
 router.route('/bulk')
   .post(predictionController.addPredictionsToTicket);
 
+// Correction manuelle pour une date spécifique
+// POST /admin/predictions/correct/2026-03-23?forceApi=true
+router.route('/correct/:date')
+  .post(predictionController.correctByDate);
+
 router.route('/:id')
   .get(predictionController.getPredictionById)
   .put(predictionController.updatePrediction)
