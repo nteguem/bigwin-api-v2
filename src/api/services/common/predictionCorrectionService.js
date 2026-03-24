@@ -109,17 +109,19 @@ class PredictionCorrectionService {
         const { sport, date, predictions } = group;
 
         try {
-          // D'abord essayer le cache, puis API si nécessaire (limite 100 req/jour)
+          // D'abord charger le cache (0 requête API si fichier existe)
           logger.info(`Fetching ${sport} data for ${date} (${predictions.length} predictions)...`);
           let freshData = await fetchAndStoreData(sport, date, false);
-          apiCalls++;
 
-          // Si le cache contient des matchs NOT_STARTED, on force un refresh API
-          const hasUnfinished = freshData?.matches?.some(m =>
-            m.status === 'NOT_STARTED' || m.status === 'NS' || m.status === 'LIVE'
+          // Vérifier si les matchs de NOS prédictions sont terminés dans le cache
+          const predictionMatchIds = new Set(predictions.map(p => String(p.matchData?.id)));
+          const needsRefresh = freshData?.matches?.some(m =>
+            predictionMatchIds.has(String(m.id)) &&
+            (m.status === 'NOT_STARTED' || m.status === 'NS' || m.status === 'LIVE')
           );
-          if (hasUnfinished) {
-            logger.info(`Cache has unfinished matches for ${sport}/${date}, refreshing from API...`);
+
+          if (needsRefresh) {
+            logger.info(`Cache has unfinished matches for our predictions in ${sport}/${date}, refreshing from API...`);
             freshData = await fetchAndStoreData(sport, date, true);
             apiCalls++;
           }
