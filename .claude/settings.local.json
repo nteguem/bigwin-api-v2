@@ -12,7 +12,10 @@
       "Bash(find 'C:\\\\DEV\\\\ROLAND\\\\bigwin v2' -name *Package* -type f)",
       "Bash(ls:*)",
       "Bash(find src/core/events/sports -type f -name *.json)",
-      "Bash(npx -y acorn --ecma2020 --module --allow-import-export-everywhere src/components/predictions/TicketsList.jsx)"
+      "Bash(npx -y acorn --ecma2020 --module --allow-import-export-everywhere src/components/predictions/TicketsList.jsx)",
+      "Bash(grep:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(node -e \":*)"
     ]
   }
 }

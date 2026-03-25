@@ -1,13 +1,12 @@
 /**
  * @fileoverview Service unifié de correction des prédictions
  *
- * 3 fenêtres par jour : 18h, 21h, 00h GMT
- * À chaque fenêtre :
+ * 1 cron par jour à 23h57 UTC (tous les matchs européens + la plupart des sud-américains sont terminés)
  *   1. Trouver les prédictions pending (jusqu'à 7 jours en arrière)
  *   2. Grouper par sport + date
  *   3. Pour chaque sport/date : refresh API → cache fichier → correction
  *   4. Corriger toutes les prédictions avec les données du cache
- *   5. À 00h : marquer void les matchs commencés il y a +5h sans résultat
+ *   5. Marquer void les matchs commencés il y a +5h sans résultat
  *
  * Contrainte API : 100 requêtes/jour max → on privilégie le cache local
  */
@@ -27,8 +26,8 @@ class PredictionCorrectionService {
     this.cronJobs = [];
     this.isRunning = false;
 
-    // 3 fenêtres de correction (heures UTC)
-    this.correctionWindows = [18, 21, 0];
+    // Cron unique à 23h57 UTC
+    this.cronExpression = '57 23 * * *';
 
     // Statistiques
     this.stats = {
@@ -48,27 +47,18 @@ class PredictionCorrectionService {
     try {
       logger.info('Starting Prediction Correction Service...');
 
-      this.correctionWindows.forEach(hour => {
-        const cronExpression = `0 ${hour} * * *`;
-
-        const job = cron.schedule(cronExpression, async () => {
-          await this.runCorrectionWindow(hour);
-        }, {
-          scheduled: false,
-          timezone: 'UTC'
-        });
-
-        this.cronJobs.push({ hour, job, expression: cronExpression });
+      const job = cron.schedule(this.cronExpression, async () => {
+        await this.runCorrectionWindow();
+      }, {
+        scheduled: false,
+        timezone: 'UTC'
       });
 
-      // Démarrer tous les jobs
-      this.cronJobs.forEach(({ hour, job }) => {
-        job.start();
-        logger.info(`Correction window scheduled at ${hour}:00 UTC`);
-      });
+      this.cronJobs.push({ job, expression: this.cronExpression });
+      job.start();
 
       this.isRunning = true;
-      logger.info(`Prediction Correction Service started — windows: ${this.correctionWindows.map(h => h + 'h').join(', ')} UTC`);
+      logger.info(`Prediction Correction Service started — cron: ${this.cronExpression} UTC (23:57)`);
 
     } catch (error) {
       logger.error(`Failed to start Prediction Correction Service: ${error.message}`);
@@ -79,10 +69,9 @@ class PredictionCorrectionService {
   /**
    * Exécute une fenêtre de correction
    */
-  async runCorrectionWindow(windowHour) {
+  async runCorrectionWindow() {
     const startTime = Date.now();
-    const isLastWindow = windowHour === 0;
-    logger.info(`=== Correction window ${windowHour}h UTC started ===`);
+    logger.info(`=== Correction cron 23:57 UTC started ===`);
 
     try {
       // 1. Trouver toutes les prédictions pending
@@ -137,7 +126,7 @@ class PredictionCorrectionService {
           // Corriger chaque prédiction du groupe
           for (const prediction of predictions) {
             try {
-              const result = await this.correctPrediction(prediction, freshData, isLastWindow);
+              const result = await this.correctPrediction(prediction, freshData, true);
 
               if (result === 'corrected') totalCorrected++;
               else if (result === 'void') totalVoid++;
@@ -164,10 +153,10 @@ class PredictionCorrectionService {
       this.stats.lastRun = new Date();
 
       const duration = Date.now() - startTime;
-      logger.info(`=== Window ${windowHour}h completed in ${duration}ms — corrected: ${totalCorrected}, void: ${totalVoid}, errors: ${totalErrors}, API calls: ${apiCalls} ===`);
+      logger.info(`=== Correction completed in ${duration}ms — corrected: ${totalCorrected}, void: ${totalVoid}, errors: ${totalErrors}, API calls: ${apiCalls} ===`);
 
     } catch (error) {
-      logger.error(`Critical error in correction window ${windowHour}h: ${error.message}`);
+      logger.error(`Critical error in correction cron: ${error.message}`);
     }
   }
 
@@ -470,9 +459,8 @@ class PredictionCorrectionService {
   async stop() {
     logger.info('Stopping Prediction Correction Service...');
 
-    this.cronJobs.forEach(({ hour, job }) => {
+    this.cronJobs.forEach(({ job }) => {
       job.stop();
-      logger.info(`Window ${hour}h stopped`);
     });
 
     this.cronJobs = [];
@@ -487,38 +475,36 @@ class PredictionCorrectionService {
   getStatus() {
     return {
       isRunning: this.isRunning,
-      windows: this.correctionWindows.map(h => `${h}:00 UTC`),
+      cron: '23:57 UTC',
       stats: this.stats,
-      nextRuns: this.getNextRuns()
+      nextRun: this.getNextRun()
     };
   }
 
   /**
-   * Prochaines exécutions
+   * Prochaine exécution
    */
-  getNextRuns() {
+  getNextRun() {
     const now = new Date();
     const runs = [];
 
     for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
-      for (const hour of this.correctionWindows) {
         const run = new Date(Date.UTC(
           now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + dayOffset,
-          hour, 0, 0
+          23, 57, 0
         ));
         if (run > now) runs.push(run);
-      }
     }
 
-    return runs.sort((a, b) => a - b).slice(0, 3);
+    return runs.length > 0 ? runs[0] : null;
   }
 
   /**
    * Force une exécution manuelle (pour les tests)
    */
-  async runManualCycle(windowHour = 0) {
-    logger.info(`Running manual correction cycle (simulating window ${windowHour}h)...`);
-    await this.runCorrectionWindow(windowHour);
+  async runManualCycle() {
+    logger.info('Running manual correction cycle...');
+    await this.runCorrectionWindow();
   }
 }
 
