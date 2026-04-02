@@ -5,30 +5,25 @@ const userAuth = require('../../middlewares/user/userAuth');
 
 const router = express.Router();
 
-// ---------------------------------------------
-//  Routes publiques (callbacks CinetPay)
-// ---------------------------------------------
-
-// Webhook — CinetPay notifie ici quand paiement SUCCESS ou FAILED
+/**
+ * Routes publiques pour les callbacks
+ */
+// Webhook pour les notifications CinetPay (non protégé)
 router.post('/webhook', cinetpayController.webhook);
 
-// Page de retour succes — l'utilisateur est redirige ici apres paiement reussi
+// Page de retour après paiement (non protégé car l'utilisateur vient de CinetPay)
 router.get('/success', cinetpayController.paymentSuccess);
 router.post('/success', cinetpayController.paymentSuccess);
 
-// Page de retour echec — l'utilisateur est redirige ici apres paiement echoue
-router.get('/failed', cinetpayController.paymentFailed);
-router.post('/failed', cinetpayController.paymentFailed);
-
-// ---------------------------------------------
-//  Routes protegees (token utilisateur requis)
-// ---------------------------------------------
+/**
+ * Routes protégées (authentification requise)
+ */
 router.use(userAuth.protect);
 
-// Initier un paiement
+// Initier un paiement CinetPay
 router.post('/initiate', cinetpayController.initiatePayment);
 
-// Verifier le statut d'un paiement
+// Vérifier le statut d'un paiement
 router.get('/status/:transactionId', cinetpayController.checkStatus);
 
 module.exports = router;
