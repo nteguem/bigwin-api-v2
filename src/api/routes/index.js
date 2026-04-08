@@ -35,6 +35,7 @@ const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes');
 const adminUserRoutes = require('./admin/userRoutes');
 const adminDayOffRoutes = require('./admin/dayOffRoutes');
+const adminSubscriptionRoutes = require('./admin/subscriptionRoutes');
 
 // Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
 router.use('/admin/apps', adminAppRoutes);
@@ -52,6 +53,7 @@ router.use('/admin/affiliate-types', identifyApp, adminAffiliateTypeRoutes);
 router.use('/admin/formations', identifyApp, adminFormationRoutes);
 router.use('/admin/users', identifyApp, adminUserRoutes);
 router.use('/admin/day-off', identifyApp, adminDayOffRoutes);
+router.use('/admin/subscriptions', identifyApp, adminSubscriptionRoutes);
 
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
