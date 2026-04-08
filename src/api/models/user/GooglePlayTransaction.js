@@ -29,7 +29,7 @@ const googlePlayTransactionSchema = new mongoose.Schema({
     ref: 'Package',
     required: true
   },
-  
+    
   subscription: {
     type: mongoose.Schema.ObjectId,
     ref: 'Subscription'
