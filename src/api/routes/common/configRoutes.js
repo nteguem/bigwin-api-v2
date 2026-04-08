@@ -9,30 +9,19 @@ const adminAuth = require('../../middlewares/admin/adminAuth');
 const router = express.Router();
 
 /**
- * Routes publiques (sans authentification, sans appId)
+ * Routes protégées admin (authentification requise, sans appId)
+ * IMPORTANT: /admin AVANT /:countryCode sinon Express capture "admin" comme countryCode
  */
-// Obtenir config par IP (onboarding)
-router.post('/', configController.getConfigByIp);
-
-// Obtenir config par code pays
-router.get('/:countryCode', configController.getConfigByCountryCode);
+router.get('/admin', adminAuth.protect, configController.getAllConfigs);
+router.post('/admin', adminAuth.protect, configController.createConfig);
+router.put('/admin/:countryCode', adminAuth.protect, configController.updateConfig);
+router.delete('/admin/:countryCode', adminAuth.protect, configController.deleteConfig);
+router.patch('/admin/:countryCode/toggle', adminAuth.protect, configController.toggleCountry);
 
 /**
- * Routes protégées admin (authentification requise, sans appId)
+ * Routes publiques (sans authentification, sans appId)
  */
-// Lister toutes les configurations
-router.get('/admin', adminAuth.protect, configController.getAllConfigs);
-
-// Créer une nouvelle configuration
-router.post('/admin', adminAuth.protect, configController.createConfig);
-
-// Mettre à jour une configuration
-router.put('/admin/:countryCode', adminAuth.protect, configController.updateConfig);
-
-// Supprimer une configuration
-router.delete('/admin/:countryCode', adminAuth.protect, configController.deleteConfig);
-
-// Activer/désactiver un pays
-router.patch('/admin/:countryCode/toggle', adminAuth.protect, configController.toggleCountry);
+router.post('/', configController.getConfigByIp);
+router.get('/:countryCode', configController.getConfigByCountryCode);
 
 module.exports = router;
