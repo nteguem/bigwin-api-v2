@@ -70,7 +70,7 @@ const appConfigSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
       // ⭐ AJOUT DE KORAPAY
-      enum: ['cinetpay', 'afribapay', 'smobilpay', 'googlepay', 'korapay', 'flutterwave'],
+      enum: ['cinetpay', 'afribapay', 'smobilpay', 'googlepay', 'korapay', 'flutterwave', 'fedapay'],
       default: 'googlepay',
     },
     isActive: {
