@@ -13,7 +13,7 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
   
-  const { lang = 'fr', currency } = req.query;
+  const { lang = 'fr', currency, raw } = req.query;
   
   // ⭐ Construire le filtre de base AVEC APPID
   const filter = { appId };
@@ -57,17 +57,24 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
     });
   }
 
-  // Formater selon la langue
+  // Formater selon la langue (ou retourner brut si raw=true)
   const formattedPackages = finalPackages.map(pkg => {
+    if (raw === 'true') {
+      const obj = pkg.toObject();
+      // Convertir les Map en objets simples
+      if (obj.pricing instanceof Map) obj.pricing = Object.fromEntries(obj.pricing);
+      if (obj.economy instanceof Map) obj.economy = Object.fromEntries(obj.economy);
+      return obj;
+    }
     const formatted = pkg.formatForLanguage(lang);
-    
+
     // Si une devise est spécifiée, ne retourner que le prix pour cette devise
     if (currency) {
       formatted.pricing = formatted.pricing[currency] || 0;
       formatted.economy = formatted.economy ? (formatted.economy[currency] || 0) : null;
     }
     // Sinon, retourner tous les prix (déjà formatés par formatForLanguage)
-    
+
     return formatted;
   });
 

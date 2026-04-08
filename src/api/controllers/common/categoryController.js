@@ -9,7 +9,7 @@ class CategoryController {
     try {
 
     const appId = req.appId;
-    const { offset = 0, limit = 10, isVip, isActive, lang = 'fr' } = req.query;
+    const { offset = 0, limit = 10, isVip, isActive, lang = 'fr', raw } = req.query;
 
     const result = await categoryService.getCategories(appId, {
       offset: parseInt(offset),
@@ -19,7 +19,7 @@ class CategoryController {
     });
 
       formatSuccess(res, {
-        data: result.data.map(cat => cat.formatForLanguage(lang)),
+        data: raw === 'true' ? result.data : result.data.map(cat => cat.formatForLanguage(lang)),
         pagination: result.pagination,
         message: 'Categories retrieved successfully'
       });
