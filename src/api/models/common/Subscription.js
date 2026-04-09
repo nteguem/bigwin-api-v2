@@ -72,9 +72,14 @@ const subscriptionSchema = new mongoose.Schema({
   
   paymentProvider: {
     type: String,
-    enum: ['MOBILE_MONEY', 'GOOGLE_PLAY'],
+    enum: ['MOBILE_MONEY', 'GOOGLE_PLAY', 'ADMIN'],
     default: 'MOBILE_MONEY',
     required: true
+  },
+
+  isGift: {
+    type: Boolean,
+    default: false
   },
 
   googlePlayTransaction: {

@@ -2,6 +2,7 @@
 
 const subscriptionManagementService = require('../../services/admin/subscriptionManagementService');
 const catchAsync = require('../../../utils/catchAsync');
+const { AppError } = require('../../../utils/AppError');
 
 /**
  * Récupérer toutes les souscriptions avec filtres
@@ -34,6 +35,31 @@ exports.getAllSubscriptions = catchAsync(async (req, res, next) => {
       subscriptions: result.subscriptions,
       pagination: result.pagination,
     }
+  });
+});
+
+/**
+ * Créer une souscription manuellement (achat ou offre)
+ * POST /api/admin/subscriptions
+ */
+exports.createSubscription = catchAsync(async (req, res, next) => {
+  const appId = req.appId;
+  const { userId, packageId, isGift } = req.body;
+
+  if (!userId || !packageId) {
+    return next(new AppError('userId et packageId sont requis', 400));
+  }
+
+  const result = await subscriptionManagementService.createAdminSubscription(appId, {
+    userId,
+    packageId,
+    isGift: isGift === true,
+  });
+
+  res.status(201).json({
+    success: true,
+    message: isGift ? 'Offre créée avec succès' : 'Souscription créée avec succès',
+    data: { subscription: result }
   });
 });
 

@@ -15,7 +15,8 @@ router.use(adminAuth.protect);
  * Routes principales
  */
 router.route('/')
-  .get(subscriptionController.getAllSubscriptions);     // GET /api/admin/subscriptions
+  .get(subscriptionController.getAllSubscriptions)      // GET /api/admin/subscriptions
+  .post(subscriptionController.createSubscription);     // POST /api/admin/subscriptions
 
 router.route('/stats')
   .get(subscriptionController.getSubscriptionStats);    // GET /api/admin/subscriptions/stats
