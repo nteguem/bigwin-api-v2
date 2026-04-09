@@ -188,6 +188,76 @@ class CouponController {
     }
   }
 
+  // Preview VIP : données masquées pour upsell (accès public)
+  async getVipPreview(req, res) {
+    try {
+      const appId = req.appId;
+      const { lang = 'fr' } = req.query;
+
+      // Récupérer les tickets VIP visibles du jour
+      const today = new Date().toISOString().split('T')[0];
+      const result = await TicketService.getTickets(appId, {
+        offset: 0,
+        limit: 150,
+        date: today,
+        isVisible: true
+      });
+
+      // Ne garder que les catégories VIP
+      const vipTickets = result.data.filter(ticket => ticket.category.isVip);
+
+      // Grouper par catégorie avec données masquées
+      const categoriesMap = new Map();
+
+      vipTickets.forEach(ticket => {
+        const categoryId = ticket.category._id.toString();
+
+        if (!categoriesMap.has(categoryId)) {
+          categoriesMap.set(categoryId, {
+            id: ticket.category._id,
+            name: ticket.category.name?.[lang] || ticket.category.name?.fr || ticket.category.name,
+            icon: ticket.category.icon,
+            successRate: ticket.category.successRate,
+            description: ticket.category.description?.[lang] || ticket.category.description?.fr || ticket.category.description || null,
+            isVip: true,
+            totalCoupons: 0,
+            coupons: []
+          });
+        }
+
+        const category = categoriesMap.get(categoryId);
+        category.totalCoupons++;
+
+        // Données masquées : stats sans détails des prédictions
+        category.coupons.push({
+          id: ticket._id,
+          title: ticket.title,
+          date: ticket.date,
+          status: ticket.status,
+          totalPredictions: ticket.predictions.length,
+          totalOdds: ticket.predictions.reduce((total, pred) => total * pred.odds, 1).toFixed(2),
+          // Pas de predictions[] — c'est le masquage
+        });
+      });
+
+      const categories = Array.from(categoriesMap.values());
+
+      return res.status(200).json({
+        success: true,
+        message: 'Aperçu VIP récupéré avec succès',
+        data: { categories }
+      });
+
+    } catch (error) {
+      console.error('Erreur lors de la récupération du preview VIP:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur interne du serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+
   // Récupérer un coupon spécifique par ID
   async getCouponById(req, res) {
     try {

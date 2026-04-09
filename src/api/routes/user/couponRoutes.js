@@ -36,6 +36,9 @@ const conditionalVipMiddleware = (req, res, next) => {
  * - GET /coupons?isVip=false&category=categoryId&page=1&limit=20
  */
 
+// Preview VIP (accès public — données masquées pour upsell)
+router.get('/preview', couponController.getVipPreview);
+
 // Récupérer tous les coupons avec middleware conditionnel
 router.get('/', conditionalVipMiddleware, couponController.getCoupons);
 
