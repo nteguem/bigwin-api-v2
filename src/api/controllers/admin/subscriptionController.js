@@ -8,8 +8,8 @@ const catchAsync = require('../../../utils/catchAsync');
  * GET /api/admin/subscriptions
  */
 exports.getAllSubscriptions = catchAsync(async (req, res, next) => {
-  // appId depuis le middleware identifyApp, ou 'all' si paramètre explicite
-  const appId = req.query.appId === 'all' ? 'all' : req.appId;
+  // appId: query param prioritaire, sinon header
+  const appId = req.query.appId ? req.query.appId : req.appId;
 
   const filters = {
     startDate: req.query.startDate,
@@ -42,7 +42,7 @@ exports.getAllSubscriptions = catchAsync(async (req, res, next) => {
  * GET /api/admin/subscriptions/stats
  */
 exports.getSubscriptionStats = catchAsync(async (req, res, next) => {
-  const appId = req.query.appId === 'all' ? 'all' : req.appId;
+  const appId = req.query.appId ? req.query.appId : req.appId;
 
   const filters = {
     startDate: req.query.startDate,
