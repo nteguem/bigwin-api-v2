@@ -147,6 +147,12 @@ const appSchema = new mongoose.Schema({
     }
   },
   
+  admobAppId: {
+    type: String,
+    default: null,
+    trim: true
+  },
+
   branding: {
     primaryColor: String,
     logo: String,

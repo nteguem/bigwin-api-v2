@@ -3,6 +3,7 @@
 
 const { google } = require('googleapis');
 const logger = require('../../../utils/logger');
+const App = require('../../models/common/App');
 
 const ADMOB_CONFIG = {
   clientId: process.env.ADMOB_CLIENT_ID,
@@ -191,23 +192,39 @@ async function getAdmobStatsByApp() {
   const todayRows = parseReportRows(todayData);
   const monthRows = parseReportRows(monthData);
 
+  // Load apps with admobAppId from DB
+  const apps = await App.find({ admobAppId: { $ne: null }, isActive: true })
+    .select('appId displayName branding admobAppId')
+    .lean();
+
+  const appMap = {};
+  apps.forEach(app => { appMap[app.admobAppId] = app; });
+
   // Merge: use monthRows as base, attach today data
   const todayMap = {};
   todayRows.forEach(row => { todayMap[row.APP] = row; });
 
-  return monthRows.map(row => ({
-    app: row.APP,
-    today: {
-      earnings: todayMap[row.APP]?.ESTIMATED_EARNINGS || 0,
-      impressions: todayMap[row.APP]?.IMPRESSIONS || 0,
-      clicks: todayMap[row.APP]?.CLICKS || 0,
-    },
-    thisMonth: {
-      earnings: row.ESTIMATED_EARNINGS || 0,
-      impressions: row.IMPRESSIONS || 0,
-      clicks: row.CLICKS || 0,
-    },
-  }));
+  return monthRows
+    .filter(row => appMap[row.APP]) // only apps with admobAppId in DB
+    .map(row => {
+      const app = appMap[row.APP];
+      return {
+        appId: app.appId,
+        displayName: app.displayName,
+        branding: app.branding,
+        admobAppId: row.APP,
+        today: {
+          earnings: todayMap[row.APP]?.ESTIMATED_EARNINGS || 0,
+          impressions: todayMap[row.APP]?.IMPRESSIONS || 0,
+          clicks: todayMap[row.APP]?.CLICKS || 0,
+        },
+        thisMonth: {
+          earnings: row.ESTIMATED_EARNINGS || 0,
+          impressions: row.IMPRESSIONS || 0,
+          clicks: row.CLICKS || 0,
+        },
+      };
+    });
 }
 
 module.exports = {
