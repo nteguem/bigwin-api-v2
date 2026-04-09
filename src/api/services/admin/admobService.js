@@ -172,7 +172,7 @@ async function getAdmobDashboardStats() {
 }
 
 /**
- * Récupérer les stats par app AdMob
+ * Récupérer les stats par app AdMob (today + thisMonth)
  */
 async function getAdmobStatsByApp() {
   const now = new Date();
@@ -181,10 +181,33 @@ async function getAdmobStatsByApp() {
 
   const metrics = ['ESTIMATED_EARNINGS', 'IMPRESSIONS', 'CLICKS'];
 
-  const data = await fetchNetworkReport(thisMonthStart, today, ['APP'], metrics)
-    .catch(err => { logger.error('[ADMOB] Erreur byApp:', err.message); return []; });
+  const [todayData, monthData] = await Promise.all([
+    fetchNetworkReport(today, today, ['APP'], metrics)
+      .catch(err => { logger.error('[ADMOB] Erreur byApp today:', err.message); return []; }),
+    fetchNetworkReport(thisMonthStart, today, ['APP'], metrics)
+      .catch(err => { logger.error('[ADMOB] Erreur byApp month:', err.message); return []; }),
+  ]);
 
-  return parseReportRows(data);
+  const todayRows = parseReportRows(todayData);
+  const monthRows = parseReportRows(monthData);
+
+  // Merge: use monthRows as base, attach today data
+  const todayMap = {};
+  todayRows.forEach(row => { todayMap[row.APP] = row; });
+
+  return monthRows.map(row => ({
+    app: row.APP,
+    today: {
+      earnings: todayMap[row.APP]?.ESTIMATED_EARNINGS || 0,
+      impressions: todayMap[row.APP]?.IMPRESSIONS || 0,
+      clicks: todayMap[row.APP]?.CLICKS || 0,
+    },
+    thisMonth: {
+      earnings: row.ESTIMATED_EARNINGS || 0,
+      impressions: row.IMPRESSIONS || 0,
+      clicks: row.CLICKS || 0,
+    },
+  }));
 }
 
 module.exports = {
