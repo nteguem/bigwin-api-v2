@@ -9,6 +9,7 @@ const { connectDB } = require('./config/database');
 // Services CRON
 const PredictionCorrectionService = require('./src/api/services/common/predictionCorrectionService');
 const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
+const retentionJobs = require('./src/jobs/retentionNotificationJob');
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -31,6 +32,7 @@ const startServer = async () => {
     await correctionService.start();
 
     await googlePlayJobs.start();
+    await retentionJobs.start();
 
     // Démarrer le serveur HTTP
     app.listen(PORT, '0.0.0.0', () => {
