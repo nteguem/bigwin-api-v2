@@ -148,9 +148,14 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
  * GET /api/admin/users/stats
  */
 exports.getUserStats = catchAsync(async (req, res, next) => {
-  const appId = req.appId;
+  const appId = req.query.appId ? req.query.appId : req.appId;
 
-  const stats = await userManagementService.getUserStats(appId);
+  const filters = {
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+  };
+
+  const stats = await userManagementService.getUserStats(appId, filters);
 
   res.status(200).json({
     success: true,

@@ -301,24 +301,38 @@ class UserManagementService {
    * Obtenir les statistiques des utilisateurs
    * @param {String} appId - ID de l'application
    */
-  async getUserStats(appId) {
-    const totalUsers = await User.countDocuments({ appId });
-    const activeUsers = await User.countDocuments({ appId, isActive: true });
-    const inactiveUsers = await User.countDocuments({ appId, isActive: false });
-    
-    const localUsers = await User.countDocuments({ 
-      appId, 
-      authProvider: 'local' 
+  async getUserStats(appId, filters = {}) {
+    // Base query: appId ou toutes les apps
+    const baseQuery = appId === 'all' ? {} : { appId };
+
+    // Filtre par date optionnel
+    const dateQuery = {};
+    if (filters.startDate || filters.endDate) {
+      dateQuery.createdAt = {};
+      if (filters.startDate) dateQuery.createdAt.$gte = new Date(filters.startDate);
+      if (filters.endDate) dateQuery.createdAt.$lte = new Date(filters.endDate);
+    }
+
+    const query = { ...baseQuery, ...dateQuery };
+
+    const totalUsers = await User.countDocuments(query);
+    const activeUsers = await User.countDocuments({ ...query, isActive: true });
+    const inactiveUsers = await User.countDocuments({ ...query, isActive: false });
+
+    const localUsers = await User.countDocuments({
+      ...query,
+      authProvider: 'local'
     });
-    
-    const googleUsers = await User.countDocuments({ 
-      appId, 
-      authProvider: 'google' 
+
+    const googleUsers = await User.countDocuments({
+      ...query,
+      authProvider: 'google'
     });
 
     // Utilisateurs avec abonnement actif
+    const subQuery = appId === 'all' ? {} : { appId };
     const activeSubscriptions = await Subscription.countDocuments({
-      appId,
+      ...subQuery,
       status: 'active',
       endDate: { $gt: new Date() }
     });
@@ -326,24 +340,25 @@ class UserManagementService {
     // Nouveaux utilisateurs (7 derniers jours)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
+
     const newUsersLastWeek = await User.countDocuments({
-      appId,
+      ...baseQuery,
       createdAt: { $gte: sevenDaysAgo }
     });
 
     // Nouveaux utilisateurs (30 derniers jours)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
     const newUsersLastMonth = await User.countDocuments({
-      appId,
+      ...baseQuery,
       createdAt: { $gte: thirtyDaysAgo }
     });
 
     // Répartition par pays (top 10)
+    const matchStage = appId === 'all' ? {} : { appId };
     const usersByCountry = await User.aggregate([
-      { $match: { appId } },
+      { $match: matchStage },
       { $group: { _id: '$countryCode', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 10 }
