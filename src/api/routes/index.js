@@ -55,6 +55,9 @@ router.use('/admin/users', identifyApp, adminUserRoutes);
 router.use('/admin/day-off', identifyApp, adminDayOffRoutes);
 router.use('/admin/subscriptions', identifyApp, adminSubscriptionRoutes);
 
+const adminAdmobRoutes = require('./admin/admobRoutes');
+router.use('/admin/admob', adminAdmobRoutes);
+
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
 
