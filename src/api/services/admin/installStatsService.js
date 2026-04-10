@@ -23,11 +23,20 @@ function getStorage() {
 
 /**
  * Lire et parser un fichier CSV d'installs depuis GCS
- * Format: Date,Package Name,Current Device Installs,Daily Device Installs,Daily Device Uninstalls,
- *         Daily Device Upgrades,Current User Installs,Total User Installs,Daily User Installs,Daily User Uninstalls
+ * Les fichiers Play Console sont encodés en UTF-16 LE avec BOM
  */
-function parseCsv(content) {
-  const lines = content.split('\n').filter(l => l.trim());
+function parseCsv(buffer) {
+  // Détecter UTF-16 LE (BOM: FF FE) et convertir
+  let text;
+  if (buffer[0] === 0xFF && buffer[1] === 0xFE) {
+    text = buffer.toString('utf16le');
+  } else {
+    text = buffer.toString('utf-8');
+  }
+  // Retirer le BOM s'il reste
+  text = text.replace(/^\uFEFF/, '');
+
+  const lines = text.split('\n').filter(l => l.trim());
   if (lines.length < 2) return [];
 
   const headers = lines[0].split(',').map(h => h.trim());
@@ -57,8 +66,8 @@ async function listAvailableFiles() {
  */
 async function downloadAndParse(fileName) {
   const storage = getStorage();
-  const [content] = await storage.bucket(GCS_BUCKET).file(fileName).download();
-  return parseCsv(content.toString('utf-8'));
+  const [buffer] = await storage.bucket(GCS_BUCKET).file(fileName).download();
+  return parseCsv(buffer);
 }
 
 /**
@@ -128,12 +137,12 @@ async function getInstallStats() {
           // Avant-dernière pour calculer la tendance
           const previous = rows.length > 1 ? rows[rows.length - 2] : null;
 
-          const currentInstalls = parseInt(latest['Current Device Installs'] || latest['Current User Installs'] || '0');
-          const totalInstalls = parseInt(latest['Total User Installs'] || '0');
-          const dailyInstalls = parseInt(latest['Daily Device Installs'] || latest['Daily User Installs'] || '0');
-          const dailyUninstalls = parseInt(latest['Daily Device Uninstalls'] || latest['Daily User Uninstalls'] || '0');
+          const currentInstalls = parseInt(latest['Active Device Installs'] || '0');
+          const totalInstalls = parseInt(latest['Total User Installs'] || '0') || parseInt(latest['Install events'] || '0');
+          const dailyInstalls = parseInt(latest['Daily Device Installs'] || '0');
+          const dailyUninstalls = parseInt(latest['Uninstall events'] || latest['Daily Device Uninstalls'] || '0');
 
-          const prevDaily = previous ? parseInt(previous['Daily Device Installs'] || previous['Daily User Installs'] || '0') : 0;
+          const prevDaily = previous ? parseInt(previous['Daily Device Installs'] || '0') : 0;
           const trend = prevDaily > 0 ? Math.round(((dailyInstalls - prevDaily) / prevDaily) * 100) : 0;
 
           const app = packageToApp[pkg];
