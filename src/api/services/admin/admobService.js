@@ -110,15 +110,16 @@ function parseReportRows(data) {
  * Récupérer les stats AdMob pour le dashboard
  * Retourne : today, yesterday, thisMonth, lastMonth
  */
-async function getAdmobDashboardStats() {
-  const now = new Date();
+async function getAdmobDashboardStats(dateParam = null) {
+  // Si dateParam fourni (YYYY-MM-DD), utiliser cette date comme "today"
+  const baseDate = dateParam ? new Date(dateParam + 'T00:00:00') : new Date();
 
   // Dates
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
   const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0); // dernier jour du mois précédent
+  const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
   const metrics = [
     'ESTIMATED_EARNINGS',
@@ -175,10 +176,10 @@ async function getAdmobDashboardStats() {
 /**
  * Récupérer les stats par app AdMob (today + thisMonth)
  */
-async function getAdmobStatsByApp() {
-  const now = new Date();
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+async function getAdmobStatsByApp(dateParam = null) {
+  const baseDate = dateParam ? new Date(dateParam + 'T00:00:00') : new Date();
+  const thisMonthStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+  const today = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
 
   const metrics = ['ESTIMATED_EARNINGS', 'IMPRESSIONS', 'CLICKS'];
 
