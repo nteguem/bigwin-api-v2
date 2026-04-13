@@ -128,7 +128,8 @@ exports.getPackage = catchAsync(async (req, res, next) => {
 exports.createPackage = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
-  
+  const { lang = 'fr' } = req.query;
+
   const { name, description, pricing, duration, categories, badge, economy, formationId } = req.body;
 
   // Validation des champs obligatoires
