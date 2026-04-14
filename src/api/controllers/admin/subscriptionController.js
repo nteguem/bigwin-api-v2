@@ -9,8 +9,9 @@ const { AppError } = require('../../../utils/AppError');
  * GET /api/admin/subscriptions
  */
 exports.getAllSubscriptions = catchAsync(async (req, res, next) => {
-  // appId: query param prioritaire, sinon header
-  const appId = req.query.appId ? req.query.appId : req.appId;
+  // Seul super_admin peut cross-app. Sinon on force l'appId du header (validé par enforceAppScope).
+  const isSuper = req.admin && req.admin.role === 'super_admin';
+  const appId = isSuper ? (req.query.appId || req.appId) : req.appId;
 
   const filters = {
     startDate: req.query.startDate,
@@ -68,7 +69,8 @@ exports.createSubscription = catchAsync(async (req, res, next) => {
  * GET /api/admin/subscriptions/stats
  */
 exports.getSubscriptionStats = catchAsync(async (req, res, next) => {
-  const appId = req.query.appId ? req.query.appId : req.appId;
+  const isSuper = req.admin && req.admin.role === 'super_admin';
+  const appId = isSuper ? (req.query.appId || req.appId) : req.appId;
 
   const filters = {
     startDate: req.query.startDate,

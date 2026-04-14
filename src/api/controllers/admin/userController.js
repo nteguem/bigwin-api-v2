@@ -148,7 +148,8 @@ exports.deleteUser = catchAsync(async (req, res, next) => {
  * GET /api/admin/users/stats
  */
 exports.getUserStats = catchAsync(async (req, res, next) => {
-  const appId = req.query.appId ? req.query.appId : req.appId;
+  const isSuper = req.admin && req.admin.role === 'super_admin';
+  const appId = isSuper ? (req.query.appId || req.appId) : req.appId;
 
   const filters = {
     startDate: req.query.startDate,
