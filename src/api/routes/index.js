@@ -73,10 +73,13 @@ router.use('/admin/affiliate-types', identifyApp, ...ADMIN_SUPER,  adminAffiliat
 router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
 // Users: stats accessible aux investisseurs (read-only, scoped à leurs apps); le reste reste super_admin only
 const adminUserController = require('../controllers/admin/userController');
-router.get('/admin/users/stats',     identifyApp, ...ADMIN_INVESTOR, adminUserController.getUserStats);
+router.get('/admin/users/stats',     identifyAppOptional, adminAuth.protect, authorize('super_admin', 'investisseur'), enforceAppScope, readOnly, adminUserController.getUserStats);
 router.use('/admin/users',           identifyApp, ...ADMIN_SUPER,  adminUserRoutes);
 
 // Subscriptions (sales/ventes) — super_admin full, investisseur read-only
+// Stats route accepte appId=all pour super_admin (X-App-Id optionnel)
+const adminSubscriptionController = require('../controllers/admin/subscriptionController');
+router.get('/admin/subscriptions/stats', identifyAppOptional, adminAuth.protect, authorize('super_admin', 'investisseur'), enforceAppScope, readOnly, adminSubscriptionController.getSubscriptionStats);
 router.use('/admin/subscriptions',   identifyApp, ...ADMIN_INVESTOR, adminSubscriptionRoutes);
 
 const adminAdmobRoutes = require('./admin/admobRoutes');
