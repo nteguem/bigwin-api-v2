@@ -142,7 +142,13 @@ const packageSchema = new mongoose.Schema({
 });
 
 // Indexes
-packageSchema.index({ appId: 1, googleProductId: 1 }, { unique: true, sparse: true });
+packageSchema.index(
+  { appId: 1, googleProductId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { googleProductId: { $exists: true, $type: 'string', $ne: '' } }
+  }
+);
 packageSchema.index({ appId: 1, isActive: 1 });
 packageSchema.index({ appId: 1, availableOnGooglePlay: 1 });
 packageSchema.index({ isActive: 1 });

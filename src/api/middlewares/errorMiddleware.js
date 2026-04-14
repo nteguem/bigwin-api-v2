@@ -6,11 +6,20 @@ const errorHandler = (err, req, res, next) => {
 
   // Mongoose duplicate key error
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
+    const keys = Object.keys(err.keyValue || {});
+    const field = keys[0];
     if (field === 'email') {
       error = new AppError('Cet email est déjà utilisé', 400, ErrorCodes.AUTH_EMAIL_EXISTS);
     } else {
-      error = new AppError(`Ce ${field} existe déjà`, 400, ErrorCodes.VALIDATION_ERROR);
+      // Champs significatifs (hors appId qui est juste le scope multi-app)
+      const meaningful = keys.filter(k => k !== 'appId');
+      const conflictField = meaningful[0] || field;
+      const conflictValue = err.keyValue?.[conflictField];
+      error = new AppError(
+        `Le champ "${conflictField}" avec la valeur "${conflictValue}" existe déjà`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
     }
   }
 

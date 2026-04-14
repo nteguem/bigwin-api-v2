@@ -5,15 +5,18 @@ const adminAuth = require('../../middlewares/admin/adminAuth');
 const router = express.Router();
 
 /**
- * Routes publiques (sans authentification)
+ * Public routes — 2FA login flow
  */
-router.post('/login', authController.login);
+router.post('/login', authController.login);              // step 1: credentials → OTP email
+router.post('/verify-otp', authController.verifyOtp);     // step 2: verify OTP → JWT or requirePasswordChange
+router.post('/resend-otp', authController.resendOtp);
+router.post('/set-password', authController.setPassword); // step 3: first-login password set → JWT
 router.post('/refresh', adminAuth.verifyRefreshToken, authController.refresh);
 
 /**
- * Routes protégées (authentification requise)
+ * Protected routes (authenticated admin)
  */
-router.use(adminAuth.protect); // Toutes les routes suivantes nécessitent une authentification
+router.use(adminAuth.protect);
 
 router.post('/logout', authController.logout);
 router.post('/logout-all', authController.logoutAll);

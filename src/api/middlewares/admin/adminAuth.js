@@ -19,8 +19,9 @@ exports.protect = catchAsync(async (req, res, next) => {
   
   const decoded = authService.verifyToken(token, 'admin');
   
-  const admin = await Admin.findById(decoded.id);
-  
+  const admin = await Admin.findById(decoded.id)
+    .populate('assignedApps', 'appId name displayName branding');
+
   if (!admin) {
     return next(new AppError('L\'administrateur n\'existe plus', 401, ErrorCodes.AUTH_USER_NOT_FOUND));
   }

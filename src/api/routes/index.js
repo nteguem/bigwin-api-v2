@@ -6,8 +6,21 @@
  */
 const express = require('express');
 const { identifyApp, identifyAppOptional } = require('../middlewares/common/appIdentifier');
+const adminAuth = require('../middlewares/admin/adminAuth');
+const { authorize, enforceAppScope, readOnly } = require('../middlewares/admin/rbac');
 
 const router = express.Router();
+
+// Reusable admin-protection chains. Each array is expanded with spread when mounting.
+const ADMIN_SUPER     = [adminAuth.protect, authorize('super_admin')];
+const ADMIN_PRONO     = [adminAuth.protect, authorize('super_admin', 'pronostiqueur'), enforceAppScope];
+const ADMIN_INVESTOR  = [adminAuth.protect, authorize('super_admin', 'investisseur'), enforceAppScope, readOnly];
+
+// On /admin/apps, non-super_admin are read-only.
+const appsRoleGuard = (req, res, next) => {
+  if (req.admin.role === 'super_admin') return next();
+  return readOnly(req, res, next);
+};
 
 // ===== ROUTES D'AUTHENTIFICATION =====
 const adminAuthRoutes = require('./admin/authRoutes');
@@ -36,30 +49,38 @@ const adminFormationRoutes = require('./admin/formationRoutes');
 const adminUserRoutes = require('./admin/userRoutes');
 const adminDayOffRoutes = require('./admin/dayOffRoutes');
 const adminSubscriptionRoutes = require('./admin/subscriptionRoutes');
+const adminAdminRoutes = require('./admin/adminRoutes');
 
-// Routes apps (pas besoin de identifyApp car l'admin liste toutes les apps)
-router.use('/admin/apps', adminAppRoutes);
+// RBAC management — super_admin only. Mounted first so it has priority.
+router.use('/admin/admins', adminAdminRoutes);
 
-// Admin routes: identifyApp pour savoir sur quelle app il travaille
-router.use('/admin/packages', identifyApp, adminPackageRoutes);
-router.use('/admin/categories', identifyApp, adminCategoryRoutes);
-router.use('/admin/tickets', identifyApp, adminTicketRoutes);
-router.use('/admin/predictions', identifyApp, adminPredictionRoutes);
-router.use('/admin/sports', identifyApp, adminSportsRoutes);
-router.use('/admin/events', identifyApp, adminEventRoutes);
-router.use('/admin/affiliates', identifyApp, adminAffiliateRoutes);
-router.use('/admin/commissions', identifyApp, adminCommissionRoutes);
-router.use('/admin/affiliate-types', identifyApp, adminAffiliateTypeRoutes);
-router.use('/admin/formations', identifyApp, adminFormationRoutes);
-router.use('/admin/users', identifyApp, adminUserRoutes);
-router.use('/admin/day-off', identifyApp, adminDayOffRoutes);
-router.use('/admin/subscriptions', identifyApp, adminSubscriptionRoutes);
+// Apps list — all roles can GET (to resolve their assignedApps); write ops stay super_admin only (enforced in the subroute file or by the matrix).
+router.use('/admin/apps', adminAuth.protect, appsRoleGuard, adminAppRoutes);
+
+// Predictions & tickets & sports & events & categories & days-off: super_admin + pronostiqueur
+router.use('/admin/packages',        identifyApp, ...ADMIN_SUPER,  adminPackageRoutes);
+router.use('/admin/categories',      identifyApp, ...ADMIN_PRONO,  adminCategoryRoutes);
+router.use('/admin/tickets',         identifyApp, ...ADMIN_PRONO,  adminTicketRoutes);
+router.use('/admin/predictions',     identifyApp, ...ADMIN_PRONO,  adminPredictionRoutes);
+router.use('/admin/sports',          identifyApp, ...ADMIN_PRONO,  adminSportsRoutes);
+router.use('/admin/events',          identifyApp, ...ADMIN_PRONO,  adminEventRoutes);
+router.use('/admin/day-off',         identifyApp, ...ADMIN_PRONO,  adminDayOffRoutes);
+
+// Affiliates / commissions / users / affiliate-types / formations — super_admin only
+router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliateRoutes);
+router.use('/admin/commissions',     identifyApp, ...ADMIN_SUPER,  adminCommissionRoutes);
+router.use('/admin/affiliate-types', identifyApp, ...ADMIN_SUPER,  adminAffiliateTypeRoutes);
+router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
+router.use('/admin/users',           identifyApp, ...ADMIN_SUPER,  adminUserRoutes);
+
+// Subscriptions (sales/ventes) — super_admin full, investisseur read-only
+router.use('/admin/subscriptions',   identifyApp, ...ADMIN_INVESTOR, adminSubscriptionRoutes);
 
 const adminAdmobRoutes = require('./admin/admobRoutes');
-router.use('/admin/admob', adminAdmobRoutes);
+router.use('/admin/admob', adminAuth.protect, authorize('super_admin'), adminAdmobRoutes);
 
 const adminInstallStatsRoutes = require('./admin/installStatsRoutes');
-router.use('/admin/installs', adminInstallStatsRoutes);
+router.use('/admin/installs', adminAuth.protect, authorize('super_admin'), adminInstallStatsRoutes);
 
 // ===== ROUTES AFFILIATE =====
 const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
