@@ -16,7 +16,10 @@ function getTransporter() {
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
-    }
+    },
+    tls: {
+      rejectUnauthorized: String(process.env.SMTP_TLS_STRICT || 'true') === 'true',
+    },
   });
 
   return transporter;
@@ -28,7 +31,7 @@ const LOGO_CID = 'proxidream-logo';
 const BRAND = {
   company: 'Proxidream',
   legalName: 'ETS PROXIDREAM',
-  tagline: 'Solutions numériques pour les acteurs du pronostic et de l\'affiliation',
+  tagline: 'Des solutions numériques qui simplifient le quotidien',
   rccm: 'RC/YAO/2025/A/1002',
   niu: 'M032517681432U',
   city: 'Yaoundé, Cameroun',

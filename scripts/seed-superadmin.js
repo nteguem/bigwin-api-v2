@@ -35,6 +35,8 @@ async function main() {
     admin.mustChangePassword = true;
     admin.isActive = true;
     admin.refreshTokens = [];
+    if (process.env.SEED_FIRSTNAME) admin.firstName = process.env.SEED_FIRSTNAME;
+    if (process.env.SEED_LASTNAME)  admin.lastName  = process.env.SEED_LASTNAME;
     await admin.save();
     console.log(`[seed] updated existing admin → super_admin: ${admin.email}`);
   } else {
