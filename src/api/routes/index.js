@@ -71,6 +71,11 @@ router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliat
 router.use('/admin/commissions',     identifyApp, ...ADMIN_SUPER,  adminCommissionRoutes);
 router.use('/admin/affiliate-types', identifyApp, ...ADMIN_SUPER,  adminAffiliateTypeRoutes);
 router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
+// Users: stats accessible aux investisseurs (read-only, scoped à leurs apps); le reste reste super_admin only
+router.use('/admin/users/stats',     identifyApp, ...ADMIN_INVESTOR, (req, res, next) => {
+  req.url = '/stats';
+  return adminUserRoutes(req, res, next);
+});
 router.use('/admin/users',           identifyApp, ...ADMIN_SUPER,  adminUserRoutes);
 
 // Subscriptions (sales/ventes) — super_admin full, investisseur read-only
