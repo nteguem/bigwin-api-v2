@@ -58,6 +58,9 @@ router.use('/admin/admins', adminAdminRoutes);
 router.use('/admin/apps', adminAuth.protect, appsRoleGuard, adminAppRoutes);
 
 // Predictions & tickets & sports & events & categories & days-off: super_admin + pronostiqueur
+// GET /admin/packages: public (utilisé par les apps Flutter pour lister les packages)
+const adminPackageController = require('../controllers/admin/packageController');
+router.get('/admin/packages', identifyApp, adminPackageController.getAllPackages);
 router.use('/admin/packages',        identifyApp, ...ADMIN_SUPER,  adminPackageRoutes);
 router.use('/admin/categories',      identifyApp, ...ADMIN_PRONO,  adminCategoryRoutes);
 router.use('/admin/tickets',         identifyApp, ...ADMIN_PRONO,  adminTicketRoutes);
