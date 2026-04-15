@@ -45,5 +45,7 @@ exports.enforceAppScope = (req, res, next) => {
  */
 exports.readOnly = (req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
+  // Super admin peut toujours ecrire, seuls les roles restreints sont bloques
+  if (req.admin?.role === 'super_admin') return next();
   return next(new AppError('Ce rôle est en lecture seule', 403, ErrorCodes.FORBIDDEN));
 };
