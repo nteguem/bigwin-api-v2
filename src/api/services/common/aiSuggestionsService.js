@@ -143,24 +143,20 @@ function buildSuggestions(predictionData, odds) {
 
   const items = [];
 
-  // Over/Under principal recommandé par API-Football
-  if (p.under_over) {
-    const raw = p.under_over.toString();
-    const direction = raw.startsWith('-') ? 'under' : 'over';
-    const value = parseFloat(raw.replace(/[-+]/, '')) || 2.5;
+  // Victoire (1 ou 2) — pas de nul
+  if (winnerSide) {
     items.push({
-      market: 'OVER_UNDER',
-      label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${value} buts`,
-      comment: 'Recommandation principale IA',
-      odds: direction === 'under' ? odds.under25 : odds.over25,
-      confidence: null,
-      eventId: 'total_goals',
-      parametric: true,
-      params: { value, direction }
+      market: '1X2',
+      label: `${p.winner?.name} gagne`,
+      comment: p.winner?.comment || 'Vainqueur conseillé IA',
+      odds: winnerSide === 'home' ? odds.home : odds.away,
+      confidence: formatPercent(comparison.total?.[winnerSide]),
+      eventId: winnerSide === 'home' ? 'home_win' : 'away_win',
+      parametric: false
     });
   }
 
-  // Over/Under alternatif (ligne 1.5 ou 3.5 selon la tendance)
+  // Signaux pour Over/Under
   const attackHome = formatPercent(comparison.att?.home);
   const attackAway = formatPercent(comparison.att?.away);
   const defHome = formatPercent(comparison.def?.home);
@@ -168,25 +164,88 @@ function buildSuggestions(predictionData, odds) {
   const attackAvg = attackHome != null && attackAway != null ? (attackHome + attackAway) / 2 : null;
   const defAvg = defHome != null && defAway != null ? (defHome + defAway) / 2 : null;
 
-  if (attackAvg != null && defAvg != null) {
-    // Attaque forte + défense faible → tendance buts élevés → Over 1.5 safe
-    // Attaque faible + défense forte → tendance buts bas → Under 2.5 safe
-    if (attackAvg >= 55 && defAvg <= 50) {
+  // Expected goals depuis predictions.goals (format "-1.5" / "+2.5")
+  const parseExpectedGoals = (val) => {
+    if (val == null) return null;
+    const n = parseFloat(val.toString().replace(/[-+]/, ''));
+    return isNaN(n) ? null : n;
+  };
+  const xgHome = parseExpectedGoals(p.goals?.home);
+  const xgAway = parseExpectedGoals(p.goals?.away);
+  const xgTotal = xgHome != null && xgAway != null ? xgHome + xgAway : null;
+
+  // 1) Over/Under recommandé par API-Football (si fourni)
+  if (p.under_over) {
+    const raw = p.under_over.toString();
+    const direction = raw.startsWith('-') ? 'under' : 'over';
+    const value = parseFloat(raw.replace(/[-+]/, '')) || 2.5;
+    items.push({
+      market: 'OVER_UNDER_MAIN',
+      label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${value} buts`,
+      comment: 'Recommandation IA principale',
+      odds: direction === 'under' ? odds.under25 : odds.over25,
+      confidence: attackAvg != null ? Math.round(attackAvg) : null,
+      eventId: 'total_goals',
+      parametric: true,
+      params: { value, direction }
+    });
+  }
+
+  // 2) Over 1.5 — très safe, toujours proposé
+  items.push({
+    market: 'OVER_1_5',
+    label: 'Plus de 1.5 buts',
+    comment: xgTotal != null ? `Buts attendus: ~${xgTotal.toFixed(1)}` : 'Option sécurisée',
+    odds: null,
+    confidence: attackAvg != null ? Math.round(attackAvg) : null,
+    eventId: 'total_goals',
+    parametric: true,
+    params: { value: 1.5, direction: 'over' }
+  });
+
+  // 3) Over/Under 2.5 selon tendance
+  if (xgTotal != null) {
+    if (xgTotal >= 2.5) {
       items.push({
-        market: 'OVER_UNDER_SAFE',
-        label: 'Plus de 1.5 buts',
-        comment: `Attaques ${attackAvg.toFixed(0)}% / défenses ${defAvg.toFixed(0)}%`,
-        odds: null,
+        market: 'OVER_2_5',
+        label: 'Plus de 2.5 buts',
+        comment: `Buts attendus: ${xgTotal.toFixed(1)}`,
+        odds: odds.over25,
+        confidence: attackAvg != null ? Math.round(attackAvg) : null,
+        eventId: 'total_goals',
+        parametric: true,
+        params: { value: 2.5, direction: 'over' }
+      });
+    } else {
+      items.push({
+        market: 'UNDER_2_5',
+        label: 'Moins de 2.5 buts',
+        comment: `Buts attendus: ${xgTotal.toFixed(1)}`,
+        odds: odds.under25,
+        confidence: defAvg != null ? Math.round(defAvg) : null,
+        eventId: 'total_goals',
+        parametric: true,
+        params: { value: 2.5, direction: 'under' }
+      });
+    }
+  } else if (attackAvg != null && defAvg != null) {
+    // Fallback si pas d'xG : tendance via force attaque/défense
+    if (attackAvg >= defAvg) {
+      items.push({
+        market: 'OVER_2_5',
+        label: 'Plus de 2.5 buts',
+        comment: `Attaque ${attackAvg.toFixed(0)}% vs défense ${defAvg.toFixed(0)}%`,
+        odds: odds.over25,
         confidence: Math.round(attackAvg),
         eventId: 'total_goals',
         parametric: true,
-        params: { value: 1.5, direction: 'over' }
+        params: { value: 2.5, direction: 'over' }
       });
-    } else if (attackAvg <= 45 && defAvg >= 55) {
+    } else {
       items.push({
-        market: 'OVER_UNDER_SAFE',
+        market: 'UNDER_2_5',
         label: 'Moins de 2.5 buts',
-        comment: `Attaques ${attackAvg.toFixed(0)}% / défenses ${defAvg.toFixed(0)}%`,
+        comment: `Défense ${defAvg.toFixed(0)}% vs attaque ${attackAvg.toFixed(0)}%`,
         odds: odds.under25,
         confidence: Math.round(defAvg),
         eventId: 'total_goals',
