@@ -225,17 +225,6 @@ function buildSuggestions(predictionData, odds) {
     });
   }
 
-  if (p.advice) {
-    items.push({
-      market: 'ADVICE',
-      label: p.advice,
-      comment: 'Conseil API-Football (informatif)',
-      odds: null,
-      confidence: null,
-      eventId: null,
-      parametric: false
-    });
-  }
 
   return {
     available: true,
