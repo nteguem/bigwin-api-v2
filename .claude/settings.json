@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --max-time 15 -H 'x-rapidapi-key: 3710085b01msh69d065b7e410a2fp14540djsn798e70cf7fbe' -H 'x-rapidapi-host: api-football-v1.p.rapidapi.com' 'https://api-football-v1.p.rapidapi.com/v3/predictions?fixture=__TRACKED_VAR__' -o C:/tmp/pred___TRACKED_VAR__.json)",
+      "Bash(python -c \"import json; d=json.load\\(open\\(r'C:\\\\tmp\\\\predictions_2026-04-14.json', encoding='utf-8'\\)\\); print\\('Date:', d['date']\\); print\\('Matches:', d['count']\\); print\\('Premier match:', d['matches'][0]['home'], 'vs', d['matches'][0]['away']\\); print\\('Prediction advice:', d['matches'][0]['prediction']['advice'] if d['matches'][0].get\\('prediction'\\) else 'N/A'\\)\")"
+    ]
+  }
+}
