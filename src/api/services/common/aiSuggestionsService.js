@@ -97,34 +97,41 @@ function buildSuggestions(predictionData, odds) {
   if (winnerSide) {
     items.push({
       market: '1X2',
-      selection: winnerSide,
       label: `${p.winner?.name} gagne`,
       comment: p.winner?.comment || null,
       odds: winnerSide === 'home' ? odds.home : odds.away,
-      confidence: formatPercent(comparison.total?.[winnerSide])
+      confidence: formatPercent(comparison.total?.[winnerSide]),
+      eventId: winnerSide === 'home' ? 'home_win' : 'away_win',
+      parametric: false
     });
-  }
 
-  if (p.advice) {
+    // Double chance couvrant le vainqueur conseillé (plus sûr)
+    const dcEventId = winnerSide === 'home' ? 'double_chance_1x' : 'double_chance_x2';
+    const dcOdds = winnerSide === 'home' ? odds.dc1X : odds.dcX2;
     items.push({
-      market: 'ADVICE',
-      selection: null,
-      label: p.advice,
-      comment: 'Conseil API-Football',
-      odds: null,
-      confidence: null
+      market: 'DOUBLE_CHANCE',
+      label: `Double chance ${winnerSide === 'home' ? '1X' : 'X2'}`,
+      comment: 'Option plus sûre',
+      odds: dcOdds,
+      confidence: null,
+      eventId: dcEventId,
+      parametric: false
     });
   }
 
-  const goalsOver = p.goals?.home;
   if (p.under_over) {
+    const raw = p.under_over.toString();
+    const direction = raw.startsWith('-') ? 'under' : 'over';
+    const value = parseFloat(raw.replace(/[-+]/, '')) || 2.5;
     items.push({
       market: 'OVER_UNDER',
-      selection: p.under_over.startsWith('-') ? 'under' : 'over',
-      label: `${p.under_over.startsWith('-') ? 'Moins' : 'Plus'} de ${p.under_over.replace(/[-+]/, '')} buts`,
+      label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${value} buts`,
       comment: null,
-      odds: p.under_over.startsWith('-') ? odds.under25 : odds.over25,
-      confidence: null
+      odds: direction === 'under' ? odds.under25 : odds.over25,
+      confidence: null,
+      eventId: 'total_goals',
+      parametric: true,
+      params: { value, direction }
     });
   }
 
@@ -134,11 +141,24 @@ function buildSuggestions(predictionData, odds) {
     const bothScore = bttsHome >= 40 && bttsAway >= 40;
     items.push({
       market: 'BTTS',
-      selection: bothScore ? 'yes' : 'no',
       label: bothScore ? 'Les deux équipes marquent: Oui' : 'Les deux équipes marquent: Non',
       comment: `Attaque dom ${bttsHome}% / ext ${bttsAway}%`,
       odds: bothScore ? odds.bttsYes : odds.bttsNo,
-      confidence: Math.round((bttsHome + bttsAway) / 2)
+      confidence: Math.round((bttsHome + bttsAway) / 2),
+      eventId: bothScore ? 'both_teams_score' : 'both_teams_score_no',
+      parametric: false
+    });
+  }
+
+  if (p.advice) {
+    items.push({
+      market: 'ADVICE',
+      label: p.advice,
+      comment: 'Conseil API-Football (informatif)',
+      odds: null,
+      confidence: null,
+      eventId: null,
+      parametric: false
     });
   }
 
