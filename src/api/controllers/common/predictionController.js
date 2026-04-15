@@ -3,6 +3,7 @@
 const predictionService = require('../../services/common/predictionService');
 const ticketService = require('../../services/common/ticketService');
 const PredictionCorrectionService = require('../../services/common/predictionCorrectionService');
+const aiSuggestionsService = require('../../services/common/aiSuggestionsService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
 // Instance partagée pour les corrections manuelles
@@ -227,6 +228,20 @@ class PredictionController {
       });
     } catch (error) {
       formatError(res, error.message, 500);
+    }
+  }
+
+  // GET /predictions/ai-suggestions/:fixtureId - Suggestions IA pour un match
+  async getAISuggestions(req, res) {
+    try {
+      const { fixtureId } = req.params;
+      const suggestions = await aiSuggestionsService.getSuggestionsForFixture(fixtureId);
+      formatSuccess(res, {
+        data: suggestions,
+        message: 'AI suggestions retrieved successfully'
+      });
+    } catch (error) {
+      formatError(res, error.message, error.statusCode || 500);
     }
   }
 }

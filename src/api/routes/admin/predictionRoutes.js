@@ -18,6 +18,10 @@ router.route('/')
 router.route('/bulk')
   .post(predictionController.addPredictionsToTicket);
 
+// Suggestions IA (API-Football predictions + odds) pour un match
+router.route('/ai-suggestions/:fixtureId')
+  .get(predictionController.getAISuggestions);
+
 // Correction manuelle pour une date spécifique
 // POST /admin/predictions/correct/2026-03-23?forceApi=true
 router.route('/correct/:date')
