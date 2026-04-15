@@ -143,31 +143,7 @@ function buildSuggestions(predictionData, odds) {
 
   const items = [];
 
-  if (winnerSide) {
-    items.push({
-      market: '1X2',
-      label: `${p.winner?.name} gagne`,
-      comment: p.winner?.comment || null,
-      odds: winnerSide === 'home' ? odds.home : odds.away,
-      confidence: formatPercent(comparison.total?.[winnerSide]),
-      eventId: winnerSide === 'home' ? 'home_win' : 'away_win',
-      parametric: false
-    });
-
-    // Double chance couvrant le vainqueur conseillé (plus sûr)
-    const dcEventId = winnerSide === 'home' ? 'double_chance_1x' : 'double_chance_x2';
-    const dcOdds = winnerSide === 'home' ? odds.dc1X : odds.dcX2;
-    items.push({
-      market: 'DOUBLE_CHANCE',
-      label: `Double chance ${winnerSide === 'home' ? '1X' : 'X2'}`,
-      comment: 'Option plus sûre',
-      odds: dcOdds,
-      confidence: null,
-      eventId: dcEventId,
-      parametric: false
-    });
-  }
-
+  // Over/Under principal recommandé par API-Football
   if (p.under_over) {
     const raw = p.under_over.toString();
     const direction = raw.startsWith('-') ? 'under' : 'over';
@@ -175,7 +151,7 @@ function buildSuggestions(predictionData, odds) {
     items.push({
       market: 'OVER_UNDER',
       label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${value} buts`,
-      comment: null,
+      comment: 'Recommandation principale IA',
       odds: direction === 'under' ? odds.under25 : odds.over25,
       confidence: null,
       eventId: 'total_goals',
@@ -184,6 +160,43 @@ function buildSuggestions(predictionData, odds) {
     });
   }
 
+  // Over/Under alternatif (ligne 1.5 ou 3.5 selon la tendance)
+  const attackHome = formatPercent(comparison.att?.home);
+  const attackAway = formatPercent(comparison.att?.away);
+  const defHome = formatPercent(comparison.def?.home);
+  const defAway = formatPercent(comparison.def?.away);
+  const attackAvg = attackHome != null && attackAway != null ? (attackHome + attackAway) / 2 : null;
+  const defAvg = defHome != null && defAway != null ? (defHome + defAway) / 2 : null;
+
+  if (attackAvg != null && defAvg != null) {
+    // Attaque forte + défense faible → tendance buts élevés → Over 1.5 safe
+    // Attaque faible + défense forte → tendance buts bas → Under 2.5 safe
+    if (attackAvg >= 55 && defAvg <= 50) {
+      items.push({
+        market: 'OVER_UNDER_SAFE',
+        label: 'Plus de 1.5 buts',
+        comment: `Attaques ${attackAvg.toFixed(0)}% / défenses ${defAvg.toFixed(0)}%`,
+        odds: null,
+        confidence: Math.round(attackAvg),
+        eventId: 'total_goals',
+        parametric: true,
+        params: { value: 1.5, direction: 'over' }
+      });
+    } else if (attackAvg <= 45 && defAvg >= 55) {
+      items.push({
+        market: 'OVER_UNDER_SAFE',
+        label: 'Moins de 2.5 buts',
+        comment: `Attaques ${attackAvg.toFixed(0)}% / défenses ${defAvg.toFixed(0)}%`,
+        odds: odds.under25,
+        confidence: Math.round(defAvg),
+        eventId: 'total_goals',
+        parametric: true,
+        params: { value: 2.5, direction: 'under' }
+      });
+    }
+  }
+
+  // BTTS
   const bttsHome = formatPercent(comparison.goals?.home);
   const bttsAway = formatPercent(comparison.goals?.away);
   if (bttsHome != null && bttsAway != null) {
@@ -195,6 +208,19 @@ function buildSuggestions(predictionData, odds) {
       odds: bothScore ? odds.bttsYes : odds.bttsNo,
       confidence: Math.round((bttsHome + bttsAway) / 2),
       eventId: bothScore ? 'both_teams_score' : 'both_teams_score_no',
+      parametric: false
+    });
+  }
+
+  // BTTS + Over 2.5 combiné (pari plus agressif)
+  if (bttsHome != null && bttsAway != null && bttsHome >= 50 && bttsAway >= 50) {
+    items.push({
+      market: 'BTTS_AND_OVER',
+      label: 'Les deux marquent + Plus de 2.5 buts',
+      comment: 'Match offensif probable',
+      odds: null,
+      confidence: Math.round((bttsHome + bttsAway) / 2),
+      eventId: 'both_teams_score_3plus',
       parametric: false
     });
   }
