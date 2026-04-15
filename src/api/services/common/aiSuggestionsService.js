@@ -174,86 +174,35 @@ function buildSuggestions(predictionData, odds) {
   const xgAway = parseExpectedGoals(p.goals?.away);
   const xgTotal = xgHome != null && xgAway != null ? xgHome + xgAway : null;
 
-  // 1) Over/Under recommandé par API-Football (si fourni)
-  if (p.under_over) {
-    const raw = p.under_over.toString();
-    const direction = raw.startsWith('-') ? 'under' : 'over';
-    const value = parseFloat(raw.replace(/[-+]/, '')) || 2.5;
+  // Over/Under figés sur 2.5 et 3.5 — direction selon expected goals ou tendance
+  const pickDirection = (line) => {
+    if (xgTotal != null) return xgTotal >= line ? 'over' : 'under';
+    if (attackAvg != null && defAvg != null) return attackAvg > defAvg ? 'over' : 'under';
+    return 'over';
+  };
+
+  const baseComment = xgTotal != null
+    ? `Buts attendus: ${xgTotal.toFixed(1)}`
+    : attackAvg != null && defAvg != null
+    ? `Attaque ${attackAvg.toFixed(0)}% / défense ${defAvg.toFixed(0)}%`
+    : 'Tendance buts';
+
+  [2.5, 3.5].forEach((line) => {
+    const direction = pickDirection(line);
+    const confidence = direction === 'over'
+      ? (attackAvg != null ? Math.round(attackAvg) : null)
+      : (defAvg != null ? Math.round(defAvg) : null);
     items.push({
-      market: 'OVER_UNDER_MAIN',
-      label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${value} buts`,
-      comment: 'Recommandation IA principale',
-      odds: direction === 'under' ? odds.under25 : odds.over25,
-      confidence: attackAvg != null ? Math.round(attackAvg) : null,
+      market: `OVER_UNDER_${line.toString().replace('.', '_')}`,
+      label: `${direction === 'under' ? 'Moins' : 'Plus'} de ${line} buts`,
+      comment: baseComment,
+      odds: line === 2.5 ? (direction === 'over' ? odds.over25 : odds.under25) : null,
+      confidence,
       eventId: 'total_goals',
       parametric: true,
-      params: { value, direction }
+      params: { value: line, direction }
     });
-  }
-
-  // 2) Over 1.5 — très safe, toujours proposé
-  items.push({
-    market: 'OVER_1_5',
-    label: 'Plus de 1.5 buts',
-    comment: xgTotal != null ? `Buts attendus: ~${xgTotal.toFixed(1)}` : 'Option sécurisée',
-    odds: null,
-    confidence: attackAvg != null ? Math.round(attackAvg) : null,
-    eventId: 'total_goals',
-    parametric: true,
-    params: { value: 1.5, direction: 'over' }
   });
-
-  // 3) Over/Under 2.5 selon tendance
-  if (xgTotal != null) {
-    if (xgTotal >= 2.5) {
-      items.push({
-        market: 'OVER_2_5',
-        label: 'Plus de 2.5 buts',
-        comment: `Buts attendus: ${xgTotal.toFixed(1)}`,
-        odds: odds.over25,
-        confidence: attackAvg != null ? Math.round(attackAvg) : null,
-        eventId: 'total_goals',
-        parametric: true,
-        params: { value: 2.5, direction: 'over' }
-      });
-    } else {
-      items.push({
-        market: 'UNDER_2_5',
-        label: 'Moins de 2.5 buts',
-        comment: `Buts attendus: ${xgTotal.toFixed(1)}`,
-        odds: odds.under25,
-        confidence: defAvg != null ? Math.round(defAvg) : null,
-        eventId: 'total_goals',
-        parametric: true,
-        params: { value: 2.5, direction: 'under' }
-      });
-    }
-  } else if (attackAvg != null && defAvg != null) {
-    // Fallback si pas d'xG : tendance via force attaque/défense
-    if (attackAvg >= defAvg) {
-      items.push({
-        market: 'OVER_2_5',
-        label: 'Plus de 2.5 buts',
-        comment: `Attaque ${attackAvg.toFixed(0)}% vs défense ${defAvg.toFixed(0)}%`,
-        odds: odds.over25,
-        confidence: Math.round(attackAvg),
-        eventId: 'total_goals',
-        parametric: true,
-        params: { value: 2.5, direction: 'over' }
-      });
-    } else {
-      items.push({
-        market: 'UNDER_2_5',
-        label: 'Moins de 2.5 buts',
-        comment: `Défense ${defAvg.toFixed(0)}% vs attaque ${attackAvg.toFixed(0)}%`,
-        odds: odds.under25,
-        confidence: Math.round(defAvg),
-        eventId: 'total_goals',
-        parametric: true,
-        params: { value: 2.5, direction: 'under' }
-      });
-    }
-  }
 
   // BTTS
   const bttsHome = formatPercent(comparison.goals?.home);
