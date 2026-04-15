@@ -3,8 +3,14 @@ const axios = require('axios');
 const API_HOST = 'api-football-v1.p.rapidapi.com';
 const BASE_URL = `https://${API_HOST}/v3`;
 const CACHE_TTL_MS = 60 * 60 * 1000;
+const QUOTA_BLOCK_THRESHOLD = 5;
 
 const cache = new Map();
+const quotaState = {
+  limit: null,
+  remaining: null,
+  updatedAt: null
+};
 
 function getCached(key) {
   const entry = cache.get(key);
@@ -21,7 +27,7 @@ function setCached(key, data) {
 }
 
 async function rapidGet(endpoint, params) {
-  const { data } = await axios.get(`${BASE_URL}${endpoint}`, {
+  const response = await axios.get(`${BASE_URL}${endpoint}`, {
     params,
     headers: {
       'x-rapidapi-key': process.env.RAPID_API_KEY,
@@ -29,8 +35,51 @@ async function rapidGet(endpoint, params) {
     },
     timeout: 15000
   });
-  return data;
+  updateQuotaFromHeaders(response.headers);
+  return response.data;
 }
+
+function updateQuotaFromHeaders(headers) {
+  if (!headers) return;
+  const limit = parseInt(headers['x-ratelimit-requests-limit'], 10);
+  const remaining = parseInt(headers['x-ratelimit-requests-remaining'], 10);
+  if (!isNaN(limit)) quotaState.limit = limit;
+  if (!isNaN(remaining)) quotaState.remaining = remaining;
+  quotaState.updatedAt = new Date().toISOString();
+}
+
+exports.getQuota = () => ({
+  limit: quotaState.limit,
+  remaining: quotaState.remaining,
+  updatedAt: quotaState.updatedAt,
+  blockThreshold: QUOTA_BLOCK_THRESHOLD,
+  blocked: quotaState.remaining != null && quotaState.remaining <= QUOTA_BLOCK_THRESHOLD
+});
+
+exports.refreshQuota = async () => {
+  if (!process.env.RAPID_API_KEY) return exports.getQuota();
+  try {
+    const response = await axios.get(`${BASE_URL}/status`, {
+      headers: {
+        'x-rapidapi-key': process.env.RAPID_API_KEY,
+        'x-rapidapi-host': API_HOST
+      },
+      timeout: 10000
+    });
+    updateQuotaFromHeaders(response.headers);
+    const reqs = response.data?.response?.requests;
+    if (reqs) {
+      if (typeof reqs.limit_day === 'number') quotaState.limit = reqs.limit_day;
+      if (typeof reqs.current === 'number' && typeof reqs.limit_day === 'number') {
+        quotaState.remaining = Math.max(0, reqs.limit_day - reqs.current);
+      }
+      quotaState.updatedAt = new Date().toISOString();
+    }
+  } catch (_) {
+    // silencieux — on retourne ce qu'on a
+  }
+  return exports.getQuota();
+};
 
 function pickMainOdds(oddsResponse) {
   const item = oddsResponse?.response?.[0];
@@ -190,6 +239,17 @@ exports.getSuggestionsForFixture = async (fixtureId) => {
   const cacheKey = `ai:${fixtureId}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
+
+  if (
+    quotaState.remaining != null &&
+    quotaState.remaining <= QUOTA_BLOCK_THRESHOLD
+  ) {
+    const err = new Error(
+      `Quota IA presque épuisé (${quotaState.remaining} restant). Suggestions bloquées.`
+    );
+    err.statusCode = 429;
+    throw err;
+  }
 
   try {
     const [predictionData, oddsData] = await Promise.all([

@@ -22,6 +22,10 @@ router.route('/bulk')
 router.route('/ai-suggestions/:fixtureId')
   .get(predictionController.getAISuggestions);
 
+// Quota API-Football (restant du jour)
+router.route('/ai-quota')
+  .get(predictionController.getAIQuota);
+
 // Correction manuelle pour une date spécifique
 // POST /admin/predictions/correct/2026-03-23?forceApi=true
 router.route('/correct/:date')

@@ -237,11 +237,24 @@ class PredictionController {
       const { fixtureId } = req.params;
       const suggestions = await aiSuggestionsService.getSuggestionsForFixture(fixtureId);
       formatSuccess(res, {
-        data: suggestions,
+        data: { ...suggestions, quota: aiSuggestionsService.getQuota() },
         message: 'AI suggestions retrieved successfully'
       });
     } catch (error) {
       formatError(res, error.message, error.statusCode || 500);
+    }
+  }
+
+  // GET /predictions/ai-quota - Quota API-Football du jour
+  async getAIQuota(req, res) {
+    try {
+      const { refresh } = req.query;
+      const quota = refresh === '1'
+        ? await aiSuggestionsService.refreshQuota()
+        : aiSuggestionsService.getQuota();
+      formatSuccess(res, { data: quota, message: 'AI quota retrieved' });
+    } catch (error) {
+      formatError(res, error.message, 500);
     }
   }
 }
