@@ -615,7 +615,7 @@ function renderHTML(status, transaction) {
           <span class="detail-label">Package</span>
           <span class="detail-value">${typeof details.package.name === 'object' ? (details.package.name.en || details.package.name.fr || '') : details.package.name}</span>
         </div>` : ''}
-        ${details.paymentMethod ? `
+        ${details.paymentMethod && typeof details.paymentMethod === 'string' ? `
         <div class="detail-row">
           <span class="detail-label">Payment Method</span>
           <span class="detail-value">${details.paymentMethod.replace('_', ' ').toUpperCase()}</span>

@@ -93,10 +93,10 @@ class CouponController {
               status: pred.status,
               sport: pred?.sport,
               event: {
-                id: pred.event.id,
-                label: pred.event.label[lang] || pred.event.label.fr || pred.event.label.current,
-                description: pred.event.description.current,
-                category: pred.event.category
+                id: pred.event?.id,
+                label: pred.event?.label?.[lang] || pred.event?.label?.fr || pred.event?.label?.current || '',
+                description: pred.event?.description?.current || '',
+                category: pred.event?.category
               },
               match: {
                 id: pred.matchData.id,
@@ -203,8 +203,8 @@ class CouponController {
         isVisible: true
       });
 
-      // Ne garder que les catégories VIP
-      const vipTickets = result.data.filter(ticket => ticket.category.isVip);
+      // Ne garder que les catégories VIP (skip les tickets dont la catégorie a été supprimée)
+      const vipTickets = result.data.filter(ticket => ticket.category && ticket.category.isVip);
 
       // Grouper par catégorie avec données masquées
       const categoriesMap = new Map();
@@ -326,10 +326,10 @@ class CouponController {
               status: pred.status,
               sport: pred?.sport,
               event: {
-                id: pred.event.id,
-                label: pred.event.label[lang] || pred.event.label.fr || pred.event.label.current,
-                description: pred.event.description.current,
-                category: pred.event.category
+                id: pred.event?.id,
+                label: pred.event?.label?.[lang] || pred.event?.label?.fr || pred.event?.label?.current || '',
+                description: pred.event?.description?.current || '',
+                category: pred.event?.category
               },
               match: {
                 id: pred.matchData.id,
@@ -494,10 +494,10 @@ class CouponController {
                 status: pred.status,
                 sport: pred?.sport,
                 event: {
-                  id: pred.event.id,
-                  label: pred.event.label[lang] || pred.event.label.fr || pred.event.label.current,
-                  description: pred.event.description.current,
-                  category: pred.event.category
+                  id: pred.event?.id,
+                  label: pred.event?.label?.[lang] || pred.event?.label?.fr || pred.event?.label?.current || '',
+                  description: pred.event?.description?.current || '',
+                  category: pred.event?.category
                 },
                 match: {
                   id: pred.matchData.id,

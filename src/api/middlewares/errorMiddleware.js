@@ -29,6 +29,16 @@ const errorHandler = (err, req, res, next) => {
     error = new AppError(message, 400, ErrorCodes.VALIDATION_ERROR);
   }
 
+  // Mongoose CastError : ObjectId mal formaté dans :id, ou cast d'un type incompatible.
+  // Sans ce handler, un GET /xxx/abc renvoyait un 500 alors que c'est une erreur cliente 400.
+  if (err.name === 'CastError') {
+    error = new AppError(
+      `Identifiant invalide pour le champ "${err.path}"`,
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    );
+  }
+
   res.status(error.statusCode || 500).json({
     success: false,
     error: {

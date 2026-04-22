@@ -89,7 +89,7 @@ async function sendPaymentSuccessNotification(appId, transaction) {
     // Populer le package pour avoir son nom
     await transaction.populate('package');
     const packageName = transaction.package?.name?.fr || transaction.package?.name?.en || 'Package Premium';
-    
+
     const notification = {
       headings: {
         en: "🎉 Payment Successful!",
@@ -102,7 +102,8 @@ async function sendPaymentSuccessNotification(appId, transaction) {
       data: {
         type: "payment_success",
         transaction_id: transaction._id.toString(),
-        package_id: transaction.package._id.toString(),
+        // Le package peut avoir été supprimé en BD entre l'initiation et le webhook
+        package_id: transaction.package?._id?.toString() || '',
         subscription_type: "premium",
         action: "view_subscription"
       },
@@ -156,7 +157,8 @@ async function sendPaymentFailedNotification(appId, transaction) {
       data: {
         type: "payment_failed",
         transaction_id: transaction._id.toString(),
-        package_id: transaction.package._id.toString(),
+        // Le package peut avoir été supprimé en BD entre l'initiation et le webhook
+        package_id: transaction.package?._id?.toString() || '',
         action: "retry_payment"
       },
       options: {

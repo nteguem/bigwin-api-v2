@@ -211,10 +211,12 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
   
   let formation = null;
   if (packageObj.formationId && typeof packageObj.formationId === 'object') {
+    // Si la Formation a été supprimée, populate retourne {} ou avec champs partiels.
+    // Optional chaining sur title/description pour ne pas crasher si champs absents.
     formation = {
       _id: packageObj.formationId._id,
-      title: packageObj.formationId.title[lang] || packageObj.formationId.title.fr,
-      description: packageObj.formationId.description[lang] || packageObj.formationId.description.fr,
+      title: packageObj.formationId.title?.[lang] || packageObj.formationId.title?.fr || '',
+      description: packageObj.formationId.description?.[lang] || packageObj.formationId.description?.fr || '',
       isActive: packageObj.formationId.isActive,
       createdAt: packageObj.formationId.createdAt,
       updatedAt: packageObj.formationId.updatedAt

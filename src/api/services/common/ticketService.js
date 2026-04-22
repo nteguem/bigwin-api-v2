@@ -100,16 +100,19 @@ class TicketService {
   async getTicketById(appId, id) {
     // ⭐ ÉTAPE 1 : Récupérer le ticket
     const ticket = await Ticket.findOne({ _id: id }).populate('category');
-    
+
     if (!ticket) return null;
-    
+
+    // Catégorie supprimée en BD : ticket orphelin, on le considère inaccessible
+    if (!ticket.category) return null;
+
     // ⭐ ÉTAPE 2 : Vérifier que la catégorie est accessible
     const categoryAccessible = await Category.findOne({
       _id: ticket.category._id,
       appId: { $in: [appId, "shared"] },
       isActive: true
     });
-    
+
     if (!categoryAccessible) return null; // Catégorie non accessible
     
     const predictions = await predictionService.getPredictionsByTicket(appId, id);

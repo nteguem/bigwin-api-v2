@@ -10,12 +10,20 @@ class DashboardService {
    * @param {String} appId - ID de l'application
    */
   async getAffiliateStats(appId, affiliateId) {
+    const { AppError, ErrorCodes } = require('../../../utils/AppError');
+
     // ⭐ Balance actuelle POUR CETTE APP
-    const affiliate = await require('../../models/affiliate/Affiliate').findOne({ 
-      _id: affiliateId, 
-      appId 
+    const affiliate = await require('../../models/affiliate/Affiliate').findOne({
+      _id: affiliateId,
+      appId
     });
-    
+
+    // Affiliate supprimé en BD ou n'appartenant pas à cette app : 404 propre
+    // au lieu d'un crash 500 à l'accès `affiliate.pendingBalance`.
+    if (!affiliate) {
+      throw new AppError('Affilié non trouvé', 404, ErrorCodes.NOT_FOUND);
+    }
+
     // ⭐ Nombre total de filleuls POUR CETTE APP
     const totalReferrals = await User.countDocuments({ referredBy: affiliateId, appId });
     

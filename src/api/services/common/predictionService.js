@@ -101,9 +101,12 @@ class PredictionService {
    */
   async getPredictionById(appId, id) {
     const prediction = await Prediction.findOne({ _id: id }).populate('ticket');
-    
+
     if (!prediction) return null;
-    
+
+    // Ticket supprimé en BD : prédiction orpheline, on la considère inaccessible
+    if (!prediction.ticket) return null;
+
     // Vérifier que le ticket est accessible
     const ticket = await Ticket.findOne({ _id: prediction.ticket._id });
     if (!ticket) return null;
