@@ -29,10 +29,11 @@ const korapayTransactionSchema = new mongoose.Schema({
     required: true
   },
   
-  // Référence retournée par KoraPay après initialize
+  // Référence retournée par KoraPay après initialize.
+  // Index déclaré plus bas via `schema.index({ reference: 1 })` — pas besoin
+  // de `index: true` ici (sinon Mongoose warn "Duplicate schema index").
   reference: {
-    type: String,
-    index: true
+    type: String
   },
   
   // URL de checkout retournée par KoraPay

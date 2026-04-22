@@ -45,17 +45,27 @@ class DeviceService {
   }
   
   /**
-   * Lier un device à un utilisateur
+   * Lier un device à un utilisateur.
+   *
    * @param {String} appId - ID de l'application
+   *
+   * Comportement défensif : si le device n'existe pas en BD (deviceId stocké
+   * en local mais jamais registered, ou device supprimé), on log et on retourne
+   * null au lieu de throw. Le login/register continue, l'utilisateur est
+   * connecté, le device sera proprement créé au prochain /devices/register.
+   * Avant : throw AppError 404 → polluait les logs sans casser le flow.
    */
   async linkDeviceToUser(appId, deviceId, userId) {
     // ⭐ Filtrer par appId
     const device = await Device.findOne({ deviceId, appId, isActive: true });
-    
+
     if (!device) {
-      throw new AppError('Device non trouvé', 404, ErrorCodes.NOT_FOUND);
+      console.warn(
+        `[DeviceService] linkDeviceToUser: device "${deviceId}" introuvable pour app "${appId}". Sera re-registered au prochain ouverture de l'app.`
+      );
+      return null;
     }
-    
+
     return await device.linkToUser(userId);
   }
   
