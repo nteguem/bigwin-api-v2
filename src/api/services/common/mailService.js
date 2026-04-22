@@ -36,7 +36,7 @@ const BRAND = {
   niu: 'M032517681432U',
   city: 'Yaoundé, Cameroun',
   website: 'https://proxidream.com',
-  supportEmail: 'support@proxidream.com',
+  supportEmail: 'contact@proxidream.com',
   primary: '#1E2ACC',
   primaryDark: '#151FA0',
   accent: '#FFD60A',

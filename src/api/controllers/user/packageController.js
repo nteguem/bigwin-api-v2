@@ -94,8 +94,9 @@ exports.getPackage = catchAsync(async (req, res, next) => {
   if (req.user) {
     // ⭐ Passer appId au service
     const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
-    userHasPackage = activeSubscriptions.some(sub => 
-      sub.package._id.toString() === package._id.toString()
+    // Skip subscriptions orphelines (Package supprimé en BD)
+    userHasPackage = activeSubscriptions.some(sub =>
+      sub.package && sub.package._id.toString() === package._id.toString()
     );
   }
 

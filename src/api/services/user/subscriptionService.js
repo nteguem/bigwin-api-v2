@@ -125,11 +125,23 @@ class SubscriptionService {
   /**
    * Obtenir les informations complètes d'abonnement d'un utilisateur
    * @param {String} appId - ID de l'application
+   *
+   * Note : on filtre les souscriptions dont le package a été supprimé en BD
+   * (populate('package') renvoie alors null). Sans ce filtre, l'accès
+   * `subscription.package._id` provoquait un crash sur tous les endpoints
+   * qui appellent cette méthode (login, /me, register, refresh).
    */
   async getUserSubscriptionInfo(appId, userId, lang = 'fr') {
     const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
 
-    const activePackages = activeSubscriptions.map(subscription => ({
+    const validSubscriptions = activeSubscriptions.filter(sub => sub.package);
+    if (validSubscriptions.length !== activeSubscriptions.length) {
+      console.warn(
+        `[SubscriptionService] App ${appId} / User ${userId} : ${activeSubscriptions.length - validSubscriptions.length} souscription(s) orpheline(s) ignorée(s) (package supprimé)`
+      );
+    }
+
+    const activePackages = validSubscriptions.map(subscription => ({
       id: subscription.package._id,
       name: subscription.package.name,
       description: subscription.package.description,
@@ -158,9 +170,9 @@ class SubscriptionService {
     }));
 
     return {
-      hasActiveSubscription: activeSubscriptions.length > 0,
+      hasActiveSubscription: validSubscriptions.length > 0,
       activePackages,
-      totalActiveSubscriptions: activeSubscriptions.length
+      totalActiveSubscriptions: validSubscriptions.length
     };
   }
 
@@ -196,20 +208,23 @@ class SubscriptionService {
    */
   async hasAccessToCategory(appId, userId, categoryId) {
     const activeSubscriptions = await this.getActiveSubscriptions(appId, userId);
-    
+
     for (const subscription of activeSubscriptions) {
+      // Skip subscriptions orphelines (Package hard-deleted en BD)
+      if (!subscription.package) continue;
+
       // ⭐ MODIFIÉ : Ne pas filtrer par appId pour permettre l'accès aux packages/catégories partagés
       // On récupère le package tel quel (peut être de l'app ou shared)
-      const currentPackage = await Package.findOne({ 
+      const currentPackage = await Package.findOne({
         _id: subscription.package._id
         // Pas de filtre appId ici - le package peut être de n'importe quelle app ou shared
       });
-      
+
       if (currentPackage && currentPackage.categories.includes(categoryId)) {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -228,12 +243,15 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
+      // Skip subscriptions orphelines
+      if (!subscription.package) continue;
+
       // ⭐ MODIFIÉ : Ne pas filtrer par appId
-      const currentPackage = await Package.findOne({ 
+      const currentPackage = await Package.findOne({
         _id: subscription.package._id
         // Pas de filtre appId - le package peut contenir des catégories shared
       });
-      
+
       if (currentPackage) {
         categoryIds.push(...currentPackage.categories);
       }
@@ -271,12 +289,15 @@ class SubscriptionService {
     // Récupérer les catégories ACTUELLES de chaque package
     const categoryIds = [];
     for (const subscription of activeSubscriptions) {
+      // Skip subscriptions orphelines
+      if (!subscription.package) continue;
+
       // ⭐ MODIFIÉ : Ne pas filtrer par appId
-      const currentPackage = await Package.findOne({ 
+      const currentPackage = await Package.findOne({
         _id: subscription.package._id
         // Pas de filtre appId - le package peut contenir des catégories shared
       });
-      
+
       if (currentPackage) {
         categoryIds.push(...currentPackage.categories);
       }

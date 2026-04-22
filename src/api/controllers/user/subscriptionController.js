@@ -148,8 +148,10 @@ exports.getSubscriptionStatus = catchAsync(async (req, res, next) => {
   const activeSubscriptions = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
 
   // Récupérer toutes les catégories accessibles
+  // (skip les subscriptions orphelines : Package supprimé en BD)
   const accessibleCategories = [];
   for (const subscription of activeSubscriptions) {
+    if (!subscription.package || !subscription.package.categories) continue;
     accessibleCategories.push(...subscription.package.categories);
   }
 

@@ -16,6 +16,18 @@ class CommissionService {
       .populate('user')
       .populate('package');
 
+    // Subscription introuvable (race condition / suppression entre création et appel)
+    if (!subscription) {
+      console.warn(`[CommissionService] Subscription ${subscriptionId} introuvable pour app ${appId}`);
+      return null;
+    }
+
+    // User supprimé : pas de parrain à créditer
+    if (!subscription.user) {
+      console.warn(`[CommissionService] User référencé par subscription ${subscriptionId} introuvable (supprimé ?)`);
+      return null;
+    }
+
     // Vérifier si l'user a un parrain
     if (!subscription.user.referredBy) return null;
 

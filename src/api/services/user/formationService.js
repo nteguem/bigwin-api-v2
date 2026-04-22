@@ -27,7 +27,10 @@ class UserFormationService {
     if (user) {
       // ⭐ Passer appId au service
       const subscriptions = await subscriptionService.getActiveSubscriptions(appId, user._id);
-      userPackages = subscriptions.map(sub => sub.package._id.toString());
+      // Filtrer les subscriptions orphelines (Package supprimé en BD)
+      userPackages = subscriptions
+        .filter(sub => sub.package)
+        .map(sub => sub.package._id.toString());
     }
 
     // Formater les formations selon l'accès
@@ -64,7 +67,10 @@ class UserFormationService {
     if (user) {
       // ⭐ Passer appId au service
       const subscriptions = await subscriptionService.getActiveSubscriptions(appId, user._id);
-      userPackages = subscriptions.map(sub => sub.package._id.toString());
+      // Filtrer les subscriptions orphelines (Package supprimé en BD)
+      userPackages = subscriptions
+        .filter(sub => sub.package)
+        .map(sub => sub.package._id.toString());
     }
 
     return this.formatFormationWithAccess(formation, userPackages, lang);

@@ -275,15 +275,21 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
       <div class="transaction-id">${transaction_id}</div>
     `;
   } else if (transactionStatus.status === 'approved') {
+    // Le package peut être null si supprimé en BD entre l'initiation et la confirmation
+    const pkg = transactionStatus.package;
+    const pkgName = pkg
+      ? (typeof pkg.name === 'object' ? (pkg.name.fr || pkg.name.en) : pkg.name)
+      : 'votre package';
+    const pkgDuration = pkg && pkg.duration ? `${pkg.duration} jours` : '—';
     content = `
       <div class="icon">🎉</div>
       <h1 class="success">Paiement Réussi !</h1>
       <div class="status-badge status-success">✅ Confirmé</div>
-      <p>Abonnement <strong>${transactionStatus.package.name.fr}</strong> activé</p>
+      <p>Abonnement <strong>${pkgName}</strong> activé</p>
       <div class="details">
         <p><strong>Transaction:</strong> <span class="transaction-id">${transaction_id}</span></p>
         <p><strong>Montant:</strong> <span class="amount">${transactionStatus.amount} ${transactionStatus.currency}</span></p>
-        <p><strong>Durée:</strong> ${transactionStatus.package.duration} jours</p>
+        <p><strong>Durée:</strong> ${pkgDuration}</p>
       </div>
     `;
   } else if (transactionStatus.status === 'declined' || transactionStatus.status === 'canceled') {

@@ -610,10 +610,10 @@ function renderHTML(status, transaction) {
           <span class="detail-label">Amount</span>
           <span class="detail-value">${details.amount.toLocaleString()} ${details.currency}</span>
         </div>` : ''}
-        ${details.package?.name ? `
+        ${details.package && details.package.name ? `
         <div class="detail-row">
           <span class="detail-label">Package</span>
-          <span class="detail-value">${details.package.name.en || details.package.name.fr}</span>
+          <span class="detail-value">${typeof details.package.name === 'object' ? (details.package.name.en || details.package.name.fr || '') : details.package.name}</span>
         </div>` : ''}
         ${details.paymentMethod ? `
         <div class="detail-row">
