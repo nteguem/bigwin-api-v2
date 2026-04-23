@@ -55,9 +55,14 @@ const AFRIBAPAY_COUNTRY_CODES = [
 // (le 0 fait partie du numéro, pas un parasite à retirer). Bénin a migré en
 // 2022 (format 01XXXXXXXX / 41XXXXXXXX), Côte d'Ivoire en 2021 (format
 // 0XXXXXXXXX). Stripper le 0 pour ces pays casse tous les paiements.
+//
+// Congo-Brazzaville (242) : AfribaPay attend aussi le 0 gardé pour le format
+// `242 0X XXXXXXXX` (validé empiriquement avec 242055605262 / 242065803305
+// qui sont rejetés dès qu'on retire le 0).
 const COUNTRIES_WITH_LEADING_ZERO_KEPT = new Set([
   '229', // Bénin (depuis 2022)
   '225', // Côte d'Ivoire (depuis 2021)
+  '242', // Congo-Brazzaville
 ]);
 
 /**
