@@ -7,6 +7,9 @@ const subscriptionService = require('../../services/user/subscriptionService');
 const deviceService = require('../../services/common/deviceService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'auth';
 
 /**
  * Inscription utilisateur avec génération automatique d'email
@@ -69,7 +72,12 @@ exports.register = catchAsync(async (req, res, next) => {
     try {
       device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
     } catch (error) {
-      console.error('Erreur linkage device:', error);
+      req.log.error('device link failed', {
+        service: SERVICE,
+        category: 'deviceLink',
+        message: error.message,
+        stack: error.stack,
+      });
     }
   }
   
@@ -140,7 +148,12 @@ exports.login = catchAsync(async (req, res, next) => {
     try {
       device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
     } catch (error) {
-      console.error('Erreur linkage device:', error);
+      req.log.error('device link failed', {
+        service: SERVICE,
+        category: 'deviceLink',
+        message: error.message,
+        stack: error.stack,
+      });
     }
   }
   
@@ -153,8 +166,11 @@ exports.login = catchAsync(async (req, res, next) => {
   response.data.activePackages = subscriptionInfo.activePackages;
   response.data.device = device;
   
-  console.log("user", user);
-  console.log("response", response);
+  req.log.info('login success', {
+    service: SERVICE,
+    category: 'login',
+    userId: String(user._id),
+  });
 
   res.status(200).json(response);
 });
@@ -175,9 +191,12 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
   
   try {
     // 1. Vérifier et décoder le token Google - ⭐ PASSER APPID
-    console.log(`🔐 Vérification du token Google pour app: ${appId}...`);
     const googleData = await googleAuthService.verifyGoogleToken(appId, idToken);
-    console.log(`✅ Token valide pour: ${googleData.email}`);
+    req.log.info('google auth: token verified', {
+      service: SERVICE,
+      category: 'googleAuth',
+      email: googleData.email,
+    });
     
     // 2. Créer ou récupérer l'utilisateur POUR CETTE APP - ⭐ PASSER APPID
     const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(appId, googleData, {
@@ -207,7 +226,12 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
       try {
         device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
       } catch (error) {
-        console.error('Erreur linkage device:', error);
+        req.log.error('device link failed', {
+        service: SERVICE,
+        category: 'deviceLink',
+        message: error.message,
+        stack: error.stack,
+      });
       }
     }
     
@@ -248,8 +272,13 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     res.status(isNewUser ? 201 : 200).json(response);
     
   } catch (error) {
-    console.error('❌ Erreur Google Auth:', error);
-    
+    req.log.error('google auth: failed', {
+      service: SERVICE,
+      category: 'googleAuth',
+      message: error.message,
+      stack: error.stack,
+    });
+
     if (error.message && error.message.includes('Token used too late')) {
       return next(new AppError('Token Google expiré, veuillez vous reconnecter', 401, ErrorCodes.AUTH_INVALID_TOKEN));
     }

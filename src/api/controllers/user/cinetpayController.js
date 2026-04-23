@@ -4,6 +4,9 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'cinetpay';
 
 /**
  * Initier un paiement CinetPay
@@ -128,7 +131,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
-    console.error('Error processing transaction update:', error.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      transactionId: transaction.transactionId,
+      message: error.message,
+      stack: error.stack,
+    });
   }
 
   res.status(200).json({
@@ -161,8 +170,12 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedToken = req.headers['x-token'];
   const { cpm_trans_id: transactionId, cpm_error_message } = req.body;
 
-  console.log('=== WEBHOOK CINETPAY REÇU ===');
-  console.log('Body:', JSON.stringify(req.body));
+  req.log.info('webhook: received', {
+    service: SERVICE,
+    category: 'webhook',
+    transactionId,
+    errorMessage: cpm_error_message,
+  });
 
   if (!transactionId) {
     return next(new AppError('Transaction ID requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -170,31 +183,32 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   try {
     const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
-    
-    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
+
     const transaction = await CinetpayTransaction.findOne({ transactionId })
       .populate(['package', 'user']);
 
     if (!transaction) {
-      console.error(`[Webhook CinetPay] Transaction ${transactionId} non trouvée`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE, category: 'webhook', transactionId,
+      });
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Récupérer l'appId depuis la transaction
     const appId = transaction.appId;
-    console.log(`[Webhook CinetPay] AppId récupéré depuis transaction: ${appId}`);
 
-    // Récupérer l'app depuis la base de données
     const currentApp = await App.findOne({ appId, isActive: true }).lean();
 
     if (!currentApp) {
-      console.error(`[Webhook CinetPay] App ${appId} non trouvée`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE, category: 'webhook', transactionId, appId,
+      });
       return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Vérifier que CinetPay est activé pour cette app
     if (!currentApp?.payments?.cinetpay?.enabled) {
-      console.error(`[Webhook CinetPay] CinetPay non activé pour app ${appId}`);
+      req.log.warn('webhook: cinetpay disabled for app', {
+        service: SERVICE, category: 'webhook', transactionId, appId,
+      });
       return next(new AppError(
         'CinetPay n\'est pas activé pour cette application',
         400,
@@ -227,7 +241,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
     }
 
     await transaction.save();
-    console.log(`[Webhook CinetPay] Transaction ${transactionId} updated to status: ${transaction.status}`);
+
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE,
+      category: 'webhook',
+      transactionId,
+      appId,
+      status: transaction.status,
+    });
 
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
@@ -237,9 +258,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('Webhook processing error:', error.message);
-    console.error('Error stack:', error.stack);
-    
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      transactionId,
+      message: error.message,
+      stack: error.stack,
+    });
+
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',
@@ -309,7 +335,13 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
     
     await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
   } catch (error) {
-    console.error('CinetPay - Erreur lors de la vérification:', error.message);
+    req.log.error('checkStatus: verification failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      transactionId: transaction_id,
+      message: error.message,
+      stack: error.stack,
+    });
     errorOccurred = true;
   }
 

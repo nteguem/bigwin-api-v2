@@ -7,6 +7,9 @@ const korapayService = require('../../services/user/KorapayService');
 const KorapayTransaction = require('../../models/user/KorapayTransaction');
 const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware');
 const App = require('../../models/common/App');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'korapay';
 
 /**
  * Initier un paiement KoraPay
@@ -85,7 +88,12 @@ exports.initiatePayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[KoraPay-Controller] Error in initiatePayment:', error);
+    req.log.error('initiatePayment: failed', {
+      service: SERVICE,
+      category: 'initiate',
+      message: error.message,
+      stack: error.stack,
+    });
 
     // Gérer les erreurs spécifiques
     if (error.name === 'KorapayError') {
@@ -175,7 +183,12 @@ exports.initiateMobileMoneyPayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[KoraPay-Controller] Error in initiateMobileMoneyPayment:', error);
+    req.log.error('initiateMobileMoney: failed', {
+      service: SERVICE,
+      category: 'initiateMobileMoney',
+      message: error.message,
+      stack: error.stack,
+    });
 
     if (error.name === 'KorapayError') {
       return res.status(error.statusCode || 500).json({
@@ -262,7 +275,12 @@ exports.checkTransactionStatus = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[KoraPay-Controller] Error in checkTransactionStatus:', error);
+    req.log.error('checkTransactionStatus: failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      message: error.message,
+      stack: error.stack,
+    });
 
     return res.status(500).json({
       success: false,
@@ -283,19 +301,19 @@ exports.webhook = async (req, res) => {
     const signature = req.headers['x-korapay-signature'];
     const webhookBody = req.body;
 
-    console.log('[KoraPay-Webhook] Webhook received from KoraPay');
-
-    // 1. Extraire la référence
     const paymentReference = webhookBody?.data?.payment_reference;
 
+    req.log.info('webhook: received', {
+      service: SERVICE, category: 'webhook', paymentReference, hasSignature: !!signature,
+    });
+
     if (!paymentReference) {
-      console.error('[KoraPay-Webhook] No payment_reference in webhook');
+      req.log.warn('webhook: payment_reference missing', {
+        service: SERVICE, category: 'webhook',
+      });
       return res.status(400).json({ success: false, message: 'Invalid webhook data' });
     }
 
-    console.log(`[KoraPay-Webhook] Payment reference: ${paymentReference}`);
-
-    // 2. Trouver transaction (SANS filter appId car on ne l'a pas encore)
     const transaction = await KorapayTransaction.findOne({
       $or: [
         { transactionId: paymentReference },
@@ -305,22 +323,22 @@ exports.webhook = async (req, res) => {
     });
 
     if (!transaction) {
-      console.error(`[KoraPay-Webhook] Transaction not found: ${paymentReference}`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE, category: 'webhook', paymentReference,
+      });
       return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
 
-    console.log(`[KoraPay-Webhook] Transaction found: ${transaction.transactionId}`);
-    console.log(`[KoraPay-Webhook] AppId: ${transaction.appId}`);
-
-    // 3. Charger l'app pour vérifier la signature
     const app = await App.findOne({ appId: transaction.appId });
 
     if (!app) {
-      console.error(`[KoraPay-Webhook] App not found: ${transaction.appId}`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE, category: 'webhook',
+        paymentReference, appId: transaction.appId,
+      });
       return res.status(404).json({ success: false, message: 'App not found' });
     }
 
-    // 4. Vérifier la signature
     const config = korapayService.getConfig(app);
     const isValidSignature = korapayService.verifyWebhookSignature(
       signature,
@@ -329,33 +347,37 @@ exports.webhook = async (req, res) => {
     );
 
     if (!isValidSignature) {
-      console.error('[KoraPay-Webhook] ❌ Invalid signature');
+      // FATAL : tentative de fraude webhook.
+      req.log.fatal('webhook: signature invalid', {
+        service: SERVICE, category: 'webhook.signature',
+        paymentReference, appId: transaction.appId,
+      });
       return res.status(401).json({ success: false, message: 'Invalid signature' });
     }
 
-    console.log('[KoraPay-Webhook] ✅ Signature valid');
-
-    // 5. Enregistrer le webhook
     await transaction.recordWebhook(webhookBody);
-    console.log('[KoraPay-Webhook] Webhook data recorded');
 
-    // 6. Traiter le paiement si succès
     if (transaction.isSuccessful() && !transaction.processed) {
-      console.log('[KoraPay-Webhook] Processing successful transaction...');
       await paymentMiddleware.processTransactionUpdate(transaction.appId, transaction);
-      console.log('[KoraPay-Webhook] ✅ Transaction processed');
     }
 
-    // 7. Toujours retourner 200 pour éviter les retries KoraPay
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE, category: 'webhook',
+      paymentReference, appId: transaction.appId,
+      status: transaction.status, processed: transaction.processed,
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Webhook processed successfully'
     });
 
   } catch (error) {
-    console.error('[KoraPay-Webhook] Error:', error);
-    
-    // Retourner 200 quand même pour éviter les retries
+    req.log.error('webhook: processing failed', {
+      service: SERVICE, category: 'webhook',
+      message: error.message, stack: error.stack,
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Webhook received'
@@ -375,9 +397,6 @@ exports.callback = async (req, res) => {
       return res.status(400).send(renderHTML('ERROR', 'Missing reference'));
     }
 
-    console.log(`[KoraPay-Callback] Processing reference: ${reference}`);
-
-    // 1. Find transaction (NO appId filter)
     const transaction = await KorapayTransaction.findOne({
       $or: [
         { transactionId: reference },
@@ -387,45 +406,45 @@ exports.callback = async (req, res) => {
     }).populate('package');
 
     if (!transaction) {
-      console.error(`[KoraPay-Callback] Transaction not found: ${reference}`);
+      req.log.warn('callback: transaction not found', {
+        service: SERVICE, category: 'callback', reference,
+      });
       return res.status(404).send(renderHTML('ERROR', 'Transaction not found'));
     }
 
-    console.log(`[KoraPay-Callback] Transaction found: ${transaction.transactionId}`);
-    console.log(`[KoraPay-Callback] AppId: ${transaction.appId}`);
-
-    // 2. Load app from transaction
     const app = await App.findOne({ appId: transaction.appId });
-    
+
     if (!app) {
-      console.error(`[KoraPay-Callback] App not found: ${transaction.appId}`);
+      req.log.error('callback: app not found', {
+        service: SERVICE, category: 'callback', reference, appId: transaction.appId,
+      });
       return res.status(404).send(renderHTML('ERROR', 'Application not found'));
     }
 
-    // 3. Check status with KoraPay API
-    console.log(`[KoraPay-Callback] Checking status with KoraPay...`);
     const updatedTransaction = await korapayService.checkTransactionStatus(
       transaction.appId,
       app,
       reference
     );
 
-    console.log(`[KoraPay-Callback] Status: ${updatedTransaction.status}`);
-
-    // 4. Process if successful and not yet processed
     if (updatedTransaction.isSuccessful() && !updatedTransaction.processed) {
-      console.log(`[KoraPay-Callback] Processing successful transaction...`);
       await paymentMiddleware.processTransactionUpdate(transaction.appId, updatedTransaction);
-      console.log(`[KoraPay-Callback] ✅ Transaction processed`);
     }
 
-    // 5. Render HTML based on status
+    req.log.info('callback: processed', {
+      service: SERVICE, category: 'callback',
+      reference, appId: transaction.appId, status: updatedTransaction.status,
+    });
+
     const html = renderHTML(updatedTransaction.status, updatedTransaction);
-    
+
     return res.send(html);
 
   } catch (error) {
-    console.error('[KoraPay-Callback] Error:', error);
+    req.log.error('callback: failed', {
+      service: SERVICE, category: 'callback',
+      message: error.message, stack: error.stack,
+    });
     return res.status(500).send(renderHTML('ERROR', 'Server error occurred'));
   }
 };

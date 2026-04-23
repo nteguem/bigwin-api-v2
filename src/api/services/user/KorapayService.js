@@ -6,6 +6,9 @@ const crypto = require('crypto');
 const KorapayTransaction = require('../../models/user/KorapayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'korapay';
 
 // Classe d'erreur personnalisée
 class KorapayError extends Error {
@@ -109,7 +112,10 @@ function verifyWebhookSignature(receivedSignature, data, secretKey) {
 
     return calculatedSignature === receivedSignature;
   } catch (error) {
-    console.error('[KoraPay] Error verifying webhook signature:', error);
+    logger.error('verifyWebhookSignature: failed', {
+      service: SERVICE, category: 'webhook.signature',
+      message: error.message, stack: error.stack,
+    });
     return false;
   }
 }
@@ -154,38 +160,32 @@ async function initiatePayment(
   customerPhone = null,
   merchantBearsCost = false
 ) {
-  try {
-    console.log(`[KoraPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, currency=${currency}`);
+  const ctx = { service: SERVICE, category: 'initiate', appId, userId: String(userId), packageId, currency };
 
-    // 1. Récupérer et valider la config
+  try {
+    logger.info('initiate: start', ctx);
+
     const config = getConfig(app);
     validateConfig(config);
-    
-    // 2. Récupérer le package
+
     const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
-    console.log(`[KoraPay-2] Package trouvé: ${packageDoc.name.fr}`);
 
-    // 3. Normaliser la devise
     const normalizedCurrency = currency.toUpperCase();
-    
-    // 4. Récupérer le prix dans la devise demandée
+
     const amount = packageDoc.pricing.get(normalizedCurrency);
     if (!amount || amount <= 0) {
       throw new AppError(
-        `Prix ${normalizedCurrency} non disponible pour ce package`, 
-        400, 
+        `Prix ${normalizedCurrency} non disponible pour ce package`,
+        400,
         ErrorCodes.VALIDATION_ERROR
       );
     }
-    console.log(`[KoraPay-4] Prix: ${amount} ${normalizedCurrency}`);
 
-    // 5. Générer un ID de transaction unique
     const transactionId = `KPY_TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
     const reference = `${transactionId}`;
-    console.log(`[KoraPay-5] TransactionId généré: ${transactionId}, Reference: ${reference}`);
 
     // 6. Générer les URLs
     const { notification_url, redirect_url } = generateUrls();
@@ -211,9 +211,7 @@ async function initiatePayment(
     });
 
     await korapayTransaction.save();
-    console.log(`[KoraPay-7] Transaction sauvegardée`);
 
-    // 8. Préparer les données pour l'API KoraPay Initialize
     const initializeData = {
       reference,
       amount,
@@ -238,27 +236,18 @@ async function initiatePayment(
       initializeData.customer.phone = customerPhone;
     }
 
-    console.log(`[KoraPay-8] InitializeData préparée`);
-    console.log('[KoraPay-DEBUG] Données envoyées à KoraPay:', JSON.stringify(initializeData, null, 2));
-
-    // 9. Appeler l'API KoraPay Initialize
     const headers = createHeaders(config);
-    console.log(`[KoraPay-9] Appel API KoraPay Initialize...`);
-    
+
     const response = await axios.post(
       `${config.apiUrl}/api/v1/charges/initialize`,
       initializeData,
       { headers }
     );
-    
-    console.log(`[KoraPay-9] Réponse API:`, {
-      status: response.data.status,
-      message: response.data.message
-    });
 
-    // 10. Vérifier la réponse
     if (!response.data.status) {
-      console.error('[KoraPay] Payment initialization failed:', response.data);
+      logger.error('initiate: API rejected', {
+        ...ctx, transactionId, responseData: response.data,
+      });
       await KorapayTransaction.findByIdAndDelete(korapayTransaction._id);
       
       throw new KorapayError(
@@ -277,9 +266,8 @@ async function initiatePayment(
     
     await korapayTransaction.save();
     
-    // 12. Populer et retourner
     await korapayTransaction.populate(['package', 'user']);
-    console.log(`[KoraPay-END] Transaction complétée avec succès`);
+    logger.info('initiate: success', { ...ctx, transactionId, amount, currency: normalizedCurrency });
 
     return {
       transaction: korapayTransaction,
@@ -287,10 +275,12 @@ async function initiatePayment(
     };
 
   } catch (error) {
-    console.error(`[KoraPay-ERROR] Erreur:`, {
+    logger.error('initiate: failed', {
+      ...ctx,
       message: error.message,
-      status: error.response?.status,
-      data: error.response?.data
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
     });
 
     if (error instanceof KorapayError || error instanceof AppError) {
@@ -316,37 +306,25 @@ async function initiatePayment(
  * @param {String} reference - Référence de la transaction (transactionId ou reference)
  */
 async function checkTransactionStatus(appId, app, reference) {
-  try {
-    console.log(`[KoraPay-CHECK] Vérification statut pour reference: ${reference}`);
+  const ctx = { service: SERVICE, category: 'checkStatus', appId, reference };
 
-    // 1. Récupérer la config
+  try {
     const config = getConfig(app);
     validateConfig(config);
 
-    // 2. Trouver la transaction
     const transaction = await KorapayTransaction.findByReference(appId, reference);
 
     if (!transaction) {
       throw new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND);
     }
 
-    console.log(`[KoraPay-CHECK] Transaction trouvée: ${transaction.transactionId}, status actuel: ${transaction.status}`);
-
-    // 3. Appeler l'API KoraPay pour vérifier
     const headers = createHeaders(config);
     const verifyReference = transaction.korapayReference || transaction.reference;
-    
-    console.log(`[KoraPay-CHECK] Vérification avec KoraPay reference: ${verifyReference}`);
 
     const response = await axios.get(
       `${config.apiUrl}/api/v1/charges/${verifyReference}`,
       { headers }
     );
-
-    console.log(`[KoraPay-CHECK] Réponse KoraPay:`, {
-      status: response.data.status,
-      dataStatus: response.data.data?.status
-    });
 
     // 4. Traiter la réponse
     if (response.data.status && response.data.data) {
@@ -389,20 +367,25 @@ async function checkTransactionStatus(appId, app, reference) {
       }
       
       await transaction.save();
-      console.log(`[KoraPay-CHECK] Transaction mise à jour, nouveau statut: ${transaction.status}`);
+      logger.info('checkStatus: transaction updated', { ...ctx, status: transaction.status });
     }
 
     return transaction;
 
   } catch (error) {
-    console.error('[KoraPay-CHECK] Erreur lors de la vérification:', error.message);
-    
+    logger.error('checkStatus: failed', {
+      ...ctx,
+      message: error.message,
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
+    });
+
     if (error instanceof KorapayError || error instanceof AppError) {
       throw error;
     }
 
     if (error.response) {
-      console.error('[KoraPay-CHECK] Erreur API:', error.response.data);
       throw new KorapayError(
         error.response.data.message || error.message,
         error.response.status,
@@ -437,10 +420,11 @@ async function initiateMobileMoneyPayment(
   customerEmail,
   merchantBearsCost = false
 ) {
-  try {
-    console.log(`[KoraPay-MM] Démarrage Mobile Money pour ${mobileNumber}`);
+  const ctx = { service: SERVICE, category: 'initiateMobileMoney', appId, userId: String(userId), packageId, currency };
 
-    // 1. Récupérer et valider la config
+  try {
+    logger.info('initiateMobileMoney: start', ctx);
+
     const config = getConfig(app);
     validateConfig(config);
     
@@ -519,11 +503,6 @@ async function initiateMobileMoneyPayment(
       { headers }
     );
 
-    console.log(`[KoraPay-MM] Réponse API:`, {
-      status: response.data.status,
-      authModel: response.data.data?.auth_model
-    });
-
     if (!response.data.status) {
       await KorapayTransaction.findByIdAndDelete(korapayTransaction._id);
       throw new KorapayError(
@@ -554,7 +533,13 @@ async function initiateMobileMoneyPayment(
     };
 
   } catch (error) {
-    console.error(`[KoraPay-MM] Erreur:`, error.message);
+    logger.error('initiateMobileMoney: failed', {
+      ...ctx,
+      message: error.message,
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
+    });
 
     if (error instanceof KorapayError || error instanceof AppError) {
       throw error;

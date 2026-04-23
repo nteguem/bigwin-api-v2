@@ -4,6 +4,9 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'flutterwave';
 
 /**
  * Initier un paiement Flutterwave Mobile Money
@@ -152,7 +155,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
-    console.error('Error processing transaction update:', error.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      transactionId: transaction.transactionId,
+      message: error.message,
+      stack: error.stack,
+    });
   }
 
   res.status(200).json({
@@ -189,13 +198,15 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const receivedHash = req.headers['verif-hash'];
   const webhookData = req.body;
 
-  console.log('=== WEBHOOK FLUTTERWAVE REÇU ===');
-  console.log('Headers:', JSON.stringify(req.headers));
-  console.log('Body:', JSON.stringify(webhookData));
+  req.log.info('webhook: received', {
+    service: SERVICE, category: 'webhook',
+    event: webhookData.event, hasSignature: !!receivedHash,
+  });
 
-  // Vérifier que le webhook contient les données nécessaires
   if (!webhookData.event || !webhookData.data) {
-    console.error('[Webhook Flutterwave] Données webhook manquantes');
+    req.log.warn('webhook: invalid payload', {
+      service: SERVICE, category: 'webhook',
+    });
     return res.status(400).json({
       success: false,
       message: 'Données webhook invalides'
@@ -205,9 +216,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const eventType = webhookData.event;
   const eventData = webhookData.data;
 
-  // On s'intéresse principalement à charge.completed
   if (eventType !== 'charge.completed') {
-    console.log(`[Webhook Flutterwave] Event type ${eventType} ignoré`);
     return res.status(200).json({
       success: true,
       message: 'Event type non traité'
@@ -218,7 +227,9 @@ exports.webhook = catchAsync(async (req, res, next) => {
   const reference = eventData.reference;
 
   if (!chargeId) {
-    console.error('[Webhook Flutterwave] Charge ID manquant');
+    req.log.warn('webhook: charge id missing', {
+      service: SERVICE, category: 'webhook', reference,
+    });
     return res.status(400).json({
       success: false,
       message: 'Charge ID requis'
@@ -227,8 +238,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   try {
     const FlutterwaveTransaction = require('../../models/user/FlutterwaveTransaction');
-    
-    // Chercher la transaction par chargeId OU par reference (transactionId)
+
     const transaction = await FlutterwaveTransaction.findOne({
       $or: [
         { chargeId: chargeId },
@@ -237,49 +247,49 @@ exports.webhook = catchAsync(async (req, res, next) => {
     }).populate(['package', 'user']);
 
     if (!transaction) {
-      console.error(`[Webhook Flutterwave] Transaction non trouvée pour chargeId: ${chargeId} ou reference: ${reference}`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE, category: 'webhook', chargeId, reference,
+      });
       return res.status(404).json({
         success: false,
         message: 'Transaction non trouvée'
       });
     }
 
-    // Récupérer l'appId depuis la transaction
     const appId = transaction.appId;
-    console.log(`[Webhook Flutterwave] AppId récupéré depuis transaction: ${appId}`);
-
-    // Récupérer l'app depuis la base de données
     const currentApp = await App.findOne({ appId, isActive: true }).lean();
 
     if (!currentApp) {
-      console.error(`[Webhook Flutterwave] App ${appId} non trouvée`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE, category: 'webhook', chargeId, appId,
+      });
       return res.status(404).json({
         success: false,
         message: 'Application non trouvée'
       });
     }
 
-    // Vérifier que Flutterwave est activé pour cette app
     if (!currentApp?.payments?.flutterwave?.enabled) {
-      console.error(`[Webhook Flutterwave] Flutterwave non activé pour app ${appId}`);
+      req.log.warn('webhook: flutterwave disabled for app', {
+        service: SERVICE, category: 'webhook', chargeId, appId,
+      });
       return res.status(400).json({
         success: false,
         message: 'Flutterwave n\'est pas activé pour cette application'
       });
     }
 
-    // Vérifier la signature du webhook
     const config = flutterwaveService.getConfig(currentApp);
     const isValidSignature = flutterwaveService.verifyWebhookSignature(receivedHash, config);
 
     if (!isValidSignature) {
-      console.error('[Webhook Flutterwave] Signature invalide');
-      // On log mais on continue quand même pour le développement
-      // En production, vous pourriez vouloir rejeter :
-      // return res.status(401).json({ success: false, message: 'Signature invalide' });
+      // FATAL : signature invalide = potentielle tentative de fraude.
+      // Non-bloquant pour l'instant (comportement historique) — à durcir.
+      req.log.fatal('webhook: signature invalid', {
+        service: SERVICE, category: 'webhook.signature', chargeId, appId,
+      });
     }
 
-    // Mettre à jour la transaction avec les données webhook
     transaction.status = flutterwaveService.mapFlutterwaveStatus(eventData.status);
     transaction.processorResponse = eventData.processor_response;
     transaction.webhookSignature = receivedHash;
@@ -291,16 +301,19 @@ exports.webhook = catchAsync(async (req, res, next) => {
       transaction.paymentDate = new Date(eventData.created_datetime);
     }
 
-    // Sauvegarder les métadonnées complètes
     transaction.metadata = {
       ...transaction.metadata,
       webhookData: eventData
     };
 
     await transaction.save();
-    console.log(`[Webhook Flutterwave] Transaction ${transaction.transactionId} updated to status: ${transaction.status}`);
 
-    // Traiter la transaction via le middleware
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE, category: 'webhook',
+      transactionId: transaction.transactionId, appId,
+      status: transaction.status, verified: isValidSignature,
+    });
+
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
@@ -309,9 +322,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('Webhook processing error:', error.message);
-    console.error('Error stack:', error.stack);
-    
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      chargeId,
+      message: error.message,
+      stack: error.stack,
+    });
+
     // IMPORTANT: Toujours retourner 200 pour éviter les retry infinis
     res.status(200).json({
       success: false,

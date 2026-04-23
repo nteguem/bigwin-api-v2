@@ -5,6 +5,9 @@ const { v4: uuidv4 } = require('uuid');
 const FedapayTransaction = require('../../models/user/FedapayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'fedapay';
 
 class FedapayError extends Error {
   constructor(message, statusCode, responseData) {
@@ -80,9 +83,6 @@ async function initiatePayment(appId, app, userId, packageId, user) {
       }
     };
 
-    console.log('=== PAYLOAD ENVOYÉ À FEDAPAY ===');
-    console.log(JSON.stringify(paymentData, null, 2));
-
     const createResponse = await axios.post(`${config.apiUrl}/transactions`, paymentData, {
       headers: {
         'Authorization': `Bearer ${config.secretKey}`,
@@ -120,7 +120,14 @@ async function initiatePayment(appId, app, userId, packageId, user) {
     };
 
   } catch (error) {
-    console.error('[FedaPay]:', error.message);
+    logger.error('initiate: failed', {
+      service: SERVICE,
+      category: 'initiate',
+      message: error.message,
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
+    });
 
     if (error instanceof FedapayError || error instanceof AppError) {
       throw error;
@@ -176,8 +183,16 @@ async function checkTransactionStatus(appId, app, transactionId) {
     return transaction;
 
   } catch (error) {
-    console.error('[FedaPay]:', error.message);
-    
+    logger.error('checkTransactionStatus: failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      transactionId,
+      message: error.message,
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
+    });
+
     if (error instanceof FedapayError || error instanceof AppError) {
       throw error;
     }

@@ -5,6 +5,9 @@ const crypto = require('crypto');
 const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'cinetpay';
 
 // Classe d'erreur personnalisée
 class CinetpayError extends Error {
@@ -178,7 +181,12 @@ function verifyHmacToken(receivedToken, data, config, currency) {
 
     return calculatedToken === receivedToken;
   } catch (error) {
-    console.error('Error verifying HMAC token:', error);
+    logger.error('verifyHmacToken: failed', {
+      service: SERVICE,
+      category: 'hmac',
+      message: error.message,
+      stack: error.stack,
+    });
     return false;
   }
 }
@@ -194,39 +202,28 @@ function verifyHmacToken(receivedToken, data, config, currency) {
  * @param {String} email - Email du client
  */
 async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email) {
-  try {
-    console.log(`[CinetPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, phone=${phoneNumber}`);
+  const ctx = { service: SERVICE, category: 'initiate', appId, userId: String(userId), packageId };
 
-    // 1. Récupérer et valider la config
+  try {
+    logger.info('initiate: start', ctx);
+
     const config = getConfig(app);
-    
-    // 2. Récupérer le package
+
     const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
-    console.log(`[CinetPay-2] Package trouvé: ${packageDoc.name.fr}`);
 
-    // 3. Détecter automatiquement la devise selon le numéro
     const currency = detectCurrencyFromPhone(phoneNumber);
-    console.log(`[CinetPay-3] Devise détectée: ${currency}`);
-
-    // 4. Valider la config pour cette devise
     validateConfig(config, currency);
 
-    // 5. Récupérer le prix dans la devise détectée
     const amount = packageDoc.pricing.get(currency);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
-    console.log(`[CinetPay-5] Prix: ${amount} ${currency}`);
 
-    // 6. Obtenir la configuration pour cette devise
     const currencyConfig = getConfigForCurrency(config, currency);
-
-    // 7. Générer un ID de transaction unique
     const transactionId = `TXN_${Date.now()}_${uuidv4().substring(0, 8)}`;
-    console.log(`[CinetPay-7] TransactionId généré: ${transactionId}`);
 
     // 8. Générer les URLs
     const { notify_url, return_url } = generateUrls();
@@ -248,9 +245,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     });
 
     await cinetpayTransaction.save();
-    console.log(`[CinetPay-9] Transaction sauvegardée`);
 
-    // 10. Préparer les données pour l'API CinetPay
     const paymentData = {
       apikey: currencyConfig.API_KEY,
       site_id: parseInt(currencyConfig.SITE_ID),
@@ -265,22 +260,22 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       channels: 'ALL',
       lang: 'FR'
     };
-    console.log(`[CinetPay-10] PaymentData préparée`);
 
-    // 11. Appeler l'API CinetPay
-    console.log(`[CinetPay-11] Appel API CinetPay...`);
     const response = await axios.post(config.apiUrl, paymentData, {
       headers: {
         'Content-Type': 'application/json'
       }
     });
-    console.log(`[CinetPay-11] Réponse API:`, response.data);
 
-    // 12. Vérifier la réponse
     if (response.data.code !== '201') {
-      console.error('Payment initialization failed with code:', response.data.code);
+      logger.error('initiate: API rejected', {
+        ...ctx,
+        transactionId,
+        responseCode: response.data.code,
+        responseData: response.data,
+      });
       await CinetpayTransaction.findByIdAndDelete(cinetpayTransaction._id);
-      
+
       throw new CinetpayError(
         response.data.message || 'Payment initialization failed',
         response.status || 400,
@@ -288,15 +283,13 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
       );
     }
 
-    // 13. Mettre à jour la transaction avec les données CinetPay
     cinetpayTransaction.paymentToken = response.data.data.payment_token;
     cinetpayTransaction.paymentUrl = response.data.data.payment_url;
     cinetpayTransaction.apiResponseId = response.data.api_response_id;
     await cinetpayTransaction.save();
-    
-    // 14. Populer et retourner
+
     await cinetpayTransaction.populate(['package', 'user']);
-    console.log(`[CinetPay-END] Transaction complétée avec succès`);
+    logger.info('initiate: success', { ...ctx, transactionId, amount, currency });
 
     return {
       transaction: cinetpayTransaction,
@@ -304,10 +297,12 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     };
 
   } catch (error) {
-    console.error(`[CinetPay-ERROR] Erreur:`, {
+    logger.error('initiate: failed', {
+      ...ctx,
       message: error.message,
-      status: error.response?.status,
-      data: error.response?.data
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
     });
 
     if (error instanceof CinetpayError || error instanceof AppError) {
@@ -358,15 +353,11 @@ async function checkTransactionStatus(appId, app, transactionId) {
       transaction_id: transactionId
     };
 
-    console.log(`Checking ${transaction.currency} transaction ${transactionId} with SITE_ID: ${currencyConfig.SITE_ID}`);
-
     const response = await axios.post(`${config.apiUrl}/check`, checkData, {
       headers: {
         'Content-Type': 'application/json'
       }
     });
-
-    console.log(`Check response for ${transactionId}:`, response.data);
 
     // 6. Traiter la réponse selon le code
     if (response.data.code === '00') {
@@ -446,14 +437,20 @@ async function checkTransactionStatus(appId, app, transactionId) {
     return transaction;
 
   } catch (error) {
-    console.error('Error checking transaction status:', error.message);
-    
+    logger.error('checkTransactionStatus: failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      message: error.message,
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
+    });
+
     if (error instanceof CinetpayError || error instanceof AppError) {
       throw error;
     }
 
     if (error.response) {
-      console.error('CinetPay status check error:', error.response.data);
       throw new CinetpayError(
         error.response.data.message || error.response.data.description || error.message,
         error.response.status,

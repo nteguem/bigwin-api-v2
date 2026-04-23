@@ -7,6 +7,9 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
 const User = require('../../models/user/User');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'fedapay';
 
 /**
  * Initier un paiement FedaPay
@@ -43,12 +46,6 @@ const hasActivePackage = activeSubscriptions.some(sub =>
   if (!fullUser) {
     return next(new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
-
-  console.log('=== USER COMPLET ===');
-  console.log('Email:', fullUser.email);
-  console.log('FirstName:', fullUser.firstName);
-  console.log('LastName:', fullUser.lastName);
-  console.log('Pseudo:', fullUser.pseudo);
 
   const result = await fedapayService.initiatePayment(
     appId,
@@ -101,7 +98,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
-    console.error('Error processing transaction:', error.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      transactionId: transaction.transactionId,
+      message: error.message,
+      stack: error.stack,
+    });
   }
 
   res.status(200).json({
@@ -131,11 +134,11 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  * Webhook FedaPay avec vérification de signature
  */
 exports.webhook = catchAsync(async (req, res, next) => {
-  console.log('=== WEBHOOK FEDAPAY ===');
-  console.log('Headers:', JSON.stringify(req.headers));
-  console.log('Body:', JSON.stringify(req.body));
-
   const { id, status } = req.body;
+
+  req.log.info('webhook: received', {
+    service: SERVICE, category: 'webhook', fedapayId: id, status,
+  });
 
   if (!id) {
     return res.status(200).json({
@@ -146,12 +149,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   try {
     const FedapayTransaction = require('../../models/user/FedapayTransaction');
-    
+
     const transaction = await FedapayTransaction.findOne({ operatorTransactionId: id })
       .populate(['package', 'user']);
 
     if (!transaction) {
-      console.error(`[Webhook FedaPay] Transaction ${id} non trouvée`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE, category: 'webhook', fedapayId: id,
+      });
       return res.status(200).json({
         success: false,
         message: 'Transaction non trouvée'
@@ -162,47 +167,53 @@ exports.webhook = catchAsync(async (req, res, next) => {
     const currentApp = await App.findOne({ appId, isActive: true }).lean();
 
     if (!currentApp?.payments?.fedapay?.enabled) {
-      console.error(`[Webhook FedaPay] FedaPay non activé pour ${appId}`);
+      req.log.warn('webhook: fedapay disabled for app', {
+        service: SERVICE, category: 'webhook', fedapayId: id, appId,
+      });
       return res.status(200).json({
         success: false,
         message: 'FedaPay non activé'
       });
     }
 
-    // ✅ VÉRIFICATION SIGNATURE
+    // Vérification HMAC signature (si webhookSecret configuré côté app)
     const webhookSecret = currentApp.payments.fedapay.webhookSecret;
     if (webhookSecret && req.headers['x-fedapay-signature']) {
       const receivedSignature = req.headers['x-fedapay-signature'];
-      
+
       const computedSignature = crypto
         .createHmac('sha256', webhookSecret)
         .update(JSON.stringify(req.body))
         .digest('hex');
 
       if (receivedSignature !== computedSignature) {
-        console.error('[Webhook FedaPay] ❌ Signature invalide');
-        console.error('Reçue:', receivedSignature);
-        console.error('Calculée:', computedSignature);
-        
+        // FATAL : signature invalide = potentielle tentative de fraude webhook.
+        req.log.fatal('webhook: HMAC signature invalid', {
+          service: SERVICE,
+          category: 'webhook.signature',
+          fedapayId: id,
+          appId,
+        });
+
         return res.status(401).json({
           success: false,
           message: 'Signature invalide'
         });
       }
-      
-      console.log('[Webhook FedaPay] ✅ Signature vérifiée');
     } else if (webhookSecret) {
-      console.warn('[Webhook FedaPay] ⚠️ Signature non fournie dans les headers');
+      req.log.warn('webhook: signature missing from headers', {
+        service: SERVICE, category: 'webhook.signature', fedapayId: id, appId,
+      });
     }
 
-    // Mise à jour de la transaction
     transaction.status = status;
     transaction.webhookData = req.body;
     await transaction.save();
 
-    console.log(`[Webhook FedaPay] Transaction ${id} updated to: ${status}`);
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE, category: 'webhook', fedapayId: id, appId, status,
+    });
 
-    // Traitement du paiement (création subscription si approved)
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
@@ -211,7 +222,13 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('[Webhook FedaPay] Erreur:', error.message);
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      fedapayId: id,
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(200).json({
       success: false,
       message: 'Erreur webhook',
@@ -261,7 +278,13 @@ exports.paymentSuccess = catchAsync(async (req, res, next) => {
     transactionStatus = await fedapayService.checkTransactionStatus(appId, currentApp, transaction_id);
     await paymentMiddleware.processTransactionUpdate(appId, transactionStatus);
   } catch (error) {
-    console.error('FedaPay - Erreur vérification:', error.message);
+    req.log.error('paymentSuccess: verification failed', {
+      service: SERVICE,
+      category: 'paymentSuccess',
+      transactionId: transaction_id,
+      message: error.message,
+      stack: error.stack,
+    });
     errorOccurred = true;
   }
 
