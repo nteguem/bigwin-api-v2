@@ -6,6 +6,9 @@ const path = require('path');
 const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'afribapay';
 
 // Cache pour le token (global car même compte AfribaPay pour toutes les apps)
 let cachedToken = null;
@@ -280,7 +283,11 @@ async function _fetchCountriesFromApi(app) {
     }
     return null;
   } catch (error) {
-    console.warn('[AfribaPay] fetchCountriesFromApi échoué, fallback sur JSON local:', error.message);
+    logger.warn('countries: API fetch failed, falling back to local JSON', {
+      service: SERVICE,
+      category: 'countries',
+      error: error.message,
+    });
     return null;
   }
 }
@@ -355,7 +362,11 @@ async function refreshCountriesCache(app) {
   if (fresh) {
     cachedCountries = fresh;
     cachedCountriesExpiry = Date.now() + COUNTRIES_CACHE_TTL_MS;
-    console.log(`[AfribaPay] Countries cache refreshed (${Object.keys(fresh).length} pays)`);
+    logger.info('countries: cache refreshed', {
+      service: SERVICE,
+      category: 'countries',
+      countryCount: Object.keys(fresh).length,
+    });
     return fresh;
   }
   return null;
@@ -384,7 +395,10 @@ async function getCountriesDataAsync(app, countryCode = null) {
   }
 
   // Fallback ultime : fichier JSON local
-  console.warn('[AfribaPay] Utilisation du fallback JSON pour countries');
+  logger.warn('countries: using JSON fallback (live API unavailable)', {
+    service: SERVICE,
+    category: 'countries',
+  });
   return _readCountriesFromFile(countryCode);
 }
 
@@ -472,43 +486,42 @@ function verifyHmacToken(receivedSignature, payload, apiKey) {
  * @param {String} otpCode - Code OTP (optionnel)
  */
 async function initiatePayment(appId, app, userId, packageId, phoneNumber, operator, country, currency, otpCode = null) {
+  const ctx = {
+    service: SERVICE,
+    category: 'initiate',
+    appId,
+    userId: String(userId),
+    packageId,
+    operator,
+    country,
+    currency,
+  };
+
   try {
-    console.log(`[AfribaPay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, phone=${phoneNumber}`);
+    logger.info('initiate: start', ctx);
 
     // 0. Normaliser le numéro avant tout — AfribaPay rejette les espaces et
     //    veut le code pays directement suivi du numéro, sans le 0 local.
     //    Ex. in:  "229 016829954"  out: "22916829954"
     phoneNumber = _sanitizeAfribapayPhone(phoneNumber);
-    console.log(`[AfribaPay-NORMALIZED] phone sanitized=${phoneNumber}`);
 
-    // 1. Récupérer et valider la config
     const config = getConfig(app);
     validateConfig(config);
-    console.log(`[AfribaPay-1] Config validée pour app=${appId}`);
 
-    // 2. Récupérer le package
     const packageDoc = await Package.findOne({ _id: packageId, appId });
-
-    console.log(`[AfribaPay-2] Package trouvé:`, packageDoc ? packageDoc.name.fr : 'NON TROUVÉ');
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
 
-    // 3. Récupérer le prix selon la devise fournie
     const amount = packageDoc.pricing.get(currency);
-    console.log(`[AfribaPay-3] Prix récupéré: ${amount} ${currency}`);
     if (!amount || amount <= 0) {
       throw new AppError(`Prix ${currency} non disponible pour ce package`, 400, ErrorCodes.VALIDATION_ERROR);
     }
 
-    // 4. Valider que l'opérateur existe pour ce pays+devise dans le JSON.
-    //    Évite de taper l'API AfribaPay pour rien quand le mobile envoie un
-    //    mauvais couple (cache obsolète, liste hardcodée, typo).
+    // Valide l'opérateur pour ce pays+devise dans le JSON avant de taper l'API.
     _validateOperatorForCountry(operator, country, currency);
 
-    // 5. Vérifier si OTP est requis
     const otpRequiredCheck = isOtpRequired(operator, country);
-    console.log(`[AfribaPay-4] OTP check: required=${otpRequiredCheck}, provided=${!!otpCode}`);
     if (otpRequiredCheck && !otpCode) {
       throw new AfribaPayError(
         `Code OTP requis pour ${operator} dans ce pays`,
@@ -523,17 +536,10 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
       );
     }
 
-    // 5. Générer IDs et URLs
     const orderId = `order-${Date.now()}`;
     const { notify_url, return_url, cancel_url } = generateUrls();
-    console.log(`[AfribaPay-5] OrderId généré: ${orderId}`);
-
-    // 6. Obtenir le token
-    console.log(`[AfribaPay-6] Tentative d'obtention du token...`);
     const accessToken = await getAccessToken(config);
-    console.log(`[AfribaPay-6] Token obtenu:`, accessToken ? 'SUCCESS' : 'FAILED');
 
-    // 7. Préparer les données pour l'API AfribaPay
     const paymentData = {
       operator,
       country,
@@ -552,12 +558,8 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
     if (otpRequiredCheck && otpCode) {
       paymentData.otp_code = otpCode;
     }
-    console.log(`[AfribaPay-7] PaymentData préparée:`, paymentData);
 
-    // 8. Appeler l'API AfribaPay avec retry automatique sur 401 (token expiré)
-    //    Sans ce retry, un paiement peut échouer à cause d'une course condition
-    //    sur l'expiration du token (token valide quand fetché, expiré à l'appel).
-    console.log(`[AfribaPay-8] Appel API AfribaPay en cours...`);
+    // Appel API AfribaPay avec retry auto sur 401 (token expiré par race condition).
     let response;
     try {
       response = await axios.post(`${config.apiUrl}/v1/pay/payin`, paymentData, {
@@ -569,7 +571,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
       });
     } catch (err) {
       if (err.response?.status === 401) {
-        console.log(`[AfribaPay-8] Token expiré, refresh + retry`);
+        logger.warn('initiate: token expired, retrying with fresh token', { ...ctx, orderId });
         cachedToken = null;
         tokenExpiry = null;
         const freshToken = await getAccessToken(config);
@@ -584,10 +586,13 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
         throw err;
       }
     }
-    console.log(`[AfribaPay-8] Réponse API:`, response.data);
 
     if (!response.data.data) {
-      console.error(`[AfribaPay-ERROR] Pas de data dans la réponse:`, response.data);
+      logger.error('initiate: empty data in response', {
+        ...ctx,
+        orderId,
+        response: response.data,
+      });
       throw new AfribaPayError(
         response.data.error?.message || 'Payment initialization failed',
         response.status || 400,
@@ -595,9 +600,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
       );
     }
 
-    // 9. Créer la transaction
     const responseData = response.data.data;
-    console.log(`[AfribaPay-9] Création transaction avec ID:`, responseData.transaction_id);
     
     const afribaPayTransaction = new AfribaPayTransaction({
       appId, 
@@ -631,27 +634,30 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
     });
 
     await afribaPayTransaction.save();
-    console.log(`[AfribaPay-9] Transaction sauvegardée avec succès`);
-
-    // 10. Populer et retourner
     await afribaPayTransaction.populate(['package', 'user']);
-    console.log(`[AfribaPay-END] Transaction complétée avec succès`);
+
+    logger.info('initiate: success', {
+      ...ctx,
+      orderId,
+      transactionId: responseData.transaction_id,
+      amount,
+    });
 
     return {
       transaction: afribaPayTransaction
     };
 
   } catch (error) {
-    console.error(`[AfribaPay-ERROR] Erreur:`, {
+    logger.error('initiate: failed', {
+      ...ctx,
       message: error.message,
-      status: error.response?.status,
-      data: error.response?.data,
-      stack: error.stack
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
     });
 
     if (error.response) {
       if (error.response.status === 401) {
-        console.log(`[AfribaPay-ERROR] Token invalide/expiré, réinitialisation du cache`);
         cachedToken = null;
         tokenExpiry = null;
       }

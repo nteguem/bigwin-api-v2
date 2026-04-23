@@ -4,6 +4,9 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'smobilpay';
 
 /**
  * Récupérer les services par pays
@@ -168,7 +171,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
-    console.error('Error processing transaction update:', error.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      paymentId: transaction.paymentId,
+      message: error.message,
+      stack: error.stack,
+    });
   }
   
   res.status(200).json({
@@ -201,65 +210,90 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 exports.webhook = catchAsync(async (req, res, next) => {
   const { errorCode, status, trid: paymentId } = req.body;
 
-  console.log('=== WEBHOOK SMOBILPAY REÇU ===');
-  console.log('Body:', JSON.stringify(req.body));
+  req.log.info('webhook: received', {
+    service: SERVICE,
+    category: 'webhook',
+    paymentId,
+    status,
+    errorCode: errorCode || null,
+  });
 
   if (!paymentId) {
     return next(new AppError('PTN ou paymentId requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-  
+
   try {
     const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
-    
-    // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
+
     const transaction = await SmobilpayTransaction.findOne({ paymentId })
       .populate(['package', 'user']);
-    
+
     if (!transaction) {
-      console.error(`[Webhook Smobilpay] Transaction ${paymentId} non trouvée`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE,
+        category: 'webhook',
+        paymentId,
+      });
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Récupérer l'appId depuis la transaction
     const appId = transaction.appId;
-    console.log(`[Webhook Smobilpay] AppId récupéré depuis transaction: ${appId}`);
 
-    // Récupérer l'app depuis la base de données
     const currentApp = await App.findOne({ appId, isActive: true }).lean();
 
     if (!currentApp) {
-      console.error(`[Webhook Smobilpay] App ${appId} non trouvée`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE,
+        category: 'webhook',
+        paymentId,
+        appId,
+      });
       return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Vérifier que Smobilpay est activé pour cette app
     if (!currentApp?.payments?.smobilpay?.enabled) {
-      console.error(`[Webhook Smobilpay] Smobilpay non activé pour app ${appId}`);
+      req.log.warn('webhook: smobilpay disabled for app', {
+        service: SERVICE,
+        category: 'webhook',
+        paymentId,
+        appId,
+      });
       return next(new AppError(
         'Smobilpay n\'est pas activé pour cette application',
         400,
         ErrorCodes.VALIDATION_ERROR
       ));
     }
-    
-    // Mettre à jour le statut si différent
+
     if (transaction.status !== status) {
       transaction.status = status;
       transaction.errorCode = errorCode || null;
       await transaction.save();
-      console.log(`[Webhook Smobilpay] Transaction ${paymentId} updated to status: ${transaction.status}`);
-      
+
+      req.log.info('webhook: transaction updated', {
+        service: SERVICE,
+        category: 'webhook',
+        paymentId,
+        appId,
+        status: transaction.status,
+      });
+
       await paymentMiddleware.processTransactionUpdate(appId, transaction);
     }
-    
+
     res.status(200).json({
       success: true,
       message: 'Webhook traité avec succès'
     });
   } catch (error) {
-    console.error('Webhook processing error:', error.message);
-    console.error('Error stack:', error.stack);
-    
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      paymentId,
+      message: error.message,
+      stack: error.stack,
+    });
+
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',

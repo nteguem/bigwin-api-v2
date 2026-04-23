@@ -197,3 +197,15 @@ exports.sendWelcome = async ({ to, firstName, tempPassword, role }) => {
   });
   return sendMail({ to, subject: `Votre accès ${BRAND.company} est prêt`, html });
 };
+
+/**
+ * Envoie une alerte tech (P0 / fatal). Pas de layout brandé, pas de logo
+ * attaché — c'est un email d'opérations, pas un email utilisateur. Le HTML
+ * est fourni par `core/logger/alerts/emailTemplate.js`.
+ */
+exports.sendAlert = async ({ to, subject, html }) => {
+  const from = `"${BRAND.company} — Alertes" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`;
+  const info = await getTransporter().sendMail({ from, to, subject, html });
+  logger.info(`[MailAlert] sent to ${to} — ${subject} (${info.messageId})`);
+  return info;
+};

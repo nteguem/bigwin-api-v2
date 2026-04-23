@@ -6,8 +6,9 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
-const logger = require('./utils/logger');
+const logger = require('./core/logger');
 const errorHandler = require('./api/middlewares/errorMiddleware');
+const requestId = require('./api/middlewares/common/requestId');
 const routes = require('./api/routes');
 
 
@@ -30,9 +31,25 @@ app.use(helmet());
 app.use(cors());
 app.use(cookieParser());
 
-// Middleware de logging des requêtes
+// RequestId : attache un UUID + X-Request-Id header + req.log dès le premier
+// middleware pour que TOUTES les lignes de log d'une requête soient corrélées.
+// Doit être le tout premier middleware applicatif.
+app.use(requestId);
+
+// Logging HTTP structuré : à la fin de la requête, on log method/url/status/
+// durée. Utilise le niveau `http` (pas `info`) pour pouvoir filtrer dans le
+// backoffice (les logs HTTP sont bruyants, on veut les séparer du métier).
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
+  const start = Date.now();
+  res.on('finish', () => {
+    req.log.http(`${req.method} ${req.originalUrl} ${res.statusCode}`, {
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      durationMs: Date.now() - start,
+      service: 'http',
+    });
+  });
   next();
 });
 

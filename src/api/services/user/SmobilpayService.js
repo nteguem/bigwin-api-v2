@@ -5,6 +5,9 @@ const crypto = require('crypto');
 const SmobilpayTransaction = require('../../models/user/SmobilpayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'smobilpay';
 
 // Classe d'erreur personnalisée
 class SmobilpayError extends Error {
@@ -368,48 +371,39 @@ async function verifyTransaction(config, identifier, isPaymentId = false) {
  * @param {Object} customerData - Données client
  */
 async function initiatePayment(appId, app, userId, packageId, serviceId, customerData) {
-  try {
-    console.log(`[Smobilpay-START] Démarrage initiate avec userId=${userId}, package=${packageId}, service=${serviceId}`);
+  const ctx = { service: SERVICE, category: 'initiate', appId, userId: String(userId), packageId, serviceId };
 
-    // 1. Récupérer et valider la config
+  try {
+    logger.info('initiate: start', ctx);
+
     const config = getConfig(app);
     validateConfig(config);
-    console.log(`[Smobilpay-1] Config validée pour app=${appId}`);
 
-    // 2. Récupérer le service
     const services = await getServices(app);
     const service = services.find(s => s.serviceid === serviceId);
-    
+
     if (!service) {
       throw new AppError(`Service ${serviceId} non trouvé`, 404, ErrorCodes.NOT_FOUND);
     }
-    console.log(`[Smobilpay-2] Service trouvé: ${service.name || service.serviceName}`);
-    
-    // 3. Récupérer le package
+
     const packageDoc = await Package.findOne({ _id: packageId, appId });
     if (!packageDoc) {
       throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
     }
-    console.log(`[Smobilpay-3] Package trouvé: ${packageDoc.name.fr}`);
-    
-    // 4. Récupérer le prix en XAF
+
     let amount;
-    
     if (packageDoc.pricing instanceof Map) {
       amount = packageDoc.pricing.get('XAF');
     } else if (packageDoc.pricing && typeof packageDoc.pricing === 'object') {
       amount = packageDoc.pricing.XAF || packageDoc.pricing['XAF'];
     }
-      
+
     if (!amount || amount <= 0) {
       throw new AppError('Prix XAF non disponible pour ce package', 400, ErrorCodes.VALIDATION_ERROR);
     }
-    console.log(`[Smobilpay-4] Prix: ${amount} XAF`);
-    
-    // 5. Créer la transaction
+
     const paymentId = uuidv4();
-    console.log(`[Smobilpay-5] PaymentId généré: ${paymentId}`);
-    
+
     const transaction = new SmobilpayTransaction({
       appId,
       paymentId,
@@ -425,38 +419,29 @@ async function initiatePayment(appId, app, userId, packageId, serviceId, custome
       email: customerData.email,
       status: 'PENDING'
     });
-    
+
     await transaction.save();
-    console.log(`[Smobilpay-5] Transaction sauvegardée`);
-    
-    // 6. Demander un devis
-    console.log(`[Smobilpay-6] Demande de devis...`);
+    logger.info('initiate: transaction created', { ...ctx, paymentId, amount });
+
     const quote = await requestQuote(config, service.payItemId, amount);
-    console.log(`[Smobilpay-6] Devis obtenu: ${quote.quoteId}`);
-    
-    // 7. Mettre à jour avec le quoteId
     transaction.quoteId = quote.quoteId;
     await transaction.save();
-    
-    // 8. Exécuter le paiement
-    console.log(`[Smobilpay-8] Exécution du paiement...`);
+
     const collectResult = await collectPayment(config, quote.quoteId, customerData, paymentId);
-    console.log(`[Smobilpay-8] Paiement exécuté, PTN: ${collectResult.ptn}`);
-    
-    // 9. Mettre à jour avec le PTN
     transaction.ptn = collectResult.ptn;
     await transaction.save();
-    
-    // 10. Populer et retourner
+
     await transaction.populate(['package', 'user']);
-    console.log(`[Smobilpay-END] Transaction complétée avec succès`);
-    
+    logger.info('initiate: success', { ...ctx, paymentId, ptn: collectResult.ptn });
+
     return transaction;
   } catch (error) {
-    console.error(`[Smobilpay-ERROR] Erreur:`, {
+    logger.error('initiate: failed', {
+      ...ctx,
       message: error.message,
-      status: error.response?.status,
-      data: error.response?.data
+      httpStatus: error.response?.status,
+      responseData: error.response?.data,
+      stack: error.stack,
     });
     throw error;
   }

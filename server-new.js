@@ -2,17 +2,19 @@
  * @fileoverview Point d'entrée de l'application
  */
 const dotenv = require('dotenv');
+
+// Charger .env AVANT tout require qui en dépend (logger lit LOG_LEVEL).
+dotenv.config();
+
 const app = require('./src/app');
-const logger = require('./src/utils/logger');
+const logger = require('./src/core/logger');
 const { connectDB } = require('./config/database');
+const { initLogsConnection } = require('./src/core/logger/connection');
 
 // Services CRON
 const PredictionCorrectionService = require('./src/api/services/common/predictionCorrectionService');
 const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
 const retentionJobs = require('./src/jobs/retentionNotificationJob');
-
-// Chargement des variables d'environnement
-dotenv.config();
 
 const PORT = process.env.PORT || 4000;
 
@@ -24,8 +26,12 @@ let correctionService = null;
  */
 const startServer = async () => {
   try {
-    // Connexion à la base de données
+    // Connexion à la base de données principale
     await connectDB();
+
+    // Connexion à la DB logs (séparée). Après la principale pour que le
+    // fallback fonctionne si MONGO_LOGS_URI est absent.
+    await initLogsConnection();
 
     // Service unifié de correction des prédictions (18h, 21h, 00h UTC)
     correctionService = new PredictionCorrectionService();

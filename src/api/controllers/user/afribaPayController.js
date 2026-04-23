@@ -4,6 +4,9 @@ const paymentMiddleware = require('../../middlewares/payment/paymentMiddleware')
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'afribapay';
 
 /**
  * Récupérer les pays et opérateurs.
@@ -279,7 +282,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (error) {
-    console.error('Error processing transaction update:', error.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      orderId: transaction.orderId,
+      message: error.message,
+      stack: error.stack,
+    });
   }
 
   res.status(200).json({
@@ -330,8 +339,15 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   const { order_id: orderId, status } = req.body;
 
-  console.log('=== WEBHOOK AFRIBAPAY REÇU ===');
-  console.log('Body:', JSON.stringify(req.body));
+  // On log uniquement les champs non-PII. `req.body` contient phone / user
+  // potentiellement → le détail part dans le context masqué par le sanitizer.
+  req.log.info('webhook: received', {
+    service: SERVICE,
+    category: 'webhook',
+    orderId,
+    status,
+    hasSignature: !!receivedSignature,
+  });
 
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -339,31 +355,41 @@ exports.webhook = catchAsync(async (req, res, next) => {
 
   try {
     const AfribaPayTransaction = require('../../models/user/AfribaPayTransaction');
-    
+
     // Chercher la transaction SANS filtrer par appId (on ne l'a pas encore)
     const transaction = await AfribaPayTransaction.findOne({ orderId })
       .populate(['package', 'user']);
 
     if (!transaction) {
-      console.error(`[Webhook AfribaPay] Transaction ${orderId} non trouvée`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE,
+        category: 'webhook',
+        orderId,
+      });
       return next(new AppError('Transaction non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Récupérer l'appId depuis la transaction
     const appId = transaction.appId;
-    console.log(`[Webhook AfribaPay] AppId récupéré depuis transaction: ${appId}`);
 
-    // Récupérer l'app depuis la base de données
     const currentApp = await App.findOne({ appId, isActive: true }).lean();
 
     if (!currentApp) {
-      console.error(`[Webhook AfribaPay] App ${appId} non trouvée`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE,
+        category: 'webhook',
+        orderId,
+        appId,
+      });
       return next(new AppError('Application non trouvée', 404, ErrorCodes.NOT_FOUND));
     }
 
-    // Vérifier que AfribaPay est activé pour cette app
     if (!currentApp?.payments?.afribapay?.enabled) {
-      console.error(`[Webhook AfribaPay] AfribaPay non activé pour app ${appId}`);
+      req.log.warn('webhook: afribapay disabled for app', {
+        service: SERVICE,
+        category: 'webhook',
+        orderId,
+        appId,
+      });
       return next(new AppError(
         'AfribaPay n\'est pas activé pour cette application',
         400,
@@ -371,13 +397,19 @@ exports.webhook = catchAsync(async (req, res, next) => {
       ));
     }
 
-    // Récupérer la config pour vérifier la signature
     const config = afribaPayService.getConfig(currentApp);
 
     if (config.apiKey && receivedSignature) {
       const isValidSignature = afribaPayService.verifyHmacToken(receivedSignature, rawPayload, config.apiKey);
       if (!isValidSignature) {
-        console.warn('AfribaPay - Invalid HMAC signature');
+        // FATAL : signature invalide → potentielle tentative de fraude webhook.
+        // Doit déclencher un email alert en J2.
+        req.log.fatal('webhook: HMAC signature invalid', {
+          service: SERVICE,
+          category: 'webhook.signature',
+          orderId,
+          appId,
+        });
       }
       transaction.webhookVerified = isValidSignature;
     } else {
@@ -395,8 +427,16 @@ exports.webhook = catchAsync(async (req, res, next) => {
     if (req.body.amount_total) transaction.amountTotal = req.body.amount_total;
 
     await transaction.save();
-    console.log(`[Webhook AfribaPay] Transaction ${orderId} updated to status: ${transaction.status}`);
-    
+
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE,
+      category: 'webhook',
+      orderId,
+      appId,
+      status: transaction.status,
+      verified: transaction.webhookVerified,
+    });
+
     await paymentMiddleware.processTransactionUpdate(appId, transaction);
 
     res.status(200).json({
@@ -405,9 +445,14 @@ exports.webhook = catchAsync(async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('Webhook processing error:', error.message);
-    console.error('Error stack:', error.stack);
-    
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      orderId,
+      message: error.message,
+      stack: error.stack,
+    });
+
     res.status(200).json({
       success: false,
       message: 'Erreur lors du traitement du webhook',

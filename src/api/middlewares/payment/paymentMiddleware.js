@@ -3,18 +3,27 @@
 const subscriptionService = require('../../services/user/subscriptionService');
 const notificationService = require('../../services/common/notificationService');
 const Device = require('../../models/common/Device');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'paymentMiddleware';
 
 /**
  * Traiter une transaction réussie
  */
 async function handleSuccessfulTransaction(appId, transaction) {
+  const ctx = {
+    service: SERVICE,
+    category: 'handleSuccess',
+    appId,
+    transactionId: String(transaction._id),
+  };
+
   try {
     if (!transaction.isSuccessful()) {
       return null;
     }
 
-    // ⭐ Opération atomique pour éviter les doublons de souscription
-    // Si deux webhooks arrivent en même temps, seul le premier réussira ce update
+    // Atomic : empêche le double-provisioning si 2 webhooks arrivent en même temps.
     const claimed = await transaction.constructor.findOneAndUpdate(
       { _id: transaction._id, processed: { $ne: true } },
       { $set: { processed: true } },
@@ -22,11 +31,9 @@ async function handleSuccessfulTransaction(appId, transaction) {
     );
 
     if (!claimed) {
-      console.log(`[${appId}] Transaction ${transaction._id} already processed, skipping`);
+      logger.info('already processed, skipping (idempotency hit)', ctx);
       return null;
     }
-
-    console.log(`[${appId}] Processing successful transaction: ${transaction._id}`);
 
     const subscription = await subscriptionService.createSubscription(
       appId,
@@ -36,15 +43,20 @@ async function handleSuccessfulTransaction(appId, transaction) {
       transaction._id
     );
 
-    console.log(`[${appId}] Subscription created: ${subscription._id}`);
-    console.log(`[${appId}] Transaction ${transaction._id} marked as processed`);
+    logger.info('subscription created', {
+      ...ctx,
+      subscriptionId: String(subscription._id),
+    });
 
-    // Envoyer notification de succès
     await sendPaymentSuccessNotification(appId, transaction);
 
     return subscription;
   } catch (error) {
-    console.error(`[${appId}] Error processing transaction ${transaction._id}:`, error.message);
+    logger.error('handleSuccess failed', {
+      ...ctx,
+      message: error.message,
+      stack: error.stack,
+    });
     throw error;
   }
 }
@@ -53,18 +65,27 @@ async function handleSuccessfulTransaction(appId, transaction) {
  * Traiter une transaction échouée
  */
 async function handleFailedTransaction(appId, transaction) {
+  const ctx = {
+    service: SERVICE,
+    category: 'handleFailed',
+    appId,
+    transactionId: String(transaction._id),
+    status: transaction.status,
+  };
+
   try {
-    console.log(`[${appId}] Processing failed transaction: ${transaction._id}`);
-    
-    // Envoyer notification d'échec
     await sendPaymentFailedNotification(appId, transaction);
-    
+
     transaction.processed = true;
     await transaction.save();
-    
-    console.log(`[${appId}] Failed transaction ${transaction._id} marked as processed`);
+
+    logger.info('failed transaction marked as processed', ctx);
   } catch (error) {
-    console.error(`[${appId}] Error processing failed transaction ${transaction._id}:`, error.message);
+    logger.error('handleFailed error', {
+      ...ctx,
+      message: error.message,
+      stack: error.stack,
+    });
   }
 }
 
@@ -82,10 +103,15 @@ async function sendPaymentSuccessNotification(appId, transaction) {
     }).sort({ lastActiveAt: -1 });
     
     if (!device || !device.playerId) {
-      console.log(`[${appId}] No playerId found for user ${transaction.user}, skipping notification`);
+      logger.debug('no playerId found, skipping success notification', {
+        service: SERVICE,
+        category: 'notify',
+        appId,
+        userId: String(transaction.user),
+      });
       return;
     }
-    
+
     // Populer le package pour avoir son nom
     await transaction.populate('package');
     const packageName = transaction.package?.name?.fr || transaction.package?.name?.en || 'Package Premium';
@@ -116,10 +142,22 @@ async function sendPaymentSuccessNotification(appId, transaction) {
     };
     
     await notificationService.sendToUsers(appId, [device.playerId], notification);
-    
-    console.log(`[${appId}] Payment success notification sent to user ${transaction.user}`);
+
+    logger.info('success notification sent', {
+      service: SERVICE,
+      category: 'notify',
+      appId,
+      userId: String(transaction.user),
+    });
   } catch (error) {
-    console.error(`[${appId}] Error sending payment success notification:`, error.message);
+    logger.error('success notification failed', {
+      service: SERVICE,
+      category: 'notify',
+      appId,
+      userId: String(transaction.user),
+      message: error.message,
+      stack: error.stack,
+    });
   }
 }
 
@@ -137,14 +175,19 @@ async function sendPaymentFailedNotification(appId, transaction) {
     }).sort({ lastActiveAt: -1 });
     
     if (!device || !device.playerId) {
-      console.log(`[${appId}] No playerId found for user ${transaction.user}, skipping notification`);
+      logger.debug('no playerId found, skipping failure notification', {
+        service: SERVICE,
+        category: 'notify',
+        appId,
+        userId: String(transaction.user),
+      });
       return;
     }
-    
+
     // Populer le package
     await transaction.populate('package');
     const packageName = transaction.package?.name?.fr || transaction.package?.name?.en || 'Package Premium';
-    
+
     const notification = {
       headings: {
         en: "❌ Payment Failed",
@@ -170,10 +213,22 @@ async function sendPaymentFailedNotification(appId, transaction) {
     };
     
     await notificationService.sendToUsers(appId, [device.playerId], notification);
-    
-    console.log(`[${appId}] Payment failed notification sent to user ${transaction.user}`);
+
+    logger.info('failed notification sent', {
+      service: SERVICE,
+      category: 'notify',
+      appId,
+      userId: String(transaction.user),
+    });
   } catch (error) {
-    console.error(`[${appId}] Error sending payment failed notification:`, error.message);
+    logger.error('failed notification failed', {
+      service: SERVICE,
+      category: 'notify',
+      appId,
+      userId: String(transaction.user),
+      message: error.message,
+      stack: error.stack,
+    });
   }
 }
 
@@ -194,7 +249,15 @@ async function processTransactionUpdate(appId, transaction) {
     
     return null;
   } catch (error) {
-    console.error(`[${appId}] Error in transaction middleware:`, error.message);
+    logger.error('processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'dispatch',
+      appId,
+      transactionId: String(transaction._id),
+      status: transaction.status,
+      message: error.message,
+      stack: error.stack,
+    });
     throw error;
   }
 }
