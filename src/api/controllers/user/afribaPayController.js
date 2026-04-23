@@ -6,23 +6,91 @@ const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
 
 /**
- * Récupérer les pays et opérateurs
+ * Récupérer les pays et opérateurs.
+ *
+ * Préfère l'API live AfribaPay (cache 1h en mémoire serveur) pour rester
+ * synchronisé avec les opérateurs réellement supportés, avec fallback sur
+ * le fichier JSON local si l'API est down.
  */
 exports.getCountries = catchAsync(async (req, res, next) => {
   const { country } = req.query;
-  
-  const data = afribaPayService.getCountriesData(country);
-  
+  const currentApp = req.currentApp;
+
+  // Passer l'app pour que le service puisse utiliser sa config AfribaPay
+  // (token, apiUrl) pour taper /v1/countries.
+  const data = await afribaPayService.getCountriesDataAsync(currentApp, country);
+
+  // Liste complète des codes pays disponibles (pour le dropdown mobile)
+  const fullList = country
+    ? await afribaPayService.getCountriesDataAsync(currentApp)
+    : data;
+
   res.status(200).json({
     success: true,
     data: country ? {
       country: data.country,
-      availableCountries: Object.keys(afribaPayService.getCountriesData().countries)
+      availableCountries: Object.keys(fullList.countries)
     } : {
       countries: data.countries,
       availableCountries: Object.keys(data.countries)
     }
   });
+});
+
+/**
+ * Déclencher l'envoi d'un OTP pour un wallet (Coris, LigdiCash, etc.).
+ *
+ * Étape 1 du flow 2-step pour les wallets. Le user reçoit un SMS avec un
+ * code, qu'il doit ensuite passer à /initiate via le champ `otpCode`.
+ */
+exports.requestOtp = catchAsync(async (req, res, next) => {
+  const { packageId, phoneNumber, operator, country, currency } = req.body;
+  const appId = req.appId;
+  const currentApp = req.currentApp;
+
+  if (!appId || !currentApp) {
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  if (!packageId || !phoneNumber || !operator || !country || !currency) {
+    return next(new AppError(
+      'packageId, phoneNumber, operator, country et currency sont requis',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  if (!currentApp?.payments?.afribapay?.enabled) {
+    return next(new AppError(
+      'AfribaPay n\'est pas activé pour cette application',
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    ));
+  }
+
+  try {
+    const result = await afribaPayService.requestWalletOtp(
+      appId, currentApp, packageId, phoneNumber, operator, country, currency
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: { status: result.status }
+    });
+  } catch (error) {
+    if (error instanceof afribaPayService.AfribaPayError) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        error: {
+          code: 'AFRIBAPAY_OTP_ERROR',
+          message: error.message,
+          details: error.responseData
+        }
+      });
+    }
+    throw error;
+  }
 });
 
 /**
@@ -130,6 +198,10 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
           country: result.transaction.country,
           phoneNumber: result.transaction.phoneNumber,
           providerId: result.transaction.providerId,
+          // providerLink : URL de checkout externe renvoyée par certains
+          // opérateurs (Wave notamment). Le mobile l'ouvre si présent.
+          // Null pour les opérateurs classiques (MTN, Moov, Orange...).
+          providerLink: result.transaction.providerLink || null,
           package: result.transaction.package
         }
       }
@@ -240,13 +312,27 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
  * Webhook AfribaPay
  */
 exports.webhook = catchAsync(async (req, res, next) => {
-  const receivedSignature = req.headers['x-signature'];
+  // Header officiel AfribaPay = "Afribapay-Sign" (cf. doc Postman).
+  // Express met les headers en lowercase, donc on lit `afribapay-sign`.
+  // Fallback sur `x-signature` pour compat historique si AfribaPay en
+  // envoyait un des deux selon l'environnement. Non-bloquant : on vérifie
+  // la signature à titre informatif (flag `webhookVerified` en BD) mais
+  // on continue de traiter le webhook comme avant.
+  const receivedSignature = req.headers['afribapay-sign']
+    || req.headers['x-signature'];
+
+  // Le raw body (non-re-sérialisé) est capturé par express.json({verify})
+  // dans app.js. Indispensable pour HMAC-SHA256 qui exige le payload
+  // byte-for-byte tel que reçu. Avant, `JSON.stringify(req.body)` ré-
+  // ordonnait les clés → la HMAC ne matchait jamais la signature.
+  // Fallback sur JSON.stringify si rawBody absent (dégradation gracieuse).
+  const rawPayload = req.rawBody || JSON.stringify(req.body);
+
   const { order_id: orderId, status } = req.body;
-  const rawPayload = JSON.stringify(req.body);
 
   console.log('=== WEBHOOK AFRIBAPAY REÇU ===');
   console.log('Body:', JSON.stringify(req.body));
-  
+
   if (!orderId) {
     return next(new AppError('Order ID requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
@@ -333,6 +419,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 module.exports = {
   getCountries: exports.getCountries,
   checkOtpRequirement: exports.checkOtpRequirement,
+  requestOtp: exports.requestOtp,        // nouveau : flow 2-step wallet
   initiatePayment: exports.initiatePayment,
   checkStatus: exports.checkStatus,
   webhook: exports.webhook

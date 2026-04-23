@@ -15,7 +15,15 @@ const routes = require('./api/routes');
 const app = express();
 
 // Middleware essentiels
-app.use(express.json({ limit: '10mb' }));
+// `verify` capture le raw body AVANT le parsing JSON — nécessaire pour la
+// vérification HMAC des webhooks (AfribaPay, Flutterwave…) qui exigent le
+// payload byte-for-byte, pas re-sérialisé.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
 app.use(helmet());

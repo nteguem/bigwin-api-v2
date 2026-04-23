@@ -24,7 +24,11 @@ router.post('/webhook', afribaPayController.webhook);
  */
 router.use(userAuth.protect);
 
-// Initier un paiement AfribaPay
+// Étape 1 du flow 2-step pour les wallets (Coris, LigdiCash…) :
+// envoie un OTP au téléphone du user
+router.post('/request-otp', afribaPayController.requestOtp);
+
+// Initier un paiement AfribaPay (étape 2 pour wallet, étape unique sinon)
 router.post('/initiate', afribaPayController.initiatePayment);
 
 // Vérifier le statut d'un paiement
