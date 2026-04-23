@@ -51,6 +51,15 @@ const AFRIBAPAY_COUNTRY_CODES = [
   '243', // RDC
 ];
 
+// Pays qui ont migré vers des numéros locaux à 10 digits commençant par 0
+// (le 0 fait partie du numéro, pas un parasite à retirer). Bénin a migré en
+// 2022 (format 01XXXXXXXX / 41XXXXXXXX), Côte d'Ivoire en 2021 (format
+// 0XXXXXXXXX). Stripper le 0 pour ces pays casse tous les paiements.
+const COUNTRIES_WITH_LEADING_ZERO_KEPT = new Set([
+  '229', // Bénin (depuis 2022)
+  '225', // Côte d'Ivoire (depuis 2021)
+]);
+
 /**
  * Normalise un numéro de téléphone pour l'API AfribaPay.
  *
@@ -72,6 +81,9 @@ function _sanitizeAfribapayPhone(phone) {
   let cleaned = String(phone).replace(/\D/g, '');
   for (const cc of AFRIBAPAY_COUNTRY_CODES) {
     if (cleaned.startsWith(cc + '0')) {
+      // Exception pays ayant migré vers numéros locaux 10 digits (BJ, CI) :
+      // le 0 après le code pays fait partie du numéro, on ne strip pas.
+      if (COUNTRIES_WITH_LEADING_ZERO_KEPT.has(cc)) break;
       cleaned = cc + cleaned.substring(cc.length + 1);
       break;
     }
