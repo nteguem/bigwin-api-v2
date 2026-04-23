@@ -310,47 +310,97 @@ async function _fetchCountriesFromApi(app) {
 }
 
 /**
- * Normalise la réponse `/v1/countries` pour garantir la rétro-compatibilité
- * avec les anciens mobiles qui attendent tous les champs présents.
+ * Normalise la réponse `/v1/countries` en utilisant le JSON local
+ * (`data/payments/afribapayData.json`) comme SOURCE DE VÉRITÉ pour la liste
+ * des opérateurs. L'API live AfribaPay renvoie parfois des opérateurs
+ * parasites qui ne fonctionnent pas réellement (ex: airtel CG,
+ * wligdicash/amanata/nita/zamani pour NE, etc.) — on les bloque en les
+ * écartant de la liste.
  *
- * Charge le JSON local et l'utilise comme squelette de référence : si
- * l'API live ne renvoie pas `wallet` pour un opérateur, on prend la valeur
- * du JSON local (ou 0 si l'opérateur n'existe pas localement).
+ * Règles :
+ *   - Si un pays+devise existe dans le JSON local : on utilise les
+ *     opérateurs listés dans le JSON. Les champs `operator_name`,
+ *     `otp_required`, `ussd_code`, `wallet` sont enrichis avec la data
+ *     live quand elle est plus à jour.
+ *   - EXCEPTION wallet : si l'API live marque un opérateur comme wallet
+ *     (`wallet: 1`), on le garde même s'il n'est pas dans le JSON. Le JSON
+ *     historique ne trackait pas les wallets car l'app ne les gérait pas
+ *     encore — on fait confiance à live pour les découvrir.
+ *   - Si un nouveau pays apparaît dans live mais n'existe pas en local :
+ *     on garde la data live telle quelle (nouvelle découverte).
+ *
+ * Pour ajouter/retirer un opérateur non-wallet → éditer
+ * `data/payments/afribapayData.json`.
  */
 function _normalizeCountriesResponse(liveData) {
-  // Lecture du JSON local pour reprendre les valeurs manquantes
   let localData = {};
   try {
     const fileContent = fs.readFileSync(COUNTRIES_DATA_PATH, 'utf8');
     localData = JSON.parse(fileContent);
   } catch (_) {
-    // Si le fichier local n'est pas lisible, on continue avec les défauts
+    // Fichier illisible → on continue sans whitelist (comportement dégradé)
   }
 
   const normalized = {};
   for (const [countryCode, countryData] of Object.entries(liveData)) {
-    const localCountry = localData[countryCode] || {};
+    const localCountry = localData[countryCode];
     const normalizedCurrencies = {};
 
     const currencies = countryData?.currencies || {};
     for (const [currCode, currData] of Object.entries(currencies)) {
-      const localCurrency = localCountry.currencies?.[currCode] || {};
-      const localOps = localCurrency.operators || [];
+      const localOps = localCountry?.currencies?.[currCode]?.operators || [];
+      const liveOps = currData.operators || [];
 
-      const normalizedOps = (currData.operators || []).map(op => {
-        const localOp = localOps.find(lo => lo.operator_code === op.operator_code) || {};
-        return {
+      // Index la data live par code opérateur pour enrichir chaque entrée
+      // du JSON local avec les champs les plus frais.
+      const liveOpsByCode = Object.fromEntries(
+        liveOps.map(op => [op.operator_code, op])
+      );
+
+      let normalizedOps;
+
+      if (localOps.length > 0) {
+        // Whitelist mode : le JSON dicte la liste des non-wallets.
+        const jsonOps = localOps.map(localOp => {
+          const liveOp = liveOpsByCode[localOp.operator_code] || {};
+          return {
+            operator_code: localOp.operator_code ?? '',
+            operator_name: liveOp.operator_name ?? localOp.operator_name ?? '',
+            otp_required: typeof liveOp.otp_required === 'number'
+              ? liveOp.otp_required
+              : (typeof localOp.otp_required === 'number' ? localOp.otp_required : 0),
+            ussd_code: liveOp.ussd_code ?? localOp.ussd_code ?? '',
+            wallet: typeof liveOp.wallet === 'number'
+              ? liveOp.wallet
+              : (typeof localOp.wallet === 'number' ? localOp.wallet : 0),
+          };
+        });
+
+        // Exception wallet : tout opérateur live marqué wallet=1 et absent
+        // du JSON est quand même ajouté (on laisse AfribaPay découvrir les
+        // wallets à notre place, le JSON historique ne les trackait pas).
+        const localCodes = new Set(localOps.map(o => o.operator_code));
+        const extraWallets = liveOps
+          .filter(op => op.wallet === 1 && !localCodes.has(op.operator_code))
+          .map(op => ({
+            operator_code: op.operator_code ?? '',
+            operator_name: op.operator_name ?? '',
+            otp_required: typeof op.otp_required === 'number' ? op.otp_required : 1,
+            ussd_code: op.ussd_code ?? '',
+            wallet: 1,
+          }));
+
+        normalizedOps = [...jsonOps, ...extraWallets];
+      } else {
+        // Nouveau pays/devise pas encore référencé localement → garder live
+        normalizedOps = liveOps.map(op => ({
           operator_code: op.operator_code ?? '',
           operator_name: op.operator_name ?? '',
-          otp_required: typeof op.otp_required === 'number'
-            ? op.otp_required
-            : (typeof localOp.otp_required === 'number' ? localOp.otp_required : 0),
-          ussd_code: op.ussd_code ?? localOp.ussd_code ?? '',
-          wallet: typeof op.wallet === 'number'
-            ? op.wallet
-            : (typeof localOp.wallet === 'number' ? localOp.wallet : 0),
-        };
-      });
+          otp_required: typeof op.otp_required === 'number' ? op.otp_required : 0,
+          ussd_code: op.ussd_code ?? '',
+          wallet: typeof op.wallet === 'number' ? op.wallet : 0,
+        }));
+      }
 
       normalizedCurrencies[currCode] = {
         ...currData,
