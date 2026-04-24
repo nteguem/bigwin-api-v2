@@ -81,7 +81,20 @@ const userSchema = new mongoose.Schema({
     type: String,
     select: false
   }],
-  
+
+  // Firebase `app_instance_id` — capturé par le mobile et envoyé à chaque
+  // login/register/googleAuth. Requis pour que les webhooks PSP puissent
+  // envoyer des events GA4 Measurement Protocol (purchase / payment_failed)
+  // attribués au bon user côté Google Ads.
+  //
+  // Peut être null si l'app mobile ne l'a pas encore envoyé (ancien client
+  // avant le sprint tracking) — dans ce cas le webhook skip le MP event.
+  firebaseAppInstanceId: {
+    type: String,
+    default: null,
+    trim: true
+  },
+
   createdAt: {
     type: Date,
     default: Date.now

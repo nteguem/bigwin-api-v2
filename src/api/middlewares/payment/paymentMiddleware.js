@@ -2,10 +2,76 @@
 
 const subscriptionService = require('../../services/user/subscriptionService');
 const notificationService = require('../../services/common/notificationService');
+const ga4mp = require('../../services/common/googleAnalyticsMpService');
+const App = require('../../models/common/App');
+const User = require('../../models/user/User');
 const Device = require('../../models/common/Device');
 const logger = require('../../../core/logger');
 
 const SERVICE = 'paymentMiddleware';
+
+/**
+ * Envoie un event GA4 Measurement Protocol en fire-and-forget.
+ * Ne bloque JAMAIS le flux de paiement — les erreurs GA sont loggées et
+ * absorbées. Utilisé depuis handleSuccessfulTransaction / handleFailedTransaction.
+ */
+async function _fireGa4Event(eventType, appId, transaction) {
+  try {
+    // On lean() les 2 queries en parallèle pour minimiser la latence
+    const [app, user] = await Promise.all([
+      App.findOne({ appId }).lean(),
+      User.findById(transaction.user).lean(),
+    ]);
+
+    if (!app || !user) return;
+
+    await transaction.populate('package');
+    const pkg = transaction.package;
+    const paymentMethod = transaction.constructor.modelName
+      .replace(/Transaction$/, '')
+      .toLowerCase(); // ex: 'afribapay', 'smobilpay'…
+
+    // Identifiant unique de transaction selon le PSP
+    const transactionId = String(
+      transaction.orderId
+        || transaction.transactionId
+        || transaction.paymentId
+        || transaction._id
+    );
+
+    if (eventType === 'purchase') {
+      await ga4mp.sendPurchase({
+        app,
+        user,
+        transactionId,
+        value: transaction.amount,
+        currency: transaction.currency,
+        paymentMethod,
+        packageId: pkg?._id ? String(pkg._id) : undefined,
+        packageName: pkg?.name?.fr || pkg?.name?.en || undefined,
+      });
+    } else if (eventType === 'payment_failed') {
+      await ga4mp.sendPaymentFailed({
+        app,
+        user,
+        transactionId,
+        value: transaction.amount,
+        currency: transaction.currency,
+        paymentMethod,
+        reason: transaction.errorCode || transaction.status,
+      });
+    }
+  } catch (err) {
+    // Absorber toutes les erreurs — analytics ne doit jamais casser le webhook
+    logger.error('_fireGa4Event failed', {
+      service: SERVICE,
+      category: 'ga4',
+      eventType,
+      appId,
+      message: err.message,
+    });
+  }
+}
 
 /**
  * Traiter une transaction réussie
@@ -48,6 +114,10 @@ async function handleSuccessfulTransaction(appId, transaction) {
       subscriptionId: String(subscription._id),
     });
 
+    // GA4 MP : fire l'event `purchase` pour Google Ads Smart Bidding.
+    // Fire-and-forget — les erreurs ne bloquent pas le flow.
+    await _fireGa4Event('purchase', appId, transaction);
+
     await sendPaymentSuccessNotification(appId, transaction);
 
     return subscription;
@@ -75,6 +145,9 @@ async function handleFailedTransaction(appId, transaction) {
 
   try {
     await sendPaymentFailedNotification(appId, transaction);
+
+    // GA4 MP : fire `payment_failed` pour diagnostic funnel (pas une conversion).
+    await _fireGa4Event('payment_failed', appId, transaction);
 
     transaction.processed = true;
     await transaction.save();

@@ -153,6 +153,31 @@ const appSchema = new mongoose.Schema({
     trim: true
   },
 
+  // Tracking / Analytics per-app — utilisé par les webhooks paiement pour
+  // envoyer des events de conversion à GA4 via Measurement Protocol, qui
+  // sont ensuite importés comme conversions dans Google Ads.
+  analytics: {
+    firebase: {
+      enabled: {
+        type: Boolean,
+        default: false,
+        comment: 'Activer l\'envoi d\'events MP depuis les webhooks PSP'
+      },
+      appId: {
+        type: String,
+        default: null,
+        trim: true,
+        comment: 'Firebase App ID format 1:NUMBER:android:HEX (pour Android)'
+      },
+      mpApiSecret: {
+        type: String,
+        default: null,
+        trim: true,
+        comment: 'Measurement Protocol API Secret (créé dans GA4 > Data streams > Android > MP secrets)'
+      }
+    }
+  },
+
   branding: {
     primaryColor: String,
     logo: String,

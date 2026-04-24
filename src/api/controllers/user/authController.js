@@ -15,7 +15,7 @@ const SERVICE = 'auth';
  * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId } = req.body;
+  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId, firebaseAppInstanceId } = req.body;
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -56,7 +56,8 @@ exports.register = catchAsync(async (req, res, next) => {
     city,
     authProvider: 'local',
     emailVerified: false,
-    referredBy: affiliate?._id
+    referredBy: affiliate?._id,
+    firebaseAppInstanceId: firebaseAppInstanceId || null
   });
   
   // Générer les tokens
@@ -114,7 +115,7 @@ async function generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode) 
  * Connexion utilisateur classique (téléphone + mot de passe)
  */
 exports.login = catchAsync(async (req, res, next) => {
-  const { phoneNumber, password, deviceId } = req.body;
+  const { phoneNumber, password, deviceId, firebaseAppInstanceId } = req.body;
   
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -137,11 +138,14 @@ exports.login = catchAsync(async (req, res, next) => {
   
   // Générer les tokens
   const tokens = authService.generateTokens(user._id, 'user');
-  
-  // Sauvegarder le refresh token
+
+  // Sauvegarder le refresh token + firebaseAppInstanceId si fourni par le mobile
   user.refreshTokens.push(tokens.refreshToken);
+  if (firebaseAppInstanceId) {
+    user.firebaseAppInstanceId = firebaseAppInstanceId;
+  }
   await user.save();
-  
+
   // Lier le device au user
   let device = null;
   if (deviceId) {
@@ -156,10 +160,10 @@ exports.login = catchAsync(async (req, res, next) => {
       });
     }
   }
-  
+
   // Vérifier s'il a un abonnement actif
   const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, user._id, req.query?.lang || 'fr');
-  
+
   // Réponse avec l'info d'abonnement et device
   const response = authService.formatAuthResponse(user, tokens, 'Connexion réussie');
   response.data.hasActiveSubscription = subscriptionInfo.hasActiveSubscription;
@@ -179,7 +183,7 @@ exports.login = catchAsync(async (req, res, next) => {
  * Authentification avec Google (login + register combiné)
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
-  const { idToken, affiliateCode, city, countryCode, deviceId } = req.body;
+  const { idToken, affiliateCode, city, countryCode, deviceId, firebaseAppInstanceId } = req.body;
   
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -213,11 +217,14 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     // 4. Générer les tokens JWT de votre app
     const tokens = authService.generateTokens(user._id, 'user');
     
-    // 5. Sauvegarder le refresh token
+    // 5. Sauvegarder le refresh token + firebaseAppInstanceId si fourni
     if (!user.refreshTokens) {
       user.refreshTokens = [];
     }
     user.refreshTokens.push(tokens.refreshToken);
+    if (firebaseAppInstanceId) {
+      user.firebaseAppInstanceId = firebaseAppInstanceId;
+    }
     await user.save();
     
     // 6. Lier le device si fourni
