@@ -179,15 +179,25 @@ class GoogleAuthService {
         }
       }
       
+      // Acquisition : capturer si le mobile a envoyé une source valide
+      const acquisition = additionalData.acquisitionSource &&
+        ['google_ads', 'organique'].includes(additionalData.acquisitionSource)
+        ? {
+            source: additionalData.acquisitionSource,
+            gclid: additionalData.acquisitionGclid || null,
+            capturedAt: new Date()
+          }
+        : undefined;
+
       // Créer le nouveau user
       user = await User.create({
         // Multi-tenant
         appId,
-        
+
         // Auth Google
         googleId: googleData.googleId,
         authProvider: 'google',
-        
+
         // Infos de profil
         email: googleData.email,
         emailVerified: googleData.emailVerified,
@@ -195,14 +205,17 @@ class GoogleAuthService {
         firstName: googleData.firstName,
         lastName: googleData.lastName,
         profilePicture: googleData.profilePicture,
-        
+
         // Infos additionnelles de l'app
         city: additionalData.city || '',
         countryCode: additionalData.countryCode || '',
         referredBy,
-        
+
         // Statut
-        isActive: true
+        isActive: true,
+
+        // Acquisition (si fournie par le mobile)
+        ...(acquisition && { acquisition })
       });
       
       console.log(`✅ Nouveau user Google créé: ${user.email} (${user.pseudo}) - App: ${appId}`);

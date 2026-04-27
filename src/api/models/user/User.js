@@ -95,6 +95,30 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
 
+  // Source d'acquisition — capturée par le mobile via Play Install Referrer
+  // API au premier lancement, envoyée au 1er register/login/googleAuth.
+  // Immutable une fois set (premier capture wins).
+  //   - google_ads : referrer contenait `gclid=` (clic sur pub Google Ads)
+  //   - organique  : tout le reste (Play Store search, lien direct, partage,
+  //                  iOS, Huawei sans GMS, install referrer indisponible)
+  //
+  // Pas de `default` sur les sous-champs : Mongoose ferait remonter null →
+  // enum validation FAIL. On laisse le champ undefined par défaut, ce qui
+  // skip le validateur enum tant que la valeur n'est pas explicitement set.
+  acquisition: {
+    source: {
+      type: String,
+      enum: ['google_ads', 'organique']
+    },
+    gclid: {
+      type: String,
+      trim: true
+    },
+    capturedAt: {
+      type: Date
+    }
+  },
+
   createdAt: {
     type: Date,
     default: Date.now

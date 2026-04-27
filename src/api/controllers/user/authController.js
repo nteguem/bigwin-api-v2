@@ -15,7 +15,7 @@ const SERVICE = 'auth';
  * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId, firebaseAppInstanceId } = req.body;
+  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -44,6 +44,16 @@ exports.register = catchAsync(async (req, res, next) => {
   // Générer l'email automatiquement avec vérification d'unicité POUR CETTE APP
   const generatedEmail = await generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode);
   
+  // Construire l'objet acquisition uniquement si le mobile a envoyé une source
+  // valide (sinon laisser null pour les anciens clients pré-sprint tracking)
+  const acquisition = acquisitionSource && ['google_ads', 'organique'].includes(acquisitionSource)
+    ? {
+        source: acquisitionSource,
+        gclid: acquisitionGclid || null,
+        capturedAt: new Date()
+      }
+    : undefined;
+
   // Créer l'utilisateur AVEC APPID
   const user = await User.create({
     appId,
@@ -57,7 +67,8 @@ exports.register = catchAsync(async (req, res, next) => {
     authProvider: 'local',
     emailVerified: false,
     referredBy: affiliate?._id,
-    firebaseAppInstanceId: firebaseAppInstanceId || null
+    firebaseAppInstanceId: firebaseAppInstanceId || null,
+    ...(acquisition && { acquisition })
   });
   
   // Générer les tokens
@@ -115,7 +126,7 @@ async function generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode) 
  * Connexion utilisateur classique (téléphone + mot de passe)
  */
 exports.login = catchAsync(async (req, res, next) => {
-  const { phoneNumber, password, deviceId, firebaseAppInstanceId } = req.body;
+  const { phoneNumber, password, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
   
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -143,6 +154,20 @@ exports.login = catchAsync(async (req, res, next) => {
   user.refreshTokens.push(tokens.refreshToken);
   if (firebaseAppInstanceId) {
     user.firebaseAppInstanceId = firebaseAppInstanceId;
+  }
+  // Acquisition : premier capture wins. On set uniquement si jamais set.
+  // Ça gère les users existants qui se reconnectent avec une app à jour :
+  // ils sont taggés à leur 1er login post-update au lieu d'être perdus.
+  if (
+    acquisitionSource &&
+    ['google_ads', 'organique'].includes(acquisitionSource) &&
+    (!user.acquisition || !user.acquisition.source)
+  ) {
+    user.acquisition = {
+      source: acquisitionSource,
+      gclid: acquisitionGclid || null,
+      capturedAt: new Date()
+    };
   }
   await user.save();
 
@@ -183,7 +208,7 @@ exports.login = catchAsync(async (req, res, next) => {
  * Authentification avec Google (login + register combiné)
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
-  const { idToken, affiliateCode, city, countryCode, deviceId, firebaseAppInstanceId } = req.body;
+  const { idToken, affiliateCode, city, countryCode, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
   
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -206,7 +231,9 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(appId, googleData, {
       affiliateCode,
       city,
-      countryCode
+      countryCode,
+      acquisitionSource,
+      acquisitionGclid
     });
     
     // 3. Vérifier si le compte est actif
@@ -224,6 +251,21 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     user.refreshTokens.push(tokens.refreshToken);
     if (firebaseAppInstanceId) {
       user.firebaseAppInstanceId = firebaseAppInstanceId;
+    }
+    // Acquisition : premier capture wins (cas d'un user Google existant qui
+    // se reconnecte avec une app à jour mais n'avait pas été taggé à la
+    // création). Pour un nouveau user, le service l'a déjà set à la création.
+    if (
+      !isNewUser &&
+      acquisitionSource &&
+      ['google_ads', 'organique'].includes(acquisitionSource) &&
+      (!user.acquisition || !user.acquisition.source)
+    ) {
+      user.acquisition = {
+        source: acquisitionSource,
+        gclid: acquisitionGclid || null,
+        capturedAt: new Date()
+      };
     }
     await user.save();
     
