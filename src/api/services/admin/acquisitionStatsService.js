@@ -11,6 +11,7 @@
 
 const User = require('../../models/user/User');
 const Subscription = require('../../models/common/Subscription');
+const { convertToXAF } = require('./subscriptionManagementService');
 
 const SOURCES = ['google_ads', 'organique'];
 
@@ -183,6 +184,26 @@ async function getMonthlyRevenue(appId, filters = {}) {
 }
 
 /**
+ * Conversion du `revenue` (multi-devise) en agrégat XAF par source.
+ * Permet d'afficher dans le dashboard les ventes du jour Pub vs Organique
+ * en une seule devise comparable, comme le `totalRevenueXAF` global.
+ */
+function buildRevenueXAF(revenue) {
+  const out = {
+    google_ads: { count: 0, amount: 0 },
+    organique: { count: 0, amount: 0 },
+    untracked: { count: 0, amount: 0 },
+  };
+  for (const row of revenue) {
+    for (const src of ['google_ads', 'organique', 'untracked']) {
+      out[src].count += row[src].count;
+      out[src].amount += convertToXAF(row[src].amount, row.currency);
+    }
+  }
+  return out;
+}
+
+/**
  * Endpoint principal — retourne tous les agrégats d'un coup.
  */
 async function getAcquisitionStats(appId, filters = {}) {
@@ -192,7 +213,9 @@ async function getAcquisitionStats(appId, filters = {}) {
     getMonthlyRevenue(appId, filters),
   ]);
 
-  return { users, revenue, monthly };
+  const revenueXAF = buildRevenueXAF(revenue);
+
+  return { users, revenue, revenueXAF, monthly };
 }
 
 module.exports = {
