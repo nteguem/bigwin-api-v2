@@ -63,6 +63,11 @@ const COUNTRIES_WITH_LEADING_ZERO_KEPT = new Set([
   '229', // Bénin (depuis 2022)
   '225', // Côte d'Ivoire (depuis 2021)
   '242', // Congo-Brazzaville
+  // Burkina Faso : les préfixes mobile Moov (01/02/03), Orange (05/06/07)
+  // commencent par 0 — ce 0 fait partie du numéro, pas un trunk code.
+  // Sans cette exception, AfribaPay reçoit ex. "2262584296" (10 chiffres)
+  // au lieu de "22602584296" (11 chiffres) et rejette "Invalid phone number".
+  '226',
 ]);
 
 /**

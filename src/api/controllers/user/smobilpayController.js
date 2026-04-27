@@ -265,8 +265,27 @@ exports.webhook = catchAsync(async (req, res, next) => {
       ));
     }
 
-    if (transaction.status !== status) {
-      transaction.status = status;
+    // Map du status Smobilpay (ERRORED/EXPIRED/...) vers notre enum
+    // (PENDING/SUCCESS/ERROR). Sans ça, Mongoose throw "is not a valid
+    // enum value" et le webhook répond 500, donc Maviance retry / abandonne.
+    const mappedStatus = smobilpayService.mapStatus(status);
+    if (!mappedStatus) {
+      req.log.warn('webhook: unknown status received', {
+        service: SERVICE,
+        category: 'webhook',
+        paymentId,
+        rawStatus: status,
+      });
+      // On répond 200 quand même pour que Maviance ne retry pas en boucle
+      // sur un status qu'on ne sait pas interpréter — on ack et on logue.
+      return res.status(200).json({
+        success: true,
+        message: 'Status inconnu, ignoré',
+      });
+    }
+
+    if (transaction.status !== mappedStatus) {
+      transaction.status = mappedStatus;
       transaction.errorCode = errorCode || null;
       await transaction.save();
 

@@ -493,6 +493,12 @@ async function checkTransactionStatus(appId, app, paymentId) {
             transaction.priceLocalCur = transactionData[field];
           } else if (field === 'localCur') {
             transaction.currency = transactionData[field];
+          } else if (field === 'status') {
+            // Map Smobilpay status (ERRORED/EXPIRED/...) vers notre enum
+            // (PENDING/SUCCESS/ERROR). Skip si status inconnu pour ne pas
+            // écraser une valeur existante avec null.
+            const mapped = mapStatus(transactionData[field]);
+            if (mapped) transaction.status = mapped;
           } else {
             transaction[field] = transactionData[field];
           }
@@ -508,6 +514,43 @@ async function checkTransactionStatus(appId, app, paymentId) {
   }
 }
 
+/**
+ * Map les status renvoyés par Smobilpay/Maviance vers les valeurs autorisées
+ * par notre schéma enum (`PENDING | SUCCESS | ERROR`).
+ *
+ * Smobilpay envoie : INITIATED, PENDING, SUCCESS, SUCCESSESS (typo Maviance),
+ * ERRORED, EXPIRED, CANCELLED, FAILED. Sans ce mapping, le webhook crashe
+ * en validation Mongoose dès qu'un statut autre que SUCCESS/PENDING/ERROR
+ * arrive (cas observé : "ERRORED is not a valid enum value").
+ *
+ * Retourne `null` si le status est inconnu — l'appelant doit alors ne pas
+ * écraser le status existant.
+ */
+function mapStatus(rawStatus) {
+  if (!rawStatus) return null;
+  const upper = String(rawStatus).trim().toUpperCase();
+  switch (upper) {
+    case 'SUCCESS':
+    case 'SUCCESSESS': // typo connue côté Maviance
+    case 'COMPLETED':
+      return 'SUCCESS';
+    case 'ERRORED':
+    case 'ERROR':
+    case 'EXPIRED':
+    case 'CANCELLED':
+    case 'CANCELED':
+    case 'FAILED':
+    case 'REJECTED':
+      return 'ERROR';
+    case 'INITIATED':
+    case 'PENDING':
+    case 'PROCESSING':
+      return 'PENDING';
+    default:
+      return null;
+  }
+}
+
 module.exports = {
   getConfig,
   getServices,
@@ -516,6 +559,7 @@ module.exports = {
   verifyTransaction,
   formatServicesResponse,
   cleanMerchantName,
+  mapStatus,
   SmobilpayError,
   COUNTRY_MAPPING
 };
