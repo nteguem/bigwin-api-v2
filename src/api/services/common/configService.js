@@ -1,51 +1,117 @@
 /**
  * @fileoverview Service de gestion de la configuration par pays (GLOBAL)
  * Gère la détection du pays et les opérations CRUD
+ *
+ * Détection IP : MaxMind GeoLite2 en local (fichier mmdb).
+ * Plus de dépendance ip-api.com (qui timeout / rate-limit).
+ * La DB est téléchargée via `npm run geoip:update` (cron mensuel).
  */
-const HttpClient = require('../../../utils/httpClient');
+const path = require('path');
+const fs = require('fs');
+const maxmind = require('maxmind');
 const AppConfig = require('../../models/common/AppConfig');
 const logger = require('../../../utils/logger');
 
+const GEOIP_DB_PATH = path.join(__dirname, '..', '..', '..', '..', 'data', 'geoip', 'GeoLite2-Country.mmdb');
+
+// Mapping pays → devise + préfixe pour les configs auto-créées. MaxMind
+// fournit le countryCode mais pas la currency ni le callingCode (ip-api
+// avait les mêmes limites en plan gratuit). On utilise un mapping local
+// pour les pays Mobile Money pertinents — les autres tombent en USD/+1.
+const COUNTRY_DEFAULTS = {
+  // Zone CFA UEMOA (XOF)
+  CI: { currency: 'XOF', phonePrefix: '+225' },
+  SN: { currency: 'XOF', phonePrefix: '+221' },
+  BJ: { currency: 'XOF', phonePrefix: '+229' },
+  TG: { currency: 'XOF', phonePrefix: '+228' },
+  ML: { currency: 'XOF', phonePrefix: '+223' },
+  BF: { currency: 'XOF', phonePrefix: '+226' },
+  NE: { currency: 'XOF', phonePrefix: '+227' },
+  GW: { currency: 'XOF', phonePrefix: '+245' },
+  // Zone CFA CEMAC (XAF)
+  CM: { currency: 'XAF', phonePrefix: '+237' },
+  GA: { currency: 'XAF', phonePrefix: '+241' },
+  CG: { currency: 'XAF', phonePrefix: '+242' },
+  CF: { currency: 'XAF', phonePrefix: '+236' },
+  TD: { currency: 'XAF', phonePrefix: '+235' },
+  GQ: { currency: 'XAF', phonePrefix: '+240' },
+  // Autres devises africaines
+  CD: { currency: 'CDF', phonePrefix: '+243' },
+  GN: { currency: 'GNF', phonePrefix: '+224' },
+  GM: { currency: 'GMD', phonePrefix: '+220' },
+  NG: { currency: 'NGN', phonePrefix: '+234' },
+  GH: { currency: 'GHS', phonePrefix: '+233' },
+  KE: { currency: 'KES', phonePrefix: '+254' },
+  EG: { currency: 'EGP', phonePrefix: '+20' },
+  TZ: { currency: 'TZS', phonePrefix: '+255' },
+  ZA: { currency: 'ZAR', phonePrefix: '+27' },
+};
+
 class ConfigService {
   constructor() {
-    // Client HTTP natif
-    this.httpClient = new HttpClient();
+    this._lookup = null;
+    this._lookupPromise = null;
   }
 
   /**
-   * Détecter le pays depuis une adresse IP avec toutes les informations nécessaires
-   * @param {string} ipAddress - Adresse IP de l'utilisateur
-   * @returns {Promise<Object>} Informations du pays {countryCode, countryName, currency, phonePrefix}
+   * Charge la base GeoLite2 en mémoire (lazy + cached). Le lookup MaxMind
+   * lit le fichier mmdb une fois puis garde l'index en RAM (~10-30 MB).
+   * Les lookups suivants sont sub-millisecondes.
+   */
+  async _getLookup() {
+    if (this._lookup) return this._lookup;
+    if (this._lookupPromise) return this._lookupPromise;
+
+    if (!fs.existsSync(GEOIP_DB_PATH)) {
+      throw new Error(
+        `GeoLite2-Country.mmdb introuvable. Lance "npm run geoip:update" d'abord. ` +
+        `Path attendu : ${GEOIP_DB_PATH}`
+      );
+    }
+
+    this._lookupPromise = maxmind.open(GEOIP_DB_PATH).then((lookup) => {
+      this._lookup = lookup;
+      logger.info('[ConfigService] GeoLite2 chargé en mémoire');
+      return lookup;
+    });
+    return this._lookupPromise;
+  }
+
+  /**
+   * Détecter le pays depuis une adresse IP (lookup MaxMind local).
+   * @param {string} ipAddress
+   * @returns {Promise<Object>} {countryCode, countryName, currency, phonePrefix}
    */
   async detectCountryFromIp(ipAddress) {
     try {
-      logger.info(`[ConfigService] Détection du pays pour IP: ${ipAddress}`);
+      const lookup = await this._getLookup();
+      const result = lookup.get(ipAddress);
 
-      // Appeler l'API de géolocalisation avec tous les champs nécessaires
-      const response = await this.httpClient.get(
-        `http://ip-api.com/json/${ipAddress}`,
-        {
-          params: {
-            fields: 'status,countryCode,country,currency,callingCode',
-          },
-        }
-      );
-
-      if (response.status === 'success' && response.countryCode) {
-        const countryInfo = {
-          countryCode: response.countryCode.toUpperCase(),
-          countryName: response.country,
-          currency: 'USD', // Fallback USD si pas disponible
-          phonePrefix: response.callingCode ? `+${response.callingCode}` : '+1' // Fallback +1
-        };
-
-        logger.info(`[ConfigService] Pays détecté: ${JSON.stringify(countryInfo)}`);
-        return countryInfo;
+      if (!result || !result.country || !result.country.iso_code) {
+        // IP privée, IPv6 mal formée, IP non-localisée → pas un crash
+        // On laisse le mobile gérer le fallback côté client (map locale)
+        logger.warn(`[ConfigService] Pays non résolu pour IP: ${ipAddress}`);
+        throw new Error(`Pays non résolu pour IP: ${ipAddress}`);
       }
 
-      throw new Error('Impossible de détecter le pays depuis l\'IP');
+      const countryCode = result.country.iso_code.toUpperCase();
+      const countryName =
+        (result.country.names && (result.country.names.fr || result.country.names.en)) ||
+        countryCode;
+      const defaults = COUNTRY_DEFAULTS[countryCode] || { currency: 'USD', phonePrefix: '+1' };
+
+      const countryInfo = {
+        countryCode,
+        countryName,
+        currency: defaults.currency,
+        phonePrefix: defaults.phonePrefix,
+      };
+
+      logger.info(`[ConfigService] Pays détecté: ${JSON.stringify(countryInfo)}`);
+      return countryInfo;
     } catch (error) {
-      logger.error(`[ConfigService] Erreur détection IP: ${error.message}`);
+      // Downgrade en warn — le mobile gère le fallback, ce n'est pas critique
+      logger.warn(`[ConfigService] Erreur détection IP: ${error.message}`);
       throw new Error(`Impossible de détecter le pays depuis l'IP: ${error.message}`);
     }
   }
@@ -60,20 +126,22 @@ class ConfigService {
     try {
       const upperCountryCode = countryCode.toUpperCase();
 
-      // Chercher en base de données
       let config = await AppConfig.findOne({ countryCode: upperCountryCode });
 
-      // Si la config n'existe pas, la créer automatiquement
       if (!config) {
         logger.info(`[ConfigService] Création automatique de la config pour: ${upperCountryCode}`);
-        
+
+        // À la création, on utilise les vraies devise + préfixe du mapping
+        // (avant : currency hardcodée à USD pour tous les pays — bug fixé).
+        const defaults = COUNTRY_DEFAULTS[upperCountryCode] || { currency: 'USD', phonePrefix: '+1' };
+
         config = await AppConfig.create({
           countryCode: upperCountryCode,
           countryName: countryInfo.countryName,
-          currency: "USD",
-          language: 'en', // Anglais par défaut
-          phonePrefix: countryInfo.phonePrefix,
-          paymentProvider: 'googlepay', // Google Pay par défaut
+          currency: countryInfo.currency || defaults.currency,
+          language: 'en',
+          phonePrefix: countryInfo.phonePrefix || defaults.phonePrefix,
+          paymentProvider: 'googlepay',
           isActive: true,
           metadata: {
             autoCreated: true,
@@ -84,7 +152,6 @@ class ConfigService {
         logger.info(`[ConfigService] Config créée automatiquement: ${upperCountryCode}`);
       }
 
-      // Formater pour le client
       const clientConfig = config.toClientJSON ? config.toClientJSON() : config.toObject();
 
       logger.info(`[ConfigService] Config récupérée/créée: ${upperCountryCode}`);
@@ -102,16 +169,14 @@ class ConfigService {
    */
   async getConfigByIp(ipAddress) {
     try {
-      // 1. Détecter le pays depuis l'IP (avec toutes les infos depuis l'API)
       const countryInfo = await this.detectCountryFromIp(ipAddress);
-
-      // 2. Récupérer ou créer la config du pays
       return await this.getOrCreateConfigByCountryCode(
         countryInfo.countryCode,
         countryInfo
       );
     } catch (error) {
-      logger.error(`[ConfigService] Erreur getConfigByIp: ${error.message}`);
+      // Downgrade en warn : le mobile a son fallback local, on ne casse rien
+      logger.warn(`[ConfigService] getConfigByIp fallback: ${error.message}`);
       throw error;
     }
   }
@@ -125,14 +190,12 @@ class ConfigService {
     try {
       const upperCountryCode = countryCode.toUpperCase();
 
-      // Récupérer depuis la DB
       const config = await AppConfig.findOne({ countryCode: upperCountryCode });
 
       if (!config) {
         throw new Error(`Configuration non trouvée pour le pays: ${upperCountryCode}`);
       }
 
-      // Formater pour le client
       const clientConfig = config.toClientJSON ? config.toClientJSON() : config.toObject();
 
       logger.info(`[ConfigService] Config récupérée: ${upperCountryCode}`);
@@ -143,10 +206,6 @@ class ConfigService {
     }
   }
 
-  /**
-   * Obtenir toutes les configurations (Admin)
-   * @returns {Promise<Array>} Liste des configurations
-   */
   async getAllConfigs() {
     try {
       const configs = await AppConfig.find().sort({ countryName: 1 });
@@ -157,12 +216,6 @@ class ConfigService {
     }
   }
 
-  /**
-   * Créer ou mettre à jour une configuration (Admin)
-   * @param {string} countryCode - Code pays
-   * @param {Object} configData - Données de configuration
-   * @returns {Promise<Object>} Configuration créée/mise à jour
-   */
   async upsertConfig(countryCode, configData) {
     try {
       const config = await AppConfig.findOneAndUpdate(
@@ -179,11 +232,6 @@ class ConfigService {
     }
   }
 
-  /**
-   * Supprimer une configuration (Admin)
-   * @param {string} countryCode - Code pays
-   * @returns {Promise<Object>} Résultat de la suppression
-   */
   async deleteConfig(countryCode) {
     try {
       const result = await AppConfig.findOneAndDelete({
@@ -202,12 +250,6 @@ class ConfigService {
     }
   }
 
-  /**
-   * Activer/désactiver un pays (Admin)
-   * @param {string} countryCode - Code pays
-   * @param {boolean} isActive - État actif/inactif
-   * @returns {Promise<Object>} Configuration mise à jour
-   */
   async toggleCountry(countryCode, isActive) {
     try {
       const config = await AppConfig.findOneAndUpdate(
@@ -229,5 +271,4 @@ class ConfigService {
   }
 }
 
-// Export singleton
 module.exports = new ConfigService();
