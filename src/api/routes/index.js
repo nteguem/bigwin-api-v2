@@ -94,6 +94,9 @@ router.use('/admin/installs', adminAuth.protect, authorize('super_admin'), admin
 const adminAcquisitionStatsRoutes = require('./admin/acquisitionStatsRoutes');
 router.use('/admin/acquisition', adminAuth.protect, authorize('super_admin'), adminAcquisitionStatsRoutes);
 
+const adminAnalyticsRoutes = require('./admin/analyticsRoutes');
+router.use('/admin/analytics', adminAuth.protect, authorize('super_admin'), adminAnalyticsRoutes);
+
 // Logs applicatifs : super_admin only. Pas de filtre X-App-Id au niveau
 // route — le super_admin peut consulter tous les tenants. Le filtre par app
 // se fait via le query param `?appId=xxx` géré dans le controller.
