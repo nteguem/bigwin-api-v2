@@ -131,16 +131,19 @@ class ConfigService {
       if (!config) {
         logger.info(`[ConfigService] Création automatique de la config pour: ${upperCountryCode}`);
 
-        // À la création, on utilise les vraies devise + préfixe du mapping
-        // (avant : currency hardcodée à USD pour tous les pays — bug fixé).
-        const defaults = COUNTRY_DEFAULTS[upperCountryCode] || { currency: 'USD', phonePrefix: '+1' };
-
+        // Par défaut : USD + Google Pay. C'est le signal "pays pas encore
+        // intégré avec un PSP local". L'admin modifie manuellement la
+        // currency + paymentProvider quand un intégrateur (AfribaPay,
+        // Smobilpay…) est branché pour ce pays.
+        // On garde le `phonePrefix` correct du pays détecté car c'est
+        // utile pour le formulaire d'inscription côté mobile, sans effet
+        // de bord sur l'affichage des prix (qui dépend de `currency`).
         config = await AppConfig.create({
           countryCode: upperCountryCode,
           countryName: countryInfo.countryName,
-          currency: countryInfo.currency || defaults.currency,
+          currency: 'USD',
           language: 'en',
-          phonePrefix: countryInfo.phonePrefix || defaults.phonePrefix,
+          phonePrefix: countryInfo.phonePrefix || '+1',
           paymentProvider: 'googlepay',
           isActive: true,
           metadata: {
