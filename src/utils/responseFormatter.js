@@ -19,15 +19,38 @@ const formatSuccess = (res, { data, message, statusCode = 200, pagination }) => 
 };
 
 /**
- * Formate une réponse d'erreur
+ * Formate une réponse d'erreur. Accepte 2 signatures pour rétrocompatibilité :
+ *
+ * NOUVELLE (recommandée) :
+ *   formatError(res, { message, statusCode, errors, stack })
+ *
+ * ANCIENNE (utilisée massivement dans les controllers existants) :
+ *   formatError(res, 'message', statusCode, errors)
+ *
+ * Sans ce dual-support, des centaines d'appels en string masquaient leur
+ * message d'erreur (la destructuration échouait silencieusement et
+ * `error: undefined` disparaissait du JSON, ne laissant que `{success: false}`
+ * côté client).
+ *
  * @param {Object} res - Objet de réponse Express
- * @param {Object} options
- * @param {string} options.message - Message d'erreur
- * @param {number} [options.statusCode=500] - Code HTTP
- * @param {Object} [options.errors] - Détails supplémentaires (champ invalide, etc.)
- * @param {string} [options.stack] - Stack trace (affichée si NODE_ENV=development)
+ * @param {string|Object} messageOrOpts
+ * @param {number} [maybeStatusCode=500] - Code HTTP (signature ancienne)
+ * @param {Object} [maybeErrors] - Détails (signature ancienne)
  */
-const formatError = (res, { message, statusCode = 500, errors, stack }) => {
+const formatError = (res, messageOrOpts, maybeStatusCode = 500, maybeErrors) => {
+  let message, statusCode, errors, stack;
+
+  if (typeof messageOrOpts === 'string') {
+    message = messageOrOpts;
+    statusCode = maybeStatusCode;
+    errors = maybeErrors;
+  } else if (messageOrOpts && typeof messageOrOpts === 'object') {
+    ({ message, statusCode = 500, errors, stack } = messageOrOpts);
+  } else {
+    message = 'Erreur inconnue';
+    statusCode = 500;
+  }
+
   const response = {
     success: false,
     error: message,

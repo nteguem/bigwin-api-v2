@@ -125,10 +125,22 @@ class TicketService {
    * ⚠️ NOTE : Ne peut mettre à jour que les tickets de son app
    */
   async updateTicket(appId, id, data) {
-    // Sécurité : On ne modifie QUE les tickets de l'app
+    // Un ticket dans une catégorie SHARED (ex: "Live Events") est accessible
+    // depuis n'importe quelle app de la galaxie : son `appId` ne correspond
+    // pas forcément à l'app de l'admin qui édite. On vérifie donc l'accès via
+    // la catégorie : autorisé si appId match OU si la catégorie est shared.
+    const ticket = await Ticket.findById(id).populate('category');
+    if (!ticket) return null;
+
+    const catAppId = ticket.category?.appId;
+    const isAccessible = ticket.appId === appId || catAppId === 'shared';
+    if (!isAccessible) return null;
+
+    // findOneAndUpdate (et pas .save()) pour déclencher le hook post('findOneAndUpdate')
+    // qui broadcast la notif OneSignal sur changement de visibility.
     return await Ticket.findOneAndUpdate(
-      { _id: id, appId },
-      data, 
+      { _id: id },
+      data,
       { new: true }
     );
   }
@@ -139,12 +151,18 @@ class TicketService {
    * ⚠️ NOTE : Ne peut supprimer que les tickets de son app
    */
   async deleteTicket(appId, id) {
-    const ticket = await Ticket.findOne({ _id: id, appId });
+    // Mêmes règles d'accès que updateTicket : autorisé si appId match
+    // OU si la catégorie est shared (ticket LIVE accessible inter-apps).
+    const ticket = await Ticket.findById(id).populate('category');
     if (!ticket) return null;
-    
+
+    const catAppId = ticket.category?.appId;
+    const isAccessible = ticket.appId === appId || catAppId === 'shared';
+    if (!isAccessible) return null;
+
     await Prediction.deleteMany({ ticket: id });
     await Ticket.findByIdAndDelete(id);
-    
+
     return { deletedTicket: ticket, message: 'Ticket and associated predictions deleted successfully' };
   }
 

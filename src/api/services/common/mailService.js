@@ -269,9 +269,13 @@ function appBrandedLayout({ app, language, preheader = '', title, bodyHtml, ctaL
        </td></tr>`
     : '';
 
-  const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" alt="${appName}" width="56" height="56" style="display:block;border-radius:12px;border:0;outline:none;background:#fff;" />`
-    : `<div style="width:56px;height:56px;border-radius:12px;background:#ffffff20;color:#fff;display:inline-block;text-align:center;line-height:56px;font-weight:700;font-size:22px;">${appName.charAt(0).toUpperCase()}</div>`;
+  // On utilise toujours un fallback texte (première lettre de l'app) plutôt
+  // que le logo en image. Raison : les images dans les emails sont souvent
+  // bloquées par défaut (Gmail, Outlook), ce qui donne un placeholder moche.
+  // La lettre dans un carré coloré est sobre, fiable et 100% rendu HTML/CSS.
+  // Note logoUrl conservé en variable mais non utilisé pour l'instant.
+  void logoUrl;
+  const logoHtml = `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="56" height="56" align="center" valign="middle" bgcolor="#FFFFFF" style="width:56px;height:56px;background:#FFFFFF;border-radius:12px;color:${primaryColor};font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:26px;line-height:56px;text-align:center;">${appName.charAt(0).toUpperCase()}</td></tr></table>`;
 
   return `<!DOCTYPE html>
 <html lang="${language}">
@@ -417,25 +421,29 @@ exports.sendSubscriptionMail = async ({
   })();
 
   // Construction des libellés bilingues
+  // Note : le mot "cadeau" / "gift" est volontairement RÉSERVÉ pour la future
+  // feature de cadeaux additionnels (vidéo/ebook/audio offerts en bonus à l'achat
+  // d'un package). Ici on parle juste du forfait lui-même → on dit "offert" /
+  // "offered to you" pour les attributions admin, pas "cadeau".
   const t = language === 'fr'
     ? {
         subjectAchat: `✅ Ton forfait ${packageName} est activé !`,
-        subjectGift: `🎁 Tu as reçu un cadeau : ${packageName}`,
-        title: isGift ? `Cadeau pour toi 🎁` : `Forfait activé ✅`,
+        subjectGift: `🎉 Forfait offert : ${packageName}`,
+        title: isGift ? `Forfait offert pour toi 🎉` : `Forfait activé ✅`,
         greeting: `Salut ${displayName},`,
         introAchat: `Ton paiement a bien été reçu. Ton forfait <strong>${packageName}</strong> sur <strong>${appName}</strong> est maintenant <strong>actif</strong>.`,
-        introGift: `Excellente nouvelle ! Tu viens de recevoir un forfait <strong>${packageName}</strong> en cadeau sur <strong>${appName}</strong>. Profite-en bien !`,
+        introGift: `Bonne nouvelle ! On t'offre un forfait <strong>${packageName}</strong> sur <strong>${appName}</strong>. Il est <strong>actif dès maintenant</strong>, profite-en bien !`,
         validUntil: endDateFormatted ? `📅 Valable jusqu'au <strong>${endDateFormatted}</strong>` : '',
         cta: 'Ouvrir l\'app',
         outro: 'Bons pronos et bons gains !',
       }
     : {
         subjectAchat: `✅ Your ${packageName} pack is activated!`,
-        subjectGift: `🎁 You received a gift: ${packageName}`,
-        title: isGift ? `A gift for you 🎁` : `Pack activated ✅`,
+        subjectGift: `🎉 Pack offered: ${packageName}`,
+        title: isGift ? `A pack offered to you 🎉` : `Pack activated ✅`,
         greeting: `Hi ${displayName},`,
         introAchat: `Your payment was received. Your <strong>${packageName}</strong> pack on <strong>${appName}</strong> is now <strong>active</strong>.`,
-        introGift: `Great news! You just received a <strong>${packageName}</strong> pack as a gift on <strong>${appName}</strong>. Enjoy!`,
+        introGift: `Good news! We're offering you a <strong>${packageName}</strong> pack on <strong>${appName}</strong>. It's <strong>active right now</strong>, enjoy!`,
         validUntil: endDateFormatted ? `📅 Valid until <strong>${endDateFormatted}</strong>` : '',
         cta: 'Open the app',
         outro: 'Good predictions and good wins!',
