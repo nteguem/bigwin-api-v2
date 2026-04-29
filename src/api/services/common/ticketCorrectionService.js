@@ -42,17 +42,24 @@ function deriveResult(predStatuses) {
  * tardivement (cas rare mais réel).
  *
  * @param {Object} opts
- * @param {number} [opts.lookbackDays=10] - Fenêtre en jours
- * @param {string} [opts.appId]            - Limiter à une app
- * @param {boolean} [opts.dryRun=false]    - Ne pas écrire en base
+ * @param {number}   [opts.lookbackDays=10] - Fenêtre en jours (ignoré si ticketIds fourni)
+ * @param {string}   [opts.appId]           - Limiter à une app
+ * @param {boolean}  [opts.dryRun=false]    - Ne pas écrire en base
+ * @param {Array}    [opts.ticketIds]       - Cibler des tickets précis (override lookbackDays)
  * @returns {Promise<Object>} Stats {scanned, updated, byResult}
  */
-async function correctTickets({ lookbackDays = 10, appId, dryRun = false } = {}) {
+async function correctTickets({ lookbackDays = 10, appId, dryRun = false, ticketIds } = {}) {
   const startTime = Date.now();
-  const since = new Date();
-  since.setDate(since.getDate() - lookbackDays);
 
-  const ticketQuery = { createdAt: { $gte: since } };
+  const ticketQuery = {};
+  if (Array.isArray(ticketIds) && ticketIds.length > 0) {
+    // Mode ciblé : on ignore lookbackDays et on prend les tickets demandés
+    ticketQuery._id = { $in: ticketIds };
+  } else {
+    const since = new Date();
+    since.setDate(since.getDate() - lookbackDays);
+    ticketQuery.createdAt = { $gte: since };
+  }
   if (appId && appId !== 'all') ticketQuery.appId = appId;
 
   const tickets = await Ticket.find(ticketQuery).select('_id appId result').lean();
@@ -61,10 +68,10 @@ async function correctTickets({ lookbackDays = 10, appId, dryRun = false } = {})
     return { scanned: 0, updated: 0, byResult: {}, durationMs: Date.now() - startTime };
   }
 
-  const ticketIds = tickets.map((t) => t._id);
+  const fetchedTicketIds = tickets.map((t) => t._id);
 
   // Récupérer toutes les prédictions liées en un seul query
-  const preds = await Prediction.find({ ticket: { $in: ticketIds } })
+  const preds = await Prediction.find({ ticket: { $in: fetchedTicketIds } })
     .select('ticket status')
     .lean();
 

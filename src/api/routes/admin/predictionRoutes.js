@@ -36,4 +36,7 @@ router.route('/:id')
   .put(predictionController.updatePrediction)
   .delete(predictionController.deletePrediction);
 
+// Corrige la prédiction + son ticket parent + notifie SI gagnée
+router.post('/:id/notify-success', predictionController.correctAndNotifySuccess);
+
 module.exports = router;

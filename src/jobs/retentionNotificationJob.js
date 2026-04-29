@@ -1,6 +1,7 @@
 // jobs/retentionNotificationJob.js
 // Notifications automatiques de rétention utilisateurs
-// Scénarios : bienvenue J+1, inactivité 3j, expiration J-3, J-1, win-back J+1
+// Scénarios : bienvenue J+1, inactivité 3j, expiration J-3, J-1, win-back J+1,
+//             churners progressifs J+7, J+15, J+30, J+60, J+90
 
 const cron = require('node-cron');
 const App = require('../api/models/common/App');
@@ -337,6 +338,126 @@ const winbackJ1 = async () => {
   }
 };
 
+// ─── Scénarios 6-10 : Churners progressifs (J+7, J+15, J+30, J+60, J+90) ───
+
+/**
+ * Factory générique : envoie une notif à tous les users dont la dernière
+ * subscription a expiré il y a EXACTEMENT `daysAfter` jours, et qui n'ont pas
+ * re-souscrit depuis. Pattern identique à winbackJ1.
+ *
+ * @param {Number} daysAfter   - Nombre de jours après expiration (ex: 7, 15, 30)
+ * @param {String} label       - Tag log (ex: 'Churn J+7')
+ * @param {Object} notification - Payload OneSignal { headings, contents, data, options }
+ */
+const winbackAtDays = async (daysAfter, label, notification) => {
+  logger.info(`[RETENTION] Début : ${label}`);
+
+  const apps = await getActiveApps();
+  const now = new Date();
+  // Fenêtre d'1 jour : [now - (daysAfter+1)j, now - daysAfter j[
+  const windowStart = new Date(now.getTime() - (daysAfter + 1) * 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(now.getTime() - daysAfter * 24 * 60 * 60 * 1000);
+
+  for (const app of apps) {
+    try {
+      // Bypass pre('find') hook qui force endDate > now (subs expirées ici)
+      const expiredSubs = await Subscription.collection.find({
+        appId: app.appId,
+        status: 'expired',
+        endDate: { $gte: windowStart, $lt: windowEnd },
+      }).project({ user: 1 }).toArray();
+
+      if (!expiredSubs.length) continue;
+
+      // Exclure ceux qui ont re-souscrit entre temps
+      const userIds = expiredSubs.map((s) => s.user);
+      const activeResubs = await Subscription.find({
+        appId: app.appId,
+        user: { $in: userIds },
+        status: 'active',
+      }).select('user').lean();
+
+      const resubUserIds = new Set(activeResubs.map((s) => s.user.toString()));
+      const targetUserIds = userIds.filter((uid) => !resubUserIds.has(uid.toString()));
+
+      if (!targetUserIds.length) continue;
+
+      const playerIds = await getPlayerIdsByUsers(app.appId, targetUserIds);
+      if (!playerIds.length) continue;
+
+      const sent = await sendRetention(app.appId, playerIds, notification);
+      logger.info(`[RETENTION] ${label} — ${app.appId}: ${expiredSubs.length} expirés, ${targetUserIds.length} ciblés, ${sent} notifiés`);
+    } catch (err) {
+      logger.error(`[RETENTION] Erreur ${label} (${app.appId}):`, err.message);
+    }
+  }
+};
+
+const churnJ7 = () => winbackAtDays(7, 'Churn J+7', {
+  headings: {
+    fr: '🔥 Ça fait une semaine, on a un coupon de feu pour toi',
+    en: '🔥 It\'s been a week — we have a hot coupon for you',
+  },
+  contents: {
+    fr: 'Reviens découvrir le coupon premium du jour. Tu vas adorer 🎯',
+    en: 'Come check out today\'s premium coupon. You\'ll love it 🎯',
+  },
+  data: { type: 'retention_churn_j7', daysAfter: 7, action: 'view_subscription' },
+  options: { android_accent_color: 'F59E0B', small_icon: 'ic_notification', priority: 7 },
+});
+
+const churnJ15 = () => winbackAtDays(15, 'Churn J+15', {
+  headings: {
+    fr: '👀 15 jours sans toi, viens voir le nouveau coupon',
+    en: '👀 15 days without you — come see our new coupon',
+  },
+  contents: {
+    fr: 'Notre coupon du jour vient de sortir. Profite-en avant la fin de la journée !',
+    en: 'Our daily coupon just dropped. Enjoy it before the day ends!',
+  },
+  data: { type: 'retention_churn_j15', daysAfter: 15, action: 'view_subscription' },
+  options: { android_accent_color: 'F59E0B', small_icon: 'ic_notification', priority: 7 },
+});
+
+const churnJ30 = () => winbackAtDays(30, 'Churn J+30', {
+  headings: {
+    fr: '😢 Tu nous manques — voici -30% pour ton retour VIP',
+    en: '😢 We miss you — here\'s -30% to come back as VIP',
+  },
+  contents: {
+    fr: 'Reprends ton accès VIP avec 30% de réduction. Offre valable 48h seulement !',
+    en: 'Get your VIP access back with 30% off. Offer valid 48h only!',
+  },
+  data: { type: 'retention_churn_j30', daysAfter: 30, action: 'view_subscription' },
+  options: { android_accent_color: 'EC4899', small_icon: 'ic_notification', priority: 8 },
+});
+
+const churnJ60 = () => winbackAtDays(60, 'Churn J+60', {
+  headings: {
+    fr: '⏰ 2 mois déjà, voici une chance de revenir',
+    en: '⏰ Already 2 months — here\'s a chance to come back',
+  },
+  contents: {
+    fr: 'On t\'offre l\'accès VIP à -50% pour fêter ton retour. Tu mérites ce comeback !',
+    en: 'Get VIP access at -50% to celebrate your comeback. You deserve it!',
+  },
+  data: { type: 'retention_churn_j60', daysAfter: 60, action: 'view_subscription' },
+  options: { android_accent_color: 'EC4899', small_icon: 'ic_notification', priority: 8 },
+});
+
+const churnJ90 = () => winbackAtDays(90, 'Churn J+90', {
+  headings: {
+    fr: '🎁 Dernière chance : accès gratuit 24h pour toi',
+    en: '🎁 Last chance: free 24h access just for you',
+  },
+  contents: {
+    fr: 'On te donne un accès VIP gratuit 24h. Reviens découvrir nos meilleurs pronostics !',
+    en: 'We\'re giving you a free 24h VIP access. Come back for our best predictions!',
+  },
+  data: { type: 'retention_churn_j90', daysAfter: 90, action: 'view_subscription' },
+  options: { android_accent_color: 'D4AF37', small_icon: 'ic_notification', priority: 9 },
+});
+
 // ─── Cron Jobs ─────────────────────────────────────────────
 
 // 9h UTC = 10h Cameroun — bon moment pour les notifs du matin
@@ -345,6 +466,13 @@ const morningJob = cron.schedule('0 9 * * *', async () => {
   await welcomeJ1();
   await inactivity3d();
   await expirationJ3();
+  // Churners progressifs : on les envoie le matin pour ne pas bombarder
+  // les expirés J+1 (gérés par le cycle soir 18h)
+  await churnJ7();
+  await churnJ15();
+  await churnJ30();
+  await churnJ60();
+  await churnJ90();
 }, { scheduled: false });
 
 // 18h UTC = 19h Cameroun — rappels urgents en soirée

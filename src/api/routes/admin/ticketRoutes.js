@@ -19,4 +19,9 @@ router.route('/:id')
   .get(ticketController.getTicketById)
   .put(ticketController.updateTicket)
   .delete(ticketController.deleteTicket);
+
+// Corrige les prédictions du ticket + recalcule le ticket.result + notifie
+// SI le ticket est gagné. Sinon retour sans notif (sécurité).
+router.post('/:id/notify-success', ticketController.correctAndNotifySuccess);
+
 module.exports = router;

@@ -4,6 +4,7 @@ const predictionService = require('../../services/common/predictionService');
 const ticketService = require('../../services/common/ticketService');
 const PredictionCorrectionService = require('../../services/common/predictionCorrectionService');
 const aiSuggestionsService = require('../../services/common/aiSuggestionsService');
+const correctAndNotifyService = require('../../services/admin/correctAndNotifyService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
 // Instance partagée pour les corrections manuelles
@@ -255,6 +256,30 @@ class PredictionController {
       formatSuccess(res, { data: quota, message: 'AI quota retrieved' });
     } catch (error) {
       formatError(res, error.message, 500);
+    }
+  }
+
+  /**
+   * POST /admin/predictions/:id/notify-success
+   *
+   * Corrige la prédiction + son ticket parent, puis envoie la notification
+   * de victoire SI la prédiction est gagnée. Sinon retour sans notif.
+   */
+  async correctAndNotifySuccess(req, res) {
+    try {
+      const appId = req.appId;
+      const { id } = req.params;
+      if (!appId) return formatError(res, 'X-App-Id requis', 400);
+      if (!id) return formatError(res, 'Prediction id requis', 400);
+
+      const result = await correctAndNotifyService.correctAndNotifyPrediction(id, appId);
+
+      formatSuccess(res, {
+        data: result,
+        message: result.message,
+      });
+    } catch (error) {
+      formatError(res, error.message, error.statusCode || 500);
     }
   }
 }

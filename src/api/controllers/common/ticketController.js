@@ -2,6 +2,7 @@
 
 const ticketService = require('../../services/common/ticketService');
 const categoryService = require('../../services/common/categoryService');
+const correctAndNotifyService = require('../../services/admin/correctAndNotifyService');
 const { formatSuccess, formatError } = require('../../../utils/responseFormatter');
 
 class TicketController {
@@ -162,6 +163,31 @@ class TicketController {
       });
     } catch (error) {
       formatError(res, error.message, 500);
+    }
+  }
+
+  /**
+   * POST /admin/tickets/:id/notify-success
+   *
+   * Corrige les prédictions du ticket + le ticket lui-même, puis envoie la
+   * notification de victoire SI le ticket est effectivement gagné.
+   * Sinon, renvoie le statut sans notifier (sécurité contre fausses notifs).
+   */
+  async correctAndNotifySuccess(req, res) {
+    try {
+      const appId = req.appId;
+      const { id } = req.params;
+      if (!appId) return formatError(res, 'X-App-Id requis', 400);
+      if (!id) return formatError(res, 'Ticket id requis', 400);
+
+      const result = await correctAndNotifyService.correctAndNotifyTicket(id, appId);
+
+      formatSuccess(res, {
+        data: result,
+        message: result.message,
+      });
+    } catch (error) {
+      formatError(res, error.message, error.statusCode || 500);
     }
   }
 }
