@@ -686,25 +686,40 @@ async _resolvePlayerIds(appId, userIds) {
 
 /**
  * Compte estimé de l'audience (sans envoyer la notif) pour le compteur live
- * du formulaire admin.
+ * du formulaire admin. Supporte une ou plusieurs apps.
  *
- * @returns {Object} { users, devices } — nombre de users et de devices joignables
+ * @param {String|Array<String>} appIdOrIds
+ * @returns {Object} { users, devices, perApp: [{ appId, users, devices }] }
  */
-async countAudience(appId, { audience = 'all', countryCodes = [] } = {}) {
-  const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
-  const playerIds = await this._resolvePlayerIds(appId, userIds);
+async countAudience(appIdOrIds, { audience = 'all', countryCodes = [] } = {}) {
+  const appIds = Array.isArray(appIdOrIds) ? appIdOrIds : [appIdOrIds];
+  const perApp = [];
+  let totalUsers = 0;
+  let totalDevices = 0;
+  for (const appId of appIds) {
+    const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
+    const playerIds = await this._resolvePlayerIds(appId, userIds);
+    perApp.push({ appId, users: userIds.length, devices: playerIds.length });
+    totalUsers += userIds.length;
+    totalDevices += playerIds.length;
+  }
   return {
     audience,
     countryCodes,
-    users: userIds.length,
-    devices: playerIds.length,
+    users: totalUsers,
+    devices: totalDevices,
+    perApp,
   };
 }
 
 /**
- * Envoi unifié — tous les paramètres en un seul appel.
+ * Envoi unifié — supporte 1 ou N apps en un seul appel.
  *
- * @param {String} appId
+ * Quand plusieurs apps : chaque app a sa propre config OneSignal (clé API +
+ * app_id), donc on délègue à `_sendUnifiedSingleApp` pour chacune et on
+ * agrège les résultats.
+ *
+ * @param {String|Array<String>} appIdOrIds
  * @param {Object} params
  * @param {Object}  params.notification               - { headings, contents, data, options }
  * @param {Object}  params.targeting
@@ -712,7 +727,45 @@ async countAudience(appId, { audience = 'all', countryCodes = [] } = {}) {
  * @param {Array}   [params.targeting.countryCodes]   - filtre additionnel
  * @param {Number}  [params.batchSize=2000]
  */
-async sendUnified(appId, { notification, targeting, batchSize = 2000 }) {
+async sendUnified(appIdOrIds, { notification, targeting, batchSize = 2000 }) {
+  const appIds = Array.isArray(appIdOrIds) ? appIdOrIds : [appIdOrIds];
+  if (appIds.length === 1) {
+    return this._sendUnifiedSingleApp(appIds[0], { notification, targeting, batchSize });
+  }
+  // Multi-app : on agrège
+  const perApp = [];
+  let requested = 0;
+  let queued = 0;
+  let failed = 0;
+  let recipientsOneSignal = 0;
+  const errors = [];
+  for (const appId of appIds) {
+    try {
+      const r = await this._sendUnifiedSingleApp(appId, { notification, targeting, batchSize });
+      perApp.push({ appId, ...r });
+      requested += r.requested || 0;
+      queued += r.queued || 0;
+      failed += r.failed || 0;
+      recipientsOneSignal += r.recipientsOneSignal || 0;
+      if (r.errors?.length) errors.push(...r.errors.map((e) => `[${appId}] ${e}`));
+    } catch (err) {
+      logger.error(`[${appId}] sendUnified erreur app: ${err.message}`);
+      perApp.push({ appId, error: err.message, requested: 0, queued: 0, failed: 0 });
+      errors.push(`[${appId}] ${err.message}`);
+    }
+  }
+  return {
+    apps: appIds,
+    requested,
+    queued,
+    recipientsOneSignal,
+    failed,
+    errors,
+    perApp,
+  };
+}
+
+async _sendUnifiedSingleApp(appId, { notification, targeting, batchSize = 2000 }) {
   const audience = targeting?.audience || 'all';
   const countryCodes = (targeting?.countryCodes || []).map((c) => c.toUpperCase());
 
@@ -767,9 +820,23 @@ async sendUnified(appId, { notification, targeting, batchSize = 2000 }) {
       ...notification.options,
     };
     const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+    logger.info(`[${appId}] sendUnified single batch response`, {
+      id: response.id,
+      recipients: response.recipients,
+      errors: response.errors,
+    });
+    // Si OneSignal accepte la requête (id présent) mais ne donne pas de
+    // 'recipients' fiable, on considère que la notif a été enfilée pour
+    // les playerIds envoyés. recipients=0 sans 'id' = vrai échec.
+    const requested = playerIds.length;
+    const queued = response.id ? requested : 0;
     return {
-      ...response,
-      successful: response.recipients || playerIds.length,
+      id: response.id || null,
+      requested,
+      queued,
+      recipientsOneSignal: response.recipients ?? null,
+      failed: requested - queued,
+      errors: response.errors || null,
       details: { audience, countryCodes, users: userIds.length, devices: playerIds.length },
     };
   }
@@ -792,20 +859,41 @@ async sendUnified(appId, { notification, targeting, batchSize = 2000 }) {
     };
     try {
       const r = await this._makeRequest(config, 'notifications', 'POST', payload);
-      results.push({ success: true, ...r });
+      // Log léger pour observer ce que OneSignal renvoie réellement
+      if (i === 0) {
+        logger.info(`[${appId}] sendUnified batch 1/${batches.length} response`, {
+          id: r.id,
+          recipients: r.recipients,
+          errors: r.errors,
+        });
+      }
+      results.push({ success: true, batchSize: batch.length, ...r });
     } catch (err) {
       logger.error(`[${appId}] Erreur lot ${i + 1}: ${err.message}`);
       results.push({ success: false, error: err.message, batchSize: batch.length });
     }
     if (i < batches.length - 1) await new Promise((r) => setTimeout(r, 500));
   }
-  const successful = results.filter((r) => r.success).reduce((s, r) => s + (r.recipients || 0), 0);
+
+  // Comptage : un batch est "queued" s'il a un id de notif (OneSignal a accepté).
+  // recipients dans la réponse OneSignal = estimation des reachables, souvent
+  // sous-estimée pour les batches synchrones — on ne l'utilise pas pour décider
+  // succès/échec, juste comme info.
+  const queuedBatches = results.filter((r) => r.success && r.id);
+  const failedBatches = results.filter((r) => !r.success);
+  const queued = queuedBatches.reduce((s, r) => s + r.batchSize, 0);
+  const recipientsSum = queuedBatches.reduce((s, r) => s + (r.recipients || 0), 0);
+
   return {
-    id: results[0]?.id || null,
-    recipients: successful,
-    successful,
-    failed: playerIds.length - successful,
+    id: queuedBatches[0]?.id || null,
+    requested: playerIds.length,
+    queued,
+    recipientsOneSignal: recipientsSum, // estimation OneSignal (souvent < queued)
+    failed: failedBatches.reduce((s, r) => s + r.batchSize, 0),
     batches: results.length,
+    queuedBatches: queuedBatches.length,
+    failedBatches: failedBatches.length,
+    errors: failedBatches.map((r) => r.error).filter(Boolean),
     details: { audience, countryCodes, users: userIds.length, devices: playerIds.length },
   };
 }

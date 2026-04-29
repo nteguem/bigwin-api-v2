@@ -142,7 +142,7 @@ const generateNotifications = catchAsync(async (req, res) => {
   // Vérifier que le service IA est disponible
   if (!aiNotificationService.isAvailable()) {
     throw new AppError(
-      'Service de génération IA non disponible. Vérifiez la configuration ANTHROPIC_API_KEY.',
+      'Service de génération IA non disponible. Vérifiez la configuration GEMINI_API_KEY.',
       503,
       ErrorCodes.SERVICE_UNAVAILABLE
     );
@@ -194,7 +194,7 @@ const checkAIStatus = catchAsync(async (req, res) => {
       available: isAvailable,
       message: isAvailable 
         ? 'Service de génération IA disponible' 
-        : 'Service de génération IA non configuré. Vérifiez ANTHROPIC_API_KEY.'
+        : 'Service de génération IA non configuré. Vérifiez GEMINI_API_KEY.'
     }
   });
 });
@@ -260,33 +260,43 @@ const polishNotification = catchAsync(async (req, res) => {
 
 /**
  * Compteur live de l'audience pour le formulaire admin.
+ * Si query.appIds est fourni (CSV) → multi-app, sinon utilise req.appId (header).
  */
 const audienceCount = catchAsync(async (req, res) => {
-  const appId = req.appId;
-  if (!appId) throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  const appIdsParam = req.query.appIds
+    ? String(req.query.appIds).split(',').filter(Boolean)
+    : null;
+  const appIdOrIds = appIdsParam && appIdsParam.length > 0 ? appIdsParam : req.appId;
+  if (!appIdOrIds) throw new AppError('Header X-App-Id ou query.appIds requis', 400, ErrorCodes.VALIDATION_ERROR);
 
   const audience = req.query.audience || 'all';
   const countryCodes = req.query.countryCodes
-    ? req.query.countryCodes.split(',').filter(Boolean)
+    ? String(req.query.countryCodes).split(',').filter(Boolean)
     : [];
 
   if (!['all', 'vip', 'free'].includes(audience)) {
     throw new AppError('audience doit être all|vip|free', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
-  const result = await notificationService.countAudience(appId, { audience, countryCodes });
+  const result = await notificationService.countAudience(appIdOrIds, { audience, countryCodes });
   res.status(200).json({ success: true, data: result });
 });
 
 /**
  * Envoi unifié — utilisé par le formulaire admin de notifications.
- * Combine audience (all/vip/free) × pays (optionnel) en une seule requête.
+ * Combine audience (all/vip/free) × pays × apps (1 ou N).
+ *
+ * Si targeting.apps est fourni (array d'appIds) → multi-app. Sinon req.appId.
  */
 const sendUnified = catchAsync(async (req, res) => {
   const { notification, targeting } = req.body;
-  const appId = req.appId;
 
-  if (!appId) throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  const targetApps = Array.isArray(targeting?.apps) && targeting.apps.length > 0
+    ? targeting.apps
+    : null;
+  const appIdOrIds = targetApps || req.appId;
+  if (!appIdOrIds) throw new AppError('Header X-App-Id ou targeting.apps requis', 400, ErrorCodes.VALIDATION_ERROR);
+
   if (!notification?.contents?.fr || !notification?.contents?.en) {
     throw new AppError('notification.contents.fr et .en requis', 400, ErrorCodes.VALIDATION_ERROR);
   }
@@ -299,7 +309,7 @@ const sendUnified = catchAsync(async (req, res) => {
     throw new AppError('targeting.audience doit être all|vip|free', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
-  const result = await notificationService.sendUnified(appId, {
+  const result = await notificationService.sendUnified(appIdOrIds, {
     notification,
     targeting: {
       audience,
