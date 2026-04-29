@@ -482,6 +482,43 @@ async function createAdminSubscription(appId, { userId, packageId, isGift, loyal
     logger.error(`[ADMIN] Erreur notification (${userId}):`, err.message);
   }
 
+  // Email transactionnel pour les cadeaux admin (gift / loyalty gift).
+  // Le hook Subscription.post('save') skip les paymentProvider='ADMIN' donc
+  // c'est ICI qu'on envoie le mail pour ce cas-là.
+  // Fire-and-forget : ne pas bloquer le retour de la subscription.
+  (async () => {
+    try {
+      const App = require('../../models/common/App');
+      const app = await App.findOne({ appId })
+        .select('appId displayName branding playStoreUrl supportEmail')
+        .lean();
+      if (!app) {
+        logger.warn(`[ADMIN mail] App ${appId} introuvable`);
+        return;
+      }
+
+      // Préfère le message FR du loyalty pour l'affichage en italique du mail
+      // (le mail détectera la langue via countryCode et affichera le bon texte).
+      const giftMessageForMail = loyaltyOptions
+        ? (loyaltyOptions.customMessageFr || loyaltyOptions.customMessageEn || null)
+        : null;
+
+      const mailService = require('../common/mailService');
+      await mailService.sendSubscriptionMail({
+        user, // déjà chargé en début de fonction
+        subscription,
+        package: pkg, // déjà chargé en début de fonction
+        app,
+        // isGift true → mail "cadeau". false → mail "achat" (admin a enregistré
+        // un paiement manuellement). loyaltyOptions implique toujours un cadeau.
+        isGift: !!isGift || !!loyaltyOptions,
+        giftMessage: giftMessageForMail,
+      });
+    } catch (mailErr) {
+      logger.error(`[ADMIN mail] Erreur envoi mail user=${userId} : ${mailErr.message}`);
+    }
+  })();
+
   return subscription;
 }
 

@@ -183,6 +183,22 @@ const appSchema = new mongoose.Schema({
     logo: String,
     icon: String
   },
+
+  // URL de la fiche Play Store de l'app — utilisée comme CTA dans les
+  // emails transactionnels (confirmation de souscription, cadeau, etc.).
+  // Format : https://play.google.com/store/apps/details?id=com.<app>.application
+  playStoreUrl: {
+    type: String,
+    trim: true,
+  },
+
+  // Adresse de contact pour la désinscription (mailto: dans les emails).
+  // Si absent, on utilise un fallback générique (process.env.SMTP_FROM).
+  supportEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+  },
   
   isActive: {
     type: Boolean,

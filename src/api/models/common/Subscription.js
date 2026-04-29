@@ -142,13 +142,56 @@ subscriptionSchema.methods.toJSON = function() {
 subscriptionSchema.post('save', async function (doc) {
   try {
     if (doc.status === 'active' && doc.endDate > new Date()) {
-      // Lazy import pour éviter les cycles de require
+      // 1) Tag OneSignal `is_vip=true` (réinstall safe, retag idempotent)
       const { tagUserVip } = require('./../../services/common/oneSignalTagService');
       tagUserVip(doc.user, doc.appId, true).catch((err) => {
         require('../../../utils/logger').warn(
           `[Subscription hook] Tag OneSignal échoué pour user=${doc.user} app=${doc.appId}: ${err.message}`
         );
       });
+
+      // 2) Email transactionnel "Forfait activé".
+      //    On skip pour les souscriptions ADMIN (cadeaux/loyalty gifts) car
+      //    `createAdminSubscription` envoie un mail dédié avec un contenu
+      //    personnalisé (mention de cadeau, message custom du loyalty gift).
+      if (doc.paymentProvider !== 'ADMIN') {
+        const logger = require('../../../utils/logger');
+        // Fire-and-forget : on ne bloque jamais la save sur l'envoi de mail
+        (async () => {
+          try {
+            const mongoose = require('mongoose');
+            const User = mongoose.model('User');
+            const Package = mongoose.model('Package');
+            const App = mongoose.model('App');
+
+            const [user, pkg, app] = await Promise.all([
+              User.findById(doc.user).select('email pseudo firstName countryCode').lean(),
+              Package.findById(doc.package).select('name').lean(),
+              App.findOne({ appId: doc.appId }).select('appId displayName branding playStoreUrl supportEmail').lean(),
+            ]);
+
+            if (!user) {
+              logger.warn(`[Subscription mail] User ${doc.user} introuvable`);
+              return;
+            }
+            if (!app) {
+              logger.warn(`[Subscription mail] App ${doc.appId} introuvable`);
+              return;
+            }
+
+            const mailService = require('../../services/common/mailService');
+            await mailService.sendSubscriptionMail({
+              user,
+              subscription: doc,
+              package: pkg,
+              app,
+              isGift: false, // achat réel, pas cadeau
+            });
+          } catch (mailErr) {
+            logger.error(`[Subscription mail] Erreur envoi mail user=${doc.user} : ${mailErr.message}`);
+          }
+        })();
+      }
     }
   } catch (err) {
     // Silencieux : la création de la subscription ne doit jamais être bloquée

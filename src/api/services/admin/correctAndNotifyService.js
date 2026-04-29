@@ -128,6 +128,10 @@ function buildTicketSuccessNotification(ticket, predictions) {
     matchesTextEn += `\n...and ${remaining} more 🎯`;
   }
 
+  // category_id permet au mobile d'ouvrir directement la bonne catégorie
+  // dans CouponDetailsModal sans avoir à fetch le ticket d'abord.
+  const categoryId = ticket.category?._id ? String(ticket.category._id) : null;
+
   return {
     headings: {
       en: `${categoryIcon} ${categoryName} - All Predictions Won!`,
@@ -140,6 +144,7 @@ function buildTicketSuccessNotification(ticket, predictions) {
     data: {
       type: 'ticket_success',
       ticket_id: String(ticket._id),
+      category_id: categoryId,
       category_name: typeof categoryName === 'string' ? categoryName : 'Coupon',
       success_rate: 100,
       total_predictions: predictions.length,

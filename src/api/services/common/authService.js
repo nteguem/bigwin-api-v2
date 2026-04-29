@@ -10,7 +10,9 @@ class AuthService {
    */
   generateTokens(userId, type) {
     const durations = {
-      admin: process.env.ADMIN_TOKEN_DURATION || '180m',
+      // 24h pour limiter la fréquence des OTP 2FA. Tant que le token est
+      // valide, l'admin n'a pas besoin de relogin (donc pas de nouvel OTP).
+      admin: process.env.ADMIN_TOKEN_DURATION || '24h',
       affiliate: process.env.AFFILIATE_TOKEN_DURATION || '1d',
       user: process.env.USER_TOKEN_DURATION || '120d'
     };
