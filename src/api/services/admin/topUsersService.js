@@ -131,4 +131,101 @@ async function getTopUsers({ appId, period = '30d', limit = 20, sortBy = 'revenu
   });
 }
 
-module.exports = { getTopUsers };
+/**
+ * Détails d'un user pour la modal latérale du Top Clients :
+ *   - infos profil
+ *   - liste des apps où il a un compte (par phoneNumber/email — un même
+ *     numéro peut avoir un User dans plusieurs apps de la galaxie)
+ *   - historique complet des souscriptions (package, montant, devise, dates)
+ */
+async function getUserDetails(userId) {
+  const mongoose = require('mongoose');
+  const User = mongoose.model('User');
+  const App = mongoose.model('App');
+
+  const user = await User.findById(userId).lean();
+  if (!user) return null;
+
+  // Comptes liés : autres User docs avec même phoneNumber ou email
+  // (la galaxie d'apps utilise des Users séparés par appId).
+  const linkedQuery = { $or: [] };
+  if (user.phoneNumber) linkedQuery.$or.push({ phoneNumber: user.phoneNumber });
+  if (user.email) linkedQuery.$or.push({ email: user.email });
+  const linkedAccounts = linkedQuery.$or.length > 0
+    ? await User.find(linkedQuery)
+        .select('_id appId pseudo phoneNumber email createdAt')
+        .lean()
+    : [user];
+
+  const linkedUserIds = linkedAccounts.map((u) => u._id);
+  const linkedAppIds = [...new Set(linkedAccounts.map((u) => u.appId))];
+
+  // Apps : displayName + branding pour rendu visuel
+  const appDocs = await App.find({ appId: { $in: linkedAppIds } })
+    .select('appId displayName branding')
+    .lean();
+  const appById = new Map(appDocs.map((a) => [a.appId, a]));
+
+  // Souscriptions de TOUS les comptes liés (pas seulement le user cliqué)
+  const subscriptions = await Subscription.find({ user: { $in: linkedUserIds } })
+    .populate('package', 'name price currency duration')
+    .populate('user', 'appId pseudo phoneNumber')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const totalRevenueXAF = subscriptions.reduce(
+    (sum, s) => sum + convertToXAF(s.pricing?.amount || 0, s.pricing?.currency || 'XAF'),
+    0
+  );
+
+  return {
+    user: {
+      _id: user._id,
+      phoneNumber: user.phoneNumber,
+      email: user.email,
+      pseudo: user.pseudo,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      countryCode: user.countryCode,
+      city: user.city,
+      authProvider: user.authProvider,
+      createdAt: user.createdAt,
+    },
+    apps: linkedAccounts.map((acc) => {
+      const app = appById.get(acc.appId);
+      const appName = typeof app?.displayName === 'object'
+        ? (app.displayName.fr || app.displayName.en)
+        : app?.displayName;
+      return {
+        userId: String(acc._id),
+        appId: acc.appId,
+        appName: appName || acc.appId,
+        appIcon: app?.branding?.icon || null,
+        appColor: app?.branding?.primaryColor || null,
+        pseudo: acc.pseudo,
+        memberSince: acc.createdAt,
+      };
+    }),
+    subscriptions: subscriptions.map((s) => ({
+      _id: String(s._id),
+      appId: s.user?.appId || null,
+      packageName: s.package?.name || 'Package supprimé',
+      amount: s.pricing?.amount || 0,
+      currency: s.pricing?.currency || 'XAF',
+      amountXAF: convertToXAF(s.pricing?.amount || 0, s.pricing?.currency || 'XAF'),
+      provider: s.paymentProvider,
+      status: s.status,
+      isGift: s.isGift || false,
+      startDate: s.startDate,
+      endDate: s.endDate,
+      createdAt: s.createdAt,
+    })),
+    totals: {
+      revenueXAF: Math.round(totalRevenueXAF),
+      purchasesCount: subscriptions.length,
+      appsCount: linkedAccounts.length,
+    },
+  };
+}
+
+module.exports = { getTopUsers, getUserDetails };

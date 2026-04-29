@@ -21,4 +21,7 @@ router.get('/predictions/dashboard-mini', analyticsController.getPredictionsDash
 // Top users : meilleurs clients par revenu / nb d'achats
 router.get('/top-users', analyticsController.getTopUsers);
 
+// Détails d'un client (modal latérale) : profil + apps + souscriptions
+router.get('/users/:userId/details', analyticsController.getUserDetails);
+
 module.exports = router;

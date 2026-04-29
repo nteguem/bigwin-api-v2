@@ -68,3 +68,16 @@ exports.getTopUsers = catchAsync(async (req, res) => {
   });
   res.status(200).json({ success: true, data });
 });
+
+/**
+ * Détails d'un client pour la modal latérale (Top Clients).
+ * Renvoie : profil + apps liées (multi-app via téléphone/email) + souscriptions.
+ */
+exports.getUserDetails = catchAsync(async (req, res) => {
+  const { userId } = req.params;
+  const data = await topUsersService.getUserDetails(userId);
+  if (!data) {
+    return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+  }
+  res.status(200).json({ success: true, data });
+});
