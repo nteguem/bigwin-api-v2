@@ -159,9 +159,10 @@ class PredictionCorrectionService {
       // Étape suivante : propager les résultats des prédictions vers leurs tickets.
       // Doit s'exécuter APRÈS la correction des prédictions (sinon les tickets
       // restent 'pending' alors que les pronos sont corrigés).
+      // Lookback 10j pour matcher la fenêtre par défaut du widget dashboard.
       try {
         logger.info('=== Ticket correction started ===');
-        const ticketStats = await correctTickets({ lookbackDays: LOOKBACK_DAYS });
+        const ticketStats = await correctTickets({ lookbackDays: 10 });
         logger.info(`=== Ticket correction completed — scanned: ${ticketStats.scanned}, updated: ${ticketStats.updated} ===`);
       } catch (ticketErr) {
         logger.error(`Error in ticket correction step: ${ticketErr.message}`);
