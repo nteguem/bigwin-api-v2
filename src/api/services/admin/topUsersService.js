@@ -166,12 +166,34 @@ async function getUserDetails(userId) {
     .lean();
   const appById = new Map(appDocs.map((a) => [a.appId, a]));
 
-  // Souscriptions de TOUS les comptes liés (pas seulement le user cliqué)
-  const subscriptions = await Subscription.find({ user: { $in: linkedUserIds } })
-    .populate('package', 'name price currency duration')
-    .populate('user', 'appId pseudo phoneNumber')
-    .sort({ createdAt: -1 })
-    .lean();
+  // Souscriptions de TOUS les comptes liés (pas seulement le user cliqué).
+  // ATTENTION : on utilise aggregate pour bypasser le hook pre('find') du
+  // modèle Subscription, qui filtre automatiquement les expirées (endDate > now).
+  // Ici on veut TOUT l'historique, expirées comprises.
+  const Package = require('mongoose').model('Package');
+  const subscriptions = await Subscription.aggregate([
+    { $match: { user: { $in: linkedUserIds } } },
+    { $sort: { createdAt: -1 } },
+    {
+      $lookup: {
+        from: 'packages',
+        localField: 'package',
+        foreignField: '_id',
+        as: 'packageDoc',
+      },
+    },
+    { $unwind: { path: '$packageDoc', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'user',
+        foreignField: '_id',
+        as: 'userDoc',
+      },
+    },
+    { $unwind: { path: '$userDoc', preserveNullAndEmptyArrays: true } },
+  ]);
+  void Package; // require préchargé pour s'assurer que le modèle est enregistré
 
   const totalRevenueXAF = subscriptions.reduce(
     (sum, s) => sum + convertToXAF(s.pricing?.amount || 0, s.pricing?.currency || 'XAF'),
@@ -208,13 +230,13 @@ async function getUserDetails(userId) {
     }),
     subscriptions: subscriptions.map((s) => {
       // package.name peut être un objet i18n { fr, en } ou une string
-      let packageName = s.package?.name;
+      let packageName = s.packageDoc?.name;
       if (packageName && typeof packageName === 'object') {
         packageName = packageName.fr || packageName.en || Object.values(packageName)[0];
       }
       return {
         _id: String(s._id),
-        appId: s.user?.appId || null,
+        appId: s.userDoc?.appId || null,
         packageName: packageName || 'Package supprimé',
         amount: s.pricing?.amount || 0,
         currency: s.pricing?.currency || 'XAF',
