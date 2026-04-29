@@ -132,6 +132,30 @@ subscriptionSchema.methods.toJSON = function() {
 };
 
 // Hooks
+
+// Tag OneSignal `is_vip='true'` immédiatement après création/maj d'une
+// subscription active. Permet aux notifs ciblées VIP d'arriver dès l'achat
+// sans attendre que le user rouvre l'app.
+//
+// Non-bloquant : si OneSignal échoue, on log mais on n'empêche pas la save.
+// Le cron quotidien de réconciliation rattrapera.
+subscriptionSchema.post('save', async function (doc) {
+  try {
+    if (doc.status === 'active' && doc.endDate > new Date()) {
+      // Lazy import pour éviter les cycles de require
+      const { tagUserVip } = require('./../../services/common/oneSignalTagService');
+      tagUserVip(doc.user, doc.appId, true).catch((err) => {
+        require('../../../utils/logger').warn(
+          `[Subscription hook] Tag OneSignal échoué pour user=${doc.user} app=${doc.appId}: ${err.message}`
+        );
+      });
+    }
+  } catch (err) {
+    // Silencieux : la création de la subscription ne doit jamais être bloquée
+    require('../../../utils/logger').warn(`[Subscription hook] ${err.message}`);
+  }
+});
+
 subscriptionSchema.pre('find', function() {
   this.where({ endDate: { $gt: new Date() } });
 });

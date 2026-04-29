@@ -286,7 +286,11 @@ const audienceCount = catchAsync(async (req, res) => {
  * Envoi unifié — utilisé par le formulaire admin de notifications.
  * Combine audience (all/vip/free) × pays × apps (1 ou N).
  *
- * Si targeting.apps est fourni (array d'appIds) → multi-app. Sinon req.appId.
+ * IMPORTANT : envoi en arrière-plan (fire-and-forget) pour éviter les 504
+ * Gateway Timeout du reverse proxy. Sur 5 apps × 35k devices, le traitement
+ * complet prend ~1 min (batches OneSignal de 2000 toutes les 500ms). Le
+ * client reçoit immédiatement un 202 ; les erreurs de batch sont logguées
+ * côté serveur.
  */
 const sendUnified = catchAsync(async (req, res) => {
   const { notification, targeting } = req.body;
@@ -309,15 +313,47 @@ const sendUnified = catchAsync(async (req, res) => {
     throw new AppError('targeting.audience doit être all|vip|free', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
-  const result = await notificationService.sendUnified(appIdOrIds, {
-    notification,
-    targeting: {
+  const countryCodes = (targeting?.countryCodes || []).map((c) => String(c).toUpperCase());
+  const apps = Array.isArray(appIdOrIds) ? appIdOrIds : [appIdOrIds];
+
+  // VIP/Free utilise les filters OneSignal natifs (instantané).
+  // Pour 'all' avec pays, on tombe sur la résolution serveur qui peut être longue
+  // → fire-and-forget pour éviter le 504 du proxy.
+  const useFastPath = audience === 'vip' || audience === 'free' || (audience === 'all' && countryCodes.length === 0);
+
+  if (useFastPath) {
+    // Synchrone : 1 appel OneSignal par app, retour immédiat
+    const result = await notificationService.sendUnified(appIdOrIds, {
+      notification,
+      targeting: { audience, countryCodes },
+    });
+    return res.status(200).json({ success: true, data: result });
+  }
+
+  // Path lent (audience='all' avec pays multiples → résolution serveur batchée)
+  // → fire-and-forget pour éviter Gateway Timeout
+  res.status(202).json({
+    success: true,
+    data: {
+      message: 'Notification mise en file d\'envoi (path lent)',
+      apps,
       audience,
-      countryCodes: (targeting?.countryCodes || []).map((c) => String(c).toUpperCase()),
+      countryCodes,
+      async: true,
     },
   });
-
-  res.status(200).json({ success: true, data: result });
+  setImmediate(() => {
+    notificationService
+      .sendUnified(appIdOrIds, { notification, targeting: { audience, countryCodes } })
+      .then((result) => {
+        const queued = result.queued ?? 0;
+        const failed = result.failed ?? 0;
+        require('../../../utils/logger').info(`[sendUnified bg] apps=${apps.length} queued=${queued} failed=${failed}`);
+      })
+      .catch((err) => {
+        require('../../../utils/logger').error(`[sendUnified bg] ✗ ${err.message}`);
+      });
+  });
 });
 
 module.exports = {

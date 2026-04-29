@@ -15,6 +15,7 @@ const { initLogsConnection } = require('./src/core/logger/connection');
 const PredictionCorrectionService = require('./src/api/services/common/predictionCorrectionService');
 const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
 const retentionJobs = require('./src/jobs/retentionNotificationJob');
+const oneSignalTagReconciliationJob = require('./src/jobs/oneSignalTagReconciliationJob');
 
 const PORT = process.env.PORT || 4000;
 
@@ -39,6 +40,7 @@ const startServer = async () => {
 
     await googlePlayJobs.start();
     await retentionJobs.start();
+    await oneSignalTagReconciliationJob.start();
 
     // Démarrer le serveur HTTP
     app.listen(PORT, '0.0.0.0', () => {

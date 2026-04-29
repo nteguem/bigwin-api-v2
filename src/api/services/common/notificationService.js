@@ -769,12 +769,21 @@ async _sendUnifiedSingleApp(appId, { notification, targeting, batchSize = 2000 }
   const audience = targeting?.audience || 'all';
   const countryCodes = (targeting?.countryCodes || []).map((c) => c.toUpperCase());
 
-  // Cas simple : tous + pas de filtre pays → broadcast OneSignal direct (plus efficace)
+  // Cas simple : tous + pas de filtre pays → broadcast OneSignal direct
   if (audience === 'all' && countryCodes.length === 0) {
     return this.sendToAll(appId, notification);
   }
 
-  // Sinon on résout côté serveur
+  // Cas optimisé : VIP ou Free via OneSignal filters natifs (1 appel API).
+  // Nécessite que les tags `is_vip` soient à jour côté OneSignal (cron quotidien
+  // de réconciliation + hook Subscription.post('save')).
+  // Le filtre par pays utilise le champ natif OneSignal `country` (pas besoin de
+  // résoudre les users côté serveur).
+  if (audience === 'vip' || audience === 'free') {
+    return this._sendViaFilters(appId, { notification, audience, countryCodes });
+  }
+
+  // Sinon (audience='all' avec pays seulement) : on résout côté serveur
   const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
   if (userIds.length === 0) {
     logger.warn(`[${appId}] Audience ${audience} avec pays ${countryCodes.join(',')} : 0 user`);
@@ -896,6 +905,86 @@ async _sendUnifiedSingleApp(appId, { notification, targeting, batchSize = 2000 }
     errors: failedBatches.map((r) => r.error).filter(Boolean),
     details: { audience, countryCodes, users: userIds.length, devices: playerIds.length },
   };
+}
+
+/**
+ * Envoi via OneSignal Filters natifs — 1 appel API, instantané.
+ *
+ * Utilisé pour les ciblages tag-based (VIP/Free) où les tags `is_vip` ont été
+ * pushés en amont par le hook Subscription.post('save') et le cron de
+ * réconciliation. Le filtre par pays utilise le champ OneSignal natif.
+ *
+ * Avantages vs résolution côté serveur :
+ *  • 1 appel HTTP au lieu de N batches de 2000
+ *  • Pas de timeout 504 (réponse en quelques centaines de ms)
+ *  • Plus de query Mongo lourde sur User+Subscription+Device
+ *  • OneSignal délivre uniquement aux devices effectivement reachables
+ */
+async _sendViaFilters(appId, { notification, audience, countryCodes = [] }) {
+  const filters = [];
+
+  // Filter VIP : is_vip = 'true'
+  // Filter Free : is_vip != 'true' (matche aussi l'absence de tag)
+  if (audience === 'vip') {
+    filters.push({ field: 'tag', key: 'is_vip', relation: '=', value: 'true' });
+  } else if (audience === 'free') {
+    filters.push({ field: 'tag', key: 'is_vip', relation: '!=', value: 'true' });
+  }
+
+  // Pays via le champ natif OneSignal (détecté automatiquement depuis IP/locale)
+  if (countryCodes.length > 0) {
+    if (filters.length > 0) {
+      filters.push({ operator: 'AND' });
+    }
+    countryCodes.forEach((cc, idx) => {
+      if (idx > 0) filters.push({ operator: 'OR' });
+      filters.push({ field: 'country', relation: '=', value: cc });
+    });
+  }
+
+  const config = await this._getConfig(appId);
+  const baseData = {
+    ...(notification.data || {}),
+    targetAudience: audience,
+    ...(countryCodes.length > 0 && { targetCountries: countryCodes }),
+  };
+
+  const payload = {
+    app_id: config.appId,
+    filters,
+    headings: notification.headings || { en: 'Notification', fr: 'Notification' },
+    contents: notification.contents,
+    data: baseData,
+    ...notification.options,
+  };
+
+  try {
+    const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+    logger.info(
+      `[${appId}] sendViaFilters audience=${audience} countries=${countryCodes.join(',') || 'all'} ` +
+      `→ id=${response.id} recipients=${response.recipients}`
+    );
+    return {
+      id: response.id || null,
+      requested: response.recipients ?? null,
+      queued: response.recipients ?? 0,
+      recipientsOneSignal: response.recipients ?? 0,
+      failed: 0,
+      errors: response.errors || [],
+      details: { audience, countryCodes, mode: 'filters' },
+    };
+  } catch (err) {
+    logger.error(`[${appId}] sendViaFilters erreur: ${err.message}`);
+    return {
+      id: null,
+      requested: 0,
+      queued: 0,
+      recipientsOneSignal: 0,
+      failed: 0,
+      errors: [err.message],
+      details: { audience, countryCodes, mode: 'filters' },
+    };
+  }
 }
 }
 
