@@ -3,6 +3,7 @@
 const geoAnalyticsService = require('../../services/admin/geoAnalyticsService');
 const transactionsAnalyticsService = require('../../services/admin/transactionsAnalyticsService');
 const predictionsAnalyticsService = require('../../services/admin/predictionsAnalyticsService');
+const topUsersService = require('../../services/admin/topUsersService');
 const catchAsync = require('../../../utils/catchAsync');
 
 exports.getGeo = catchAsync(async (req, res) => {
@@ -44,11 +45,26 @@ exports.getPredictions = catchAsync(async (req, res) => {
 });
 
 /**
- * Mini-stat pronostics pour le dashboard (Win Rate 30j + volumes).
+ * Mini-stat pronostics pour le dashboard (taux de réussite 10j pronos + tickets).
  * Léger, optimisé pour le chargement initial.
  */
 exports.getPredictionsDashboardMini = catchAsync(async (req, res) => {
   const { appId } = req.query;
   const data = await predictionsAnalyticsService.getDashboardMini(appId || 'all');
+  res.status(200).json({ success: true, data });
+});
+
+/**
+ * Top users — meilleurs clients par revenu ou nombre d'achats.
+ * Période par défaut : 30 derniers jours.
+ */
+exports.getTopUsers = catchAsync(async (req, res) => {
+  const { appId, period, limit, sortBy } = req.query;
+  const data = await topUsersService.getTopUsers({
+    appId: appId || 'all',
+    period: period || '30d',
+    limit: limit ? parseInt(limit, 10) : 20,
+    sortBy: sortBy || 'revenue',
+  });
   res.status(200).json({ success: true, data });
 });

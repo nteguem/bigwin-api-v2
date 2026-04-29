@@ -7,6 +7,26 @@
 const Prediction = require('../../models/common/Prediction');
 const Ticket = require('../../models/common/Ticket');
 
+// Statut d'un ticket dérivé de l'ensemble de ses prédictions :
+// - won : toutes les preds décidées sont 'won' (au moins 1 décidée)
+// - lost : au moins 1 pred 'lost' parmi les decidées
+// - pending : reste des preds 'pending' et aucune perdue
+// - void : seulement des 'void' (cas marginal — ticket annulé)
+function deriveTicketStatus(preds) {
+  let pending = 0, won = 0, lost = 0, voidCount = 0;
+  for (const p of preds) {
+    if (p.status === 'pending') pending++;
+    else if (p.status === 'won') won++;
+    else if (p.status === 'lost') lost++;
+    else if (p.status === 'void') voidCount++;
+  }
+  if (lost > 0) return 'lost';
+  if (pending > 0) return 'pending';
+  if (won > 0) return 'won';
+  if (voidCount > 0) return 'void';
+  return 'pending';
+}
+
 function buildPeriodRange({ period, startDate, endDate }) {
   if (startDate || endDate) {
     return {
@@ -203,6 +223,37 @@ async function getStatsByCategory(appId, range, limit = 10) {
 }
 
 /**
+ * Stats au niveau TICKET (coupon) — c'est ce que le client vit réellement.
+ * Un ticket gagne uniquement si TOUS ses pronos sont gagnés. Une seule perte
+ * fait perdre tout le coupon, même si le pronostiqueur avait raison sur 4/5.
+ *
+ * On agrège par ticket via $group, puis on dérive le statut côté Mongo
+ * directement (logique en SQL aurait été plus lisible mais $group fait l'affaire).
+ */
+async function getTicketsStats(appId, range) {
+  const result = await Prediction.aggregate([
+    { $match: buildPredictionMatch(appId, range) },
+    {
+      $group: {
+        _id: '$ticket',
+        statuses: { $push: '$status' },
+      },
+    },
+  ]);
+
+  const stats = { total: 0, pending: 0, won: 0, lost: 0, void: 0 };
+  for (const row of result) {
+    const status = deriveTicketStatus(row.statuses.map((s) => ({ status: s })));
+    stats[status] = (stats[status] || 0) + 1;
+    stats.total += 1;
+  }
+  const decided = stats.won + stats.lost;
+  stats.successRate = decided > 0 ? (stats.won / decided) * 100 : 0;
+  stats.decided = decided;
+  return stats;
+}
+
+/**
  * Volume de pronos par jour (pour repérer les pics et les jours creux).
  */
 async function getDailyVolume(appId, range) {
@@ -234,8 +285,9 @@ async function getDailyVolume(appId, range) {
 async function getPredictionsAnalytics({ appId, period, startDate, endDate, limit = 10 }) {
   const range = buildPeriodRange({ period, startDate, endDate });
 
-  const [global, bySport, byCategory, dailyVolume] = await Promise.all([
+  const [global, tickets, bySport, byCategory, dailyVolume] = await Promise.all([
     getGlobalStats(appId, range),
+    getTicketsStats(appId, range),
     getStatsBySport(appId, range, limit),
     getStatsByCategory(appId, range, limit),
     getDailyVolume(appId, range),
@@ -244,6 +296,7 @@ async function getPredictionsAnalytics({ appId, period, startDate, endDate, limi
   return {
     period: { start: range.start, end: range.end },
     global,
+    tickets,
     bySport,
     byCategory,
     dailyVolume,
@@ -257,14 +310,24 @@ async function getPredictionsAnalytics({ appId, period, startDate, endDate, limi
  */
 async function getDashboardMini(appId) {
   const range = buildPeriodRange({ period: '10d' });
-  const stats = await getGlobalStats(appId, range);
+  const [stats, tickets] = await Promise.all([
+    getGlobalStats(appId, range),
+    getTicketsStats(appId, range),
+  ]);
   return {
     period: '10d',
-    winRate: stats.winRate,
-    decided: stats.won + stats.lost,
-    won: stats.won,
-    lost: stats.lost,
-    pending: stats.pending,
+    predictions: {
+      successRate: stats.winRate,
+      decided: stats.won + stats.lost,
+      won: stats.won,
+      lost: stats.lost,
+    },
+    tickets: {
+      successRate: tickets.successRate,
+      decided: tickets.decided,
+      won: tickets.won,
+      lost: tickets.lost,
+    },
   };
 }
 

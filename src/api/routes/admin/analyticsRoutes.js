@@ -18,4 +18,7 @@ router.get('/predictions', analyticsController.getPredictions);
 // Mini-stat pronos pour le dashboard (léger)
 router.get('/predictions/dashboard-mini', analyticsController.getPredictionsDashboardMini);
 
+// Top users : meilleurs clients par revenu / nb d'achats
+router.get('/top-users', analyticsController.getTopUsers);
+
 module.exports = router;
