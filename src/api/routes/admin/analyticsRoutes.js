@@ -21,7 +21,16 @@ router.get('/predictions/dashboard-mini', analyticsController.getPredictionsDash
 // Top users : meilleurs clients par revenu / nb d'achats
 router.get('/top-users', analyticsController.getTopUsers);
 
+// Candidats à relancer (win-back) : churners avec gros revenu cumulé
+router.get('/winback-candidates', analyticsController.getWinbackCandidates);
+
 // Détails d'un client (modal latérale) : profil + apps + souscriptions
 router.get('/users/:userId/details', analyticsController.getUserDetails);
+
+// Packages disponibles pour une app donnée (pour le form d'offre)
+router.get('/apps/:appId/packages', analyticsController.getPackagesByApp);
+
+// Offrir un forfait fidélité à un client (notif personnalisée distincte)
+router.post('/users/:userId/loyalty-gift', analyticsController.giveLoyaltyGift);
 
 module.exports = router;

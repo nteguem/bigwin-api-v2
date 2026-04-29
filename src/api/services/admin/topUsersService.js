@@ -257,4 +257,106 @@ async function getUserDetails(userId) {
   };
 }
 
-module.exports = { getTopUsers, getUserDetails };
+/**
+ * Candidats à relancer (win-back) : clients qui ont dépensé sur les 90 derniers
+ * jours mais qui n'ont AUCUN forfait actif au moment du calcul.
+ *
+ * Logique :
+ *   1) Identifier les users avec ≥ 1 souscription dans les N derniers jours
+ *   2) Filtrer ceux qui n'ont aucune souscription dont endDate > now
+ *   3) Trier par revenu cumulé (Pareto — relancer d'abord les gros)
+ *
+ * Tous les calculs passent par aggregate pour bypasser le hook pre('find')
+ * qui filtre automatiquement les expirées.
+ */
+async function getWinbackCandidates({ appId, lookbackDays = 90, limit = 10 }) {
+  const since = new Date();
+  since.setDate(since.getDate() - lookbackDays);
+
+  const match = { createdAt: { $gte: since } };
+  if (appId && appId !== 'all') match.appId = appId;
+
+  // 1) Tous les users qui ont acheté dans la fenêtre
+  const recentBuyers = await Subscription.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: '$user',
+        revenueByCurrency: { $push: { amount: '$pricing.amount', currency: '$pricing.currency' } },
+        purchases: { $sum: 1 },
+        firstAt: { $min: '$createdAt' },
+        lastAt: { $max: '$createdAt' },
+        appIds: { $addToSet: '$appId' },
+      },
+    },
+  ]);
+
+  if (recentBuyers.length === 0) return [];
+
+  // 2) Pour chaque user, vérifier s'il a au moins une souscription active
+  const userIds = recentBuyers.map((u) => u._id);
+  const now = new Date();
+  const activeUsers = await Subscription.aggregate([
+    {
+      $match: {
+        user: { $in: userIds },
+        status: 'active',
+        endDate: { $gt: now },
+      },
+    },
+    { $group: { _id: '$user' } },
+  ]);
+  const activeUserIds = new Set(activeUsers.map((u) => String(u._id)));
+
+  // 3) Garder uniquement les churners (avec calcul du revenu XAF)
+  const churners = recentBuyers
+    .filter((u) => !activeUserIds.has(String(u._id)))
+    .map((u) => {
+      let revenueXAF = 0;
+      for (const r of u.revenueByCurrency) {
+        revenueXAF += convertToXAF(r.amount || 0, r.currency || 'XAF');
+      }
+      return {
+        userId: u._id,
+        revenueXAF: Math.round(revenueXAF),
+        purchases: u.purchases,
+        firstPurchaseAt: u.firstAt,
+        lastPurchaseAt: u.lastAt,
+        appIds: u.appIds,
+        daysSinceLastPurchase: Math.floor((Date.now() - u.lastAt.getTime()) / (1000 * 60 * 60 * 24)),
+      };
+    });
+
+  // 4) Trier par revenu cumulé décroissant + slice
+  churners.sort((a, b) => b.revenueXAF - a.revenueXAF);
+  const top = churners.slice(0, limit);
+
+  // 5) Hydrater les profils utilisateurs
+  const User = require('mongoose').model('User');
+  const userDocs = await User.find({ _id: { $in: top.map((t) => t.userId) } })
+    .select('phoneNumber email pseudo firstName lastName countryCode city createdAt')
+    .lean();
+  const usersById = new Map(userDocs.map((u) => [String(u._id), u]));
+
+  return top.map((t) => {
+    const u = usersById.get(String(t.userId)) || {};
+    return {
+      userId: String(t.userId),
+      phoneNumber: u.phoneNumber || null,
+      email: u.email || null,
+      pseudo: u.pseudo || null,
+      fullName: [u.firstName, u.lastName].filter(Boolean).join(' ') || null,
+      countryCode: u.countryCode || null,
+      city: u.city || null,
+      memberSince: u.createdAt || null,
+      revenueXAF: t.revenueXAF,
+      purchases: t.purchases,
+      firstPurchaseAt: t.firstPurchaseAt,
+      lastPurchaseAt: t.lastPurchaseAt,
+      daysSinceLastPurchase: t.daysSinceLastPurchase,
+      apps: t.appIds,
+    };
+  });
+}
+
+module.exports = { getTopUsers, getUserDetails, getWinbackCandidates };

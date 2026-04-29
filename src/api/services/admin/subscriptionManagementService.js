@@ -305,9 +305,19 @@ async function getSubscriptionStats(appId, filters = {}) {
 }
 
 /**
- * Créer une souscription admin (achat manuel ou offre)
+ * Créer une souscription admin (achat manuel ou offre).
+ *
+ * @param {String} appId
+ * @param {Object} opts
+ * @param {String} opts.userId
+ * @param {String} opts.packageId
+ * @param {Boolean} opts.isGift               - Si true, montant à 0 et notif cadeau
+ * @param {Object}  [opts.loyaltyOptions]     - Si présent, override la notif standard
+ *                                              par une notif "fidélité" personnalisée
+ * @param {String}  [opts.loyaltyOptions.customMessageFr] - Texte FR sur-mesure
+ * @param {String}  [opts.loyaltyOptions.customMessageEn] - Texte EN sur-mesure
  */
-async function createAdminSubscription(appId, { userId, packageId, isGift }) {
+async function createAdminSubscription(appId, { userId, packageId, isGift, loyaltyOptions }) {
   // Vérifier l'utilisateur
   const user = await User.findOne({ _id: userId, appId });
   if (!user) {
@@ -381,47 +391,92 @@ async function createAdminSubscription(appId, { userId, packageId, isGift }) {
     if (device?.playerId) {
       const packageName = pkg.name?.fr || pkg.name?.en || 'Package Premium';
 
-      const notification = isGift
-        ? {
-            headings: {
-              en: '🎁 VIP Access Offered!',
-              fr: '🎁 Accès VIP Offert !',
-            },
-            contents: {
-              en: `You have received a ${packageName} access! Enjoy your premium predictions.`,
-              fr: `Vous avez reçu un accès ${packageName} ! Profitez de vos pronostics premium.`,
-            },
-            data: {
-              type: 'subscription_gift',
-              package_id: packageId.toString(),
-              action: 'view_subscription',
-            },
-          }
-        : {
-            headings: {
-              en: '🎉 Payment Successful!',
-              fr: '🎉 Paiement Réussi !',
-            },
-            contents: {
-              en: `Your subscription to ${packageName} is now active! Enjoy your premium features.`,
-              fr: `Votre abonnement à ${packageName} est maintenant actif ! Profitez de vos avantages premium.`,
-            },
-            data: {
-              type: 'payment_success',
-              package_id: packageId.toString(),
-              action: 'view_subscription',
-            },
-          };
+      // Le prénom à afficher dans la notification fidélité — on prend la
+      // meilleure forme disponible (firstName puis pseudo).
+      const userDisplayName = user.firstName || user.pseudo || '';
 
-      notification.options = {
-        android_accent_color: isGift ? '8B5CF6' : '00C853',
-        small_icon: 'ic_notification',
-        large_icon: 'ic_launcher',
-        priority: 8,
-      };
+      let notification;
+
+      if (loyaltyOptions) {
+        // Notif "fidélité" : ton chaleureux, perso, pour relancer un client.
+        // Si l'admin a fourni un texte sur-mesure, il prime sur le message par défaut.
+        const defaultFr = userDisplayName
+          ? `Salut ${userDisplayName} 👑 Tu fais partie de nos meilleurs clients. Pour te remercier, on t'offre un accès ${packageName} ! Profite-en bien.`
+          : `👑 Tu fais partie de nos meilleurs clients. Pour te remercier, on t'offre un accès ${packageName} ! Profite-en bien.`;
+        const defaultEn = userDisplayName
+          ? `Hi ${userDisplayName} 👑 You're one of our best clients. As a thank you, we're offering you ${packageName} access! Enjoy.`
+          : `👑 You're one of our best clients. As a thank you, we're offering you ${packageName} access! Enjoy.`;
+
+        notification = {
+          headings: {
+            en: '👑 A gift just for you!',
+            fr: '👑 Un cadeau rien que pour toi !',
+          },
+          contents: {
+            en: loyaltyOptions.customMessageEn || defaultEn,
+            fr: loyaltyOptions.customMessageFr || defaultFr,
+          },
+          data: {
+            type: 'loyalty_gift',
+            package_id: packageId.toString(),
+            action: 'view_subscription',
+          },
+          options: {
+            android_accent_color: 'D4AF37', // doré pour la variante VIP/fidélité
+            small_icon: 'ic_notification',
+            large_icon: 'ic_launcher',
+            priority: 9,
+          },
+        };
+      } else if (isGift) {
+        notification = {
+          headings: {
+            en: '🎁 VIP Access Offered!',
+            fr: '🎁 Accès VIP Offert !',
+          },
+          contents: {
+            en: `You have received a ${packageName} access! Enjoy your premium predictions.`,
+            fr: `Vous avez reçu un accès ${packageName} ! Profitez de vos pronostics premium.`,
+          },
+          data: {
+            type: 'subscription_gift',
+            package_id: packageId.toString(),
+            action: 'view_subscription',
+          },
+          options: {
+            android_accent_color: '8B5CF6',
+            small_icon: 'ic_notification',
+            large_icon: 'ic_launcher',
+            priority: 8,
+          },
+        };
+      } else {
+        notification = {
+          headings: {
+            en: '🎉 Payment Successful!',
+            fr: '🎉 Paiement Réussi !',
+          },
+          contents: {
+            en: `Your subscription to ${packageName} is now active! Enjoy your premium features.`,
+            fr: `Votre abonnement à ${packageName} est maintenant actif ! Profitez de vos avantages premium.`,
+          },
+          data: {
+            type: 'payment_success',
+            package_id: packageId.toString(),
+            action: 'view_subscription',
+          },
+          options: {
+            android_accent_color: '00C853',
+            small_icon: 'ic_notification',
+            large_icon: 'ic_launcher',
+            priority: 8,
+          },
+        };
+      }
 
       await notificationService.sendToUsers(appId, [device.playerId], notification);
-      logger.info(`[ADMIN] Notification envoyée à user ${userId} (${isGift ? 'offre' : 'souscription'})`);
+      const variant = loyaltyOptions ? 'loyalty' : (isGift ? 'gift' : 'subscription');
+      logger.info(`[ADMIN] Notification envoyée à user ${userId} (${variant})`);
     }
   } catch (err) {
     logger.error(`[ADMIN] Erreur notification (${userId}):`, err.message);
