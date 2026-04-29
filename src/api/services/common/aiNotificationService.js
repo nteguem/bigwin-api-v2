@@ -20,10 +20,11 @@ const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models
 class AINotificationService {
   constructor() {
     this.apiKey = null;
-    // gemini-2.5-flash = modèle recommandé pour le free tier en avril 2026
-    // (250 RPD, 10 RPM, 1M TPM). gemini-2.0-flash est encore dispo mais avec
-    // des quotas free tier moins clairs.
-    this.model = 'gemini-2.5-flash';
+    // gemini-2.5-flash-lite : 1000 RPD / 15 RPM (4× plus que flash), moins
+    // en demande donc moins de 503, qualité tout à fait suffisante pour
+    // correction + traduction. Si on veut + de qualité on peut passer à
+    // 'gemini-2.5-flash' (250 RPD).
+    this.model = 'gemini-2.5-flash-lite';
     this.initializeClient();
   }
 
@@ -46,6 +47,9 @@ class AINotificationService {
    * Utilise generateContent avec system_instruction + contents.
    * responseMimeType=application/json force du JSON propre en sortie (plus
    * besoin de gérer les ```json``` markdown).
+   *
+   * Retry automatique sur 503 (UNAVAILABLE — pic de charge Google côté serveur)
+   * avec backoff exponentiel : 1s, 3s, 7s. Au-delà, surface l'erreur.
    */
   async _generateContent({ system, user, temperature = 0.6, maxTokens = 2048, jsonOutput = true }) {
     if (!this.apiKey) {
@@ -53,7 +57,6 @@ class AINotificationService {
     }
 
     const url = `${GEMINI_BASE_URL}/${this.model}:generateContent`;
-
     const payload = {
       system_instruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [{ text: user }] }],
@@ -66,48 +69,73 @@ class AINotificationService {
       payload.generationConfig.responseMimeType = 'application/json';
     }
 
-    try {
-      const response = await axios.post(url, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey,
-        },
-        timeout: 30000,
-      });
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS_MS = [1000, 3000, 7000]; // backoff exponentiel
+    let lastError = null;
 
-      const content = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!content) {
-        // Cas spécial : si l'output est bloqué par filtres safety
-        const finishReason = response.data?.candidates?.[0]?.finishReason;
-        if (finishReason && finishReason !== 'STOP') {
-          throw new Error(`Génération interrompue : ${finishReason}`);
-        }
-        throw new Error('Réponse Gemini vide');
-      }
-      return content;
-    } catch (error) {
-      if (error.response) {
-        const status = error.response.status;
-        // Le vrai message Gemini est dans error.response.data.error.message
-        const errObj = error.response.data?.error || {};
-        const detail = errObj.message || error.response.data?.message || JSON.stringify(error.response.data);
-        const geminiStatus = errObj.status || ''; // ex: RESOURCE_EXHAUSTED
-        // Log full response pour debug en cas de 429 obscur
-        logger.error(`[AINotification] Gemini HTTP ${status} (${geminiStatus}): ${detail}`, {
-          fullError: error.response.data,
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await axios.post(url, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey,
+          },
+          timeout: 30000,
         });
-        if (status === 400) throw new AppError(`Requête Gemini invalide : ${detail}`, 400);
-        if (status === 401 || status === 403) throw new AppError(`Clé API Gemini invalide ou non autorisée : ${detail}`, 500);
-        if (status === 404) throw new AppError(`Modèle ${this.model} introuvable : ${detail}`, 500);
-        if (status === 429) {
-          // On expose le message Gemini pour comprendre quel quota a été dépassé
-          throw new AppError(`Quota Gemini dépassé : ${detail}`, 429);
+
+        const content = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!content) {
+          const finishReason = response.data?.candidates?.[0]?.finishReason;
+          if (finishReason && finishReason !== 'STOP') {
+            throw new Error(`Génération interrompue : ${finishReason}`);
+          }
+          throw new Error('Réponse Gemini vide');
         }
-        throw new AppError(`Erreur Gemini (${status}) : ${detail}`, 500);
+        return content;
+      } catch (error) {
+        lastError = error;
+
+        if (error.response) {
+          const status = error.response.status;
+          const errObj = error.response.data?.error || {};
+          const detail = errObj.message || error.response.data?.message || JSON.stringify(error.response.data);
+          const geminiStatus = errObj.status || '';
+
+          // 503 / UNAVAILABLE = pic de charge temporaire → retry
+          const isTransient = status === 503 || status === 502 || geminiStatus === 'UNAVAILABLE';
+          if (isTransient && attempt < MAX_RETRIES) {
+            const delay = RETRY_DELAYS_MS[attempt];
+            logger.warn(`[AINotification] Gemini ${status} (${geminiStatus}) — retry ${attempt + 1}/${MAX_RETRIES} dans ${delay}ms`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+
+          // Erreur définitive : on log et on lève
+          logger.error(`[AINotification] Gemini HTTP ${status} (${geminiStatus}): ${detail}`, {
+            fullError: error.response.data,
+            attempts: attempt + 1,
+          });
+          if (status === 400) throw new AppError(`Requête Gemini invalide : ${detail}`, 400);
+          if (status === 401 || status === 403) throw new AppError(`Clé API Gemini invalide ou non autorisée : ${detail}`, 500);
+          if (status === 404) throw new AppError(`Modèle ${this.model} introuvable : ${detail}`, 500);
+          if (status === 429) throw new AppError(`Quota Gemini dépassé : ${detail}`, 429);
+          if (status === 503) throw new AppError(`Gemini surchargé après ${MAX_RETRIES + 1} tentatives. Réessaye dans 1-2 minutes : ${detail}`, 503);
+          throw new AppError(`Erreur Gemini (${status}) : ${detail}`, 500);
+        }
+
+        // Erreur réseau/timeout : retry aussi
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS_MS[attempt];
+          logger.warn(`[AINotification] Réseau Gemini KO — retry ${attempt + 1}/${MAX_RETRIES} dans ${delay}ms : ${error.message}`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        logger.error(`[AINotification] Erreur réseau Gemini après ${MAX_RETRIES + 1} tentatives: ${error.message}`);
+        throw new AppError(`Erreur réseau IA: ${error.message}`, 500);
       }
-      logger.error(`[AINotification] Erreur réseau Gemini: ${error.message}`);
-      throw new AppError(`Erreur réseau IA: ${error.message}`, 500);
     }
+    // Sécurité (ne devrait jamais arriver)
+    throw lastError;
   }
 
   /* ────────────────────────────────────────────────────────────
