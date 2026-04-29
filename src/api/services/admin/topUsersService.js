@@ -206,20 +206,27 @@ async function getUserDetails(userId) {
         memberSince: acc.createdAt,
       };
     }),
-    subscriptions: subscriptions.map((s) => ({
-      _id: String(s._id),
-      appId: s.user?.appId || null,
-      packageName: s.package?.name || 'Package supprimé',
-      amount: s.pricing?.amount || 0,
-      currency: s.pricing?.currency || 'XAF',
-      amountXAF: convertToXAF(s.pricing?.amount || 0, s.pricing?.currency || 'XAF'),
-      provider: s.paymentProvider,
-      status: s.status,
-      isGift: s.isGift || false,
-      startDate: s.startDate,
-      endDate: s.endDate,
-      createdAt: s.createdAt,
-    })),
+    subscriptions: subscriptions.map((s) => {
+      // package.name peut être un objet i18n { fr, en } ou une string
+      let packageName = s.package?.name;
+      if (packageName && typeof packageName === 'object') {
+        packageName = packageName.fr || packageName.en || Object.values(packageName)[0];
+      }
+      return {
+        _id: String(s._id),
+        appId: s.user?.appId || null,
+        packageName: packageName || 'Package supprimé',
+        amount: s.pricing?.amount || 0,
+        currency: s.pricing?.currency || 'XAF',
+        amountXAF: convertToXAF(s.pricing?.amount || 0, s.pricing?.currency || 'XAF'),
+        provider: s.paymentProvider,
+        status: s.status,
+        isGift: s.isGift || false,
+        startDate: s.startDate,
+        endDate: s.endDate,
+        createdAt: s.createdAt,
+      };
+    }),
     totals: {
       revenueXAF: Math.round(totalRevenueXAF),
       purchasesCount: subscriptions.length,
