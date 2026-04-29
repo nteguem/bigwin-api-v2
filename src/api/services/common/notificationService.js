@@ -606,6 +606,208 @@ async sendToCountries(appId, countryCodes, notification, options = {}) {
     
     throw new AppError(`Échec envoi notification par pays: ${errorMessage}`, 500);
   }
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Ciblage avancé : audience (tous/VIP/free) × pays
+   * ────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Résout la liste de userIds correspondant à l'audience demandée.
+   * audience='all'  : tous les users de l'app (filtrés par pays si fournis)
+   * audience='vip'  : users avec souscription active (endDate > now)
+   * audience='free' : users SANS souscription active
+   *
+   * @returns {Array<ObjectId>} liste des userIds
+   */
+  async _resolveAudienceUserIds(appId, { audience, countryCodes }) {
+  const User = require('../../models/user/User');
+  const Subscription = require('../../models/common/Subscription');
+
+  const userQuery = { appId };
+  if (countryCodes && countryCodes.length > 0) {
+    const regexes = countryCodes.map((c) => new RegExp(`^${c}$`, 'i'));
+    userQuery.countryCode = { $in: regexes };
+  }
+
+  if (audience === 'all') {
+    const users = await User.find(userQuery).select('_id').lean();
+    return users.map((u) => u._id);
+  }
+
+  // VIP / Free : on calcule l'ensemble des users avec souscription active
+  // via aggregate (bypasse le hook pre('find') de Subscription).
+  const vipUsers = await Subscription.aggregate([
+    {
+      $match: {
+        appId,
+        status: 'active',
+        endDate: { $gt: new Date() },
+      },
+    },
+    { $group: { _id: '$user' } },
+  ]);
+  const vipUserIds = new Set(vipUsers.map((u) => String(u._id)));
+
+  if (audience === 'vip') {
+    // Intersection : VIP ∩ filtre pays (si fourni)
+    if (countryCodes && countryCodes.length > 0) {
+      userQuery._id = { $in: Array.from(vipUserIds).map((id) => new (require('mongoose').Types.ObjectId)(id)) };
+      const users = await User.find(userQuery).select('_id').lean();
+      return users.map((u) => u._id);
+    }
+    // Pas de filtre pays : juste les userIds VIP
+    return Array.from(vipUserIds).map((id) => new (require('mongoose').Types.ObjectId)(id));
+  }
+
+  if (audience === 'free') {
+    // Soustraction : tous les users - les VIP
+    const users = await User.find(userQuery).select('_id').lean();
+    return users.map((u) => u._id).filter((id) => !vipUserIds.has(String(id)));
+  }
+
+  throw new AppError(`Audience inconnue : ${audience}`, 400);
+}
+
+/**
+ * Récupère les playerIds OneSignal actifs pour une liste de userIds.
+ */
+async _resolvePlayerIds(appId, userIds) {
+  if (userIds.length === 0) return [];
+  const Device = require('../../models/common/Device');
+  const devices = await Device.find({
+    appId,
+    user: { $in: userIds },
+    isActive: true,
+    playerId: { $exists: true, $nin: [null, ''] },
+  }).select('playerId').lean();
+  return devices.map((d) => d.playerId).filter(Boolean);
+}
+
+/**
+ * Compte estimé de l'audience (sans envoyer la notif) pour le compteur live
+ * du formulaire admin.
+ *
+ * @returns {Object} { users, devices } — nombre de users et de devices joignables
+ */
+async countAudience(appId, { audience = 'all', countryCodes = [] } = {}) {
+  const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
+  const playerIds = await this._resolvePlayerIds(appId, userIds);
+  return {
+    audience,
+    countryCodes,
+    users: userIds.length,
+    devices: playerIds.length,
+  };
+}
+
+/**
+ * Envoi unifié — tous les paramètres en un seul appel.
+ *
+ * @param {String} appId
+ * @param {Object} params
+ * @param {Object}  params.notification               - { headings, contents, data, options }
+ * @param {Object}  params.targeting
+ * @param {String}  params.targeting.audience         - 'all' | 'vip' | 'free'
+ * @param {Array}   [params.targeting.countryCodes]   - filtre additionnel
+ * @param {Number}  [params.batchSize=2000]
+ */
+async sendUnified(appId, { notification, targeting, batchSize = 2000 }) {
+  const audience = targeting?.audience || 'all';
+  const countryCodes = (targeting?.countryCodes || []).map((c) => c.toUpperCase());
+
+  // Cas simple : tous + pas de filtre pays → broadcast OneSignal direct (plus efficace)
+  if (audience === 'all' && countryCodes.length === 0) {
+    return this.sendToAll(appId, notification);
+  }
+
+  // Sinon on résout côté serveur
+  const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
+  if (userIds.length === 0) {
+    logger.warn(`[${appId}] Audience ${audience} avec pays ${countryCodes.join(',')} : 0 user`);
+    return {
+      id: null,
+      recipients: 0,
+      successful: 0,
+      failed: 0,
+      message: 'Aucun utilisateur correspondant aux critères',
+      details: { audience, countryCodes, users: 0, devices: 0 },
+    };
+  }
+
+  const playerIds = await this._resolvePlayerIds(appId, userIds);
+  if (playerIds.length === 0) {
+    return {
+      id: null,
+      recipients: 0,
+      successful: 0,
+      failed: 0,
+      message: 'Aucun device actif (push désactivé) pour cette audience',
+      details: { audience, countryCodes, users: userIds.length, devices: 0 },
+    };
+  }
+
+  logger.info(`[${appId}] sendUnified audience=${audience} countries=${countryCodes.join(',') || 'all'} users=${userIds.length} devices=${playerIds.length}`);
+
+  const config = await this._getConfig(appId);
+  const baseData = {
+    ...(notification.data || {}),
+    targetAudience: audience,
+    ...(countryCodes.length > 0 && { targetCountries: countryCodes }),
+  };
+
+  // Envoi en 1 lot ou en batches
+  if (playerIds.length <= batchSize) {
+    const payload = {
+      app_id: config.appId,
+      include_player_ids: playerIds,
+      headings: notification.headings || { en: 'Notification', fr: 'Notification' },
+      contents: notification.contents,
+      data: baseData,
+      ...notification.options,
+    };
+    const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+    return {
+      ...response,
+      successful: response.recipients || playerIds.length,
+      details: { audience, countryCodes, users: userIds.length, devices: playerIds.length },
+    };
+  }
+
+  // Envoi par lots
+  const batches = [];
+  for (let i = 0; i < playerIds.length; i += batchSize) {
+    batches.push(playerIds.slice(i, i + batchSize));
+  }
+  const results = [];
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const payload = {
+      app_id: config.appId,
+      include_player_ids: batch,
+      headings: notification.headings || { en: 'Notification', fr: 'Notification' },
+      contents: notification.contents,
+      data: { ...baseData, batchNumber: i + 1 },
+      ...notification.options,
+    };
+    try {
+      const r = await this._makeRequest(config, 'notifications', 'POST', payload);
+      results.push({ success: true, ...r });
+    } catch (err) {
+      logger.error(`[${appId}] Erreur lot ${i + 1}: ${err.message}`);
+      results.push({ success: false, error: err.message, batchSize: batch.length });
+    }
+    if (i < batches.length - 1) await new Promise((r) => setTimeout(r, 500));
+  }
+  const successful = results.filter((r) => r.success).reduce((s, r) => s + (r.recipients || 0), 0);
+  return {
+    id: results[0]?.id || null,
+    recipients: successful,
+    successful,
+    failed: playerIds.length - successful,
+    batches: results.length,
+    details: { audience, countryCodes, users: userIds.length, devices: playerIds.length },
+  };
 }
 }
 

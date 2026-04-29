@@ -229,6 +229,87 @@ const sendToCountries = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * Polir un texte brut en notification push bilingue.
+ * 1 appel = 1 proposition. Réappel avec attempt > 0 → variation.
+ */
+const polishNotification = catchAsync(async (req, res) => {
+  const { text, type, attempt } = req.body;
+  const appId = req.appId;
+
+  if (!appId) throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  if (!aiNotificationService.isAvailable()) {
+    throw new AppError('Service IA non configuré', 503, ErrorCodes.SERVICE_UNAVAILABLE);
+  }
+  if (!text || text.trim().length < 5) {
+    throw new AppError('Texte requis (min 5 caractères)', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  const polished = await aiNotificationService.polishMessage(
+    appId,
+    text.trim(),
+    type || 'general',
+    parseInt(attempt) || 0,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: { notification: polished, meta: { appId, type, attempt: parseInt(attempt) || 0 } },
+  });
+});
+
+/**
+ * Compteur live de l'audience pour le formulaire admin.
+ */
+const audienceCount = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  if (!appId) throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+
+  const audience = req.query.audience || 'all';
+  const countryCodes = req.query.countryCodes
+    ? req.query.countryCodes.split(',').filter(Boolean)
+    : [];
+
+  if (!['all', 'vip', 'free'].includes(audience)) {
+    throw new AppError('audience doit être all|vip|free', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  const result = await notificationService.countAudience(appId, { audience, countryCodes });
+  res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Envoi unifié — utilisé par le formulaire admin de notifications.
+ * Combine audience (all/vip/free) × pays (optionnel) en une seule requête.
+ */
+const sendUnified = catchAsync(async (req, res) => {
+  const { notification, targeting } = req.body;
+  const appId = req.appId;
+
+  if (!appId) throw new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR);
+  if (!notification?.contents?.fr || !notification?.contents?.en) {
+    throw new AppError('notification.contents.fr et .en requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  if (!notification?.headings?.fr || !notification?.headings?.en) {
+    throw new AppError('notification.headings.fr et .en requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  const audience = targeting?.audience || 'all';
+  if (!['all', 'vip', 'free'].includes(audience)) {
+    throw new AppError('targeting.audience doit être all|vip|free', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  const result = await notificationService.sendUnified(appId, {
+    notification,
+    targeting: {
+      audience,
+      countryCodes: (targeting?.countryCodes || []).map((c) => String(c).toUpperCase()),
+    },
+  });
+
+  res.status(200).json({ success: true, data: result });
+});
+
 module.exports = {
   send,
   broadcast,
@@ -237,5 +318,9 @@ module.exports = {
   getActivePlayers,
   generateNotifications, // ⭐ Maintenant multitenant
   checkAIStatus,
-  sendToCountries
+  sendToCountries,
+  // Nouveaux : flux unifié AI + ciblage avancé
+  polishNotification,
+  audienceCount,
+  sendUnified,
 };

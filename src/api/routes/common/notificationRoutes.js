@@ -104,4 +104,25 @@ router.get('/ai-status', notificationController.checkAIStatus);
  */
 router.post('/send-to-countries', notificationController.sendToCountries);
 
+/**
+ * @route POST /api/notifications/polish
+ * @desc Polir un texte brut (FR) en notification push bilingue (FR + EN)
+ * @body { text: string, type?: string, attempt?: number }
+ */
+router.post('/polish', notificationController.polishNotification);
+
+/**
+ * @route GET /api/notifications/audience-count
+ * @desc Estimer la taille de l'audience pour le compteur live du formulaire
+ * @query { audience: 'all'|'vip'|'free', countryCodes?: 'SN,CM,...' }
+ */
+router.get('/audience-count', notificationController.audienceCount);
+
+/**
+ * @route POST /api/notifications/send-unified
+ * @desc Envoi unifié : audience (all/vip/free) × pays (optionnel)
+ * @body { notification: {...}, targeting: { audience, countryCodes? } }
+ */
+router.post('/send-unified', notificationController.sendUnified);
+
 module.exports = router;
