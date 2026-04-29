@@ -16,6 +16,7 @@ const logger = require('../../../utils/logger');
 const Corrector = require('../../../core/events/Corrector');
 const { fetchAndStoreData } = require('../../../core/sports/providers/initService');
 const Prediction = require('../../models/common/Prediction');
+const { correctTickets } = require('./ticketCorrectionService');
 
 // Nombre de jours en arrière pour chercher les prédictions pending
 const LOOKBACK_DAYS = 7;
@@ -154,6 +155,17 @@ class PredictionCorrectionService {
 
       const duration = Date.now() - startTime;
       logger.info(`=== Correction completed in ${duration}ms — corrected: ${totalCorrected}, void: ${totalVoid}, errors: ${totalErrors}, API calls: ${apiCalls} ===`);
+
+      // Étape suivante : propager les résultats des prédictions vers leurs tickets.
+      // Doit s'exécuter APRÈS la correction des prédictions (sinon les tickets
+      // restent 'pending' alors que les pronos sont corrigés).
+      try {
+        logger.info('=== Ticket correction started ===');
+        const ticketStats = await correctTickets({ lookbackDays: LOOKBACK_DAYS });
+        logger.info(`=== Ticket correction completed — scanned: ${ticketStats.scanned}, updated: ${ticketStats.updated} ===`);
+      } catch (ticketErr) {
+        logger.error(`Error in ticket correction step: ${ticketErr.message}`);
+      }
 
     } catch (error) {
       logger.error(`Critical error in correction cron: ${error.message}`);

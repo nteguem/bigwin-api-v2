@@ -56,6 +56,27 @@ const TicketSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'closed', 'draft'],
     default: 'active'
+  },
+
+  // Résultat dérivé des prédictions liées au ticket. Mis à jour par le cron
+  // de correction des tickets, qui s'exécute juste après la correction des
+  // pronos. Règle :
+  //   - won  : tous les pronos décidés sont 'won' (au moins 1 pred décidée)
+  //   - lost : au moins 1 pred 'lost'
+  //   - pending : il reste des preds 'pending' et aucune 'lost'
+  //   - void : seulement des 'void' (cas marginal)
+  // Champ séparé de `status` pour ne pas casser la logique métier existante.
+  result: {
+    type: String,
+    enum: ['pending', 'won', 'lost', 'void'],
+    default: 'pending'
+  },
+
+  // Dernière fois que le résultat a été calculé (utile pour debug + skip
+  // les tickets récemment traités).
+  resultUpdatedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
@@ -70,6 +91,8 @@ TicketSchema.index({ appId: 1, isVisible: 1, date: -1 });
 TicketSchema.index({ date: -1 });
 TicketSchema.index({ category: 1 });
 TicketSchema.index({ status: 1 });
+TicketSchema.index({ appId: 1, result: 1, date: -1 });
+TicketSchema.index({ result: 1 });
 TicketSchema.index({ isVisible: 1, date: -1 });
 
 // Hooks

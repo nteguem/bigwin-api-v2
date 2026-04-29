@@ -7,26 +7,6 @@
 const Prediction = require('../../models/common/Prediction');
 const Ticket = require('../../models/common/Ticket');
 
-// Statut d'un ticket dérivé de l'ensemble de ses prédictions :
-// - won : toutes les preds décidées sont 'won' (au moins 1 décidée)
-// - lost : au moins 1 pred 'lost' parmi les decidées
-// - pending : reste des preds 'pending' et aucune perdue
-// - void : seulement des 'void' (cas marginal — ticket annulé)
-function deriveTicketStatus(preds) {
-  let pending = 0, won = 0, lost = 0, voidCount = 0;
-  for (const p of preds) {
-    if (p.status === 'pending') pending++;
-    else if (p.status === 'won') won++;
-    else if (p.status === 'lost') lost++;
-    else if (p.status === 'void') voidCount++;
-  }
-  if (lost > 0) return 'lost';
-  if (pending > 0) return 'pending';
-  if (won > 0) return 'won';
-  if (voidCount > 0) return 'void';
-  return 'pending';
-}
-
 function buildPeriodRange({ period, startDate, endDate }) {
   if (startDate || endDate) {
     return {
@@ -227,25 +207,34 @@ async function getStatsByCategory(appId, range, limit = 10) {
  * Un ticket gagne uniquement si TOUS ses pronos sont gagnés. Une seule perte
  * fait perdre tout le coupon, même si le pronostiqueur avait raison sur 4/5.
  *
- * On agrège par ticket via $group, puis on dérive le statut côté Mongo
- * directement (logique en SQL aurait été plus lisible mais $group fait l'affaire).
+ * Lit directement le champ `Ticket.result` qui est mis à jour par le cron de
+ * correction des tickets (juste après celui des pronos). Beaucoup plus rapide
+ * que de re-dériver à la volée à partir des prédictions.
  */
 async function getTicketsStats(appId, range) {
-  const result = await Prediction.aggregate([
-    { $match: buildPredictionMatch(appId, range) },
+  const match = {};
+  if (appId && appId !== 'all') match.appId = appId;
+  if (range.start || range.end) {
+    match.createdAt = {};
+    if (range.start) match.createdAt.$gte = range.start;
+    if (range.end) match.createdAt.$lt = range.end;
+  }
+
+  const result = await Ticket.aggregate([
+    { $match: match },
     {
       $group: {
-        _id: '$ticket',
-        statuses: { $push: '$status' },
+        _id: '$result',
+        count: { $sum: 1 },
       },
     },
   ]);
 
   const stats = { total: 0, pending: 0, won: 0, lost: 0, void: 0 };
   for (const row of result) {
-    const status = deriveTicketStatus(row.statuses.map((s) => ({ status: s })));
-    stats[status] = (stats[status] || 0) + 1;
-    stats.total += 1;
+    const key = row._id || 'pending';
+    stats[key] = (stats[key] || 0) + row.count;
+    stats.total += row.count;
   }
   const decided = stats.won + stats.lost;
   stats.successRate = decided > 0 ? (stats.won / decided) * 100 : 0;
@@ -309,13 +298,27 @@ async function getPredictionsAnalytics({ appId, period, startDate, endDate, limi
  * pour repérer une dérive ; 7j n'a pas assez de volume sur certaines apps.
  */
 async function getDashboardMini(appId) {
-  const range = buildPeriodRange({ period: '10d' });
-  const [stats, tickets] = await Promise.all([
-    getGlobalStats(appId, range),
-    getTicketsStats(appId, range),
-  ]);
+  // Essai sur 10j (fenêtre courte = sensibilité aux récentes performances).
+  // Fallback automatique sur 30j si la volumétrie est insuffisante : sur les
+  // apps à faible trafic, 10j peut donner 0 prono décidé et afficher 0% ce
+  // qui est trompeur. On préfère élargir la fenêtre que de mentir.
+  const tryPeriod = async (period) => {
+    const range = buildPeriodRange({ period });
+    const [stats, tickets] = await Promise.all([
+      getGlobalStats(appId, range),
+      getTicketsStats(appId, range),
+    ]);
+    return { period, stats, tickets };
+  };
+
+  let { period, stats, tickets } = await tryPeriod('10d');
+  const decidedPreds = stats.won + stats.lost;
+  if (decidedPreds < 5) {
+    ({ period, stats, tickets } = await tryPeriod('month'));
+  }
+
   return {
-    period: '10d',
+    period, // '10d' ou 'month'
     predictions: {
       successRate: stats.winRate,
       decided: stats.won + stats.lost,
