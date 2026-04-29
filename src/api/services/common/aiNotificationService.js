@@ -20,9 +20,10 @@ const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models
 class AINotificationService {
   constructor() {
     this.apiKey = null;
-    // gemini-2.0-flash = free tier 250 RPD / 10 RPM / 1M TPM, ultra rapide
-    // Alternative : gemini-2.5-flash (un peu meilleure qualité, mêmes limites)
-    this.model = 'gemini-2.0-flash';
+    // gemini-2.5-flash = modèle recommandé pour le free tier en avril 2026
+    // (250 RPD, 10 RPM, 1M TPM). gemini-2.0-flash est encore dispo mais avec
+    // des quotas free tier moins clairs.
+    this.model = 'gemini-2.5-flash';
     this.initializeClient();
   }
 
@@ -87,11 +88,21 @@ class AINotificationService {
     } catch (error) {
       if (error.response) {
         const status = error.response.status;
-        const detail = error.response.data?.error?.message || error.response.data?.message || JSON.stringify(error.response.data);
-        logger.error(`[AINotification] Gemini HTTP ${status}: ${detail}`);
+        // Le vrai message Gemini est dans error.response.data.error.message
+        const errObj = error.response.data?.error || {};
+        const detail = errObj.message || error.response.data?.message || JSON.stringify(error.response.data);
+        const geminiStatus = errObj.status || ''; // ex: RESOURCE_EXHAUSTED
+        // Log full response pour debug en cas de 429 obscur
+        logger.error(`[AINotification] Gemini HTTP ${status} (${geminiStatus}): ${detail}`, {
+          fullError: error.response.data,
+        });
         if (status === 400) throw new AppError(`Requête Gemini invalide : ${detail}`, 400);
-        if (status === 401 || status === 403) throw new AppError('Clé API Gemini invalide ou non autorisée', 500);
-        if (status === 429) throw new AppError('Limite Gemini atteinte (250 req/jour). Réessaye demain ou upgrade.', 429);
+        if (status === 401 || status === 403) throw new AppError(`Clé API Gemini invalide ou non autorisée : ${detail}`, 500);
+        if (status === 404) throw new AppError(`Modèle ${this.model} introuvable : ${detail}`, 500);
+        if (status === 429) {
+          // On expose le message Gemini pour comprendre quel quota a été dépassé
+          throw new AppError(`Quota Gemini dépassé : ${detail}`, 429);
+        }
         throw new AppError(`Erreur Gemini (${status}) : ${detail}`, 500);
       }
       logger.error(`[AINotification] Erreur réseau Gemini: ${error.message}`);
