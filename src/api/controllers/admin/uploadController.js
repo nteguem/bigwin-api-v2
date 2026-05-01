@@ -12,16 +12,25 @@ const catchAsync = require('../../../utils/catchAsync');
 
 /**
  * Construit l'URL publique d'un fichier uploadé.
+ *
  * Préférence : env PUBLIC_API_URL pour que les URLs persistées en BD soient
- * stables même si le déploiement change. À défaut on utilise le host de la
- * requête (utile en dev).
+ * stables même si le déploiement change.
+ *
+ * Sinon on utilise le host de la requête, mais on force `https://` en prod :
+ * derrière un load balancer / proxy qui termine TLS, `req.protocol` peut
+ * renvoyer `http` même si le client a tapé en HTTPS. Comme les URLs sont
+ * persistées en BD et lues par le mobile (qui bloque le clear-text HTTP par
+ * défaut sur Android moderne), on évite le piège en forçant le scheme HTTPS
+ * sauf en local (host = localhost).
  */
 function buildPublicUrl(req, relativePath) {
-  const base =
-    process.env.PUBLIC_API_URL ||
-    `${req.protocol}://${req.get('host')}`;
-  // relativePath est qqch comme "/uploads/gifts/bigwin/xxx.pdf"
-  return `${base.replace(/\/$/, '')}${relativePath}`;
+  if (process.env.PUBLIC_API_URL) {
+    return `${process.env.PUBLIC_API_URL.replace(/\/$/, '')}${relativePath}`;
+  }
+  const host = req.get('host') || '';
+  const isLocal = /^(localhost|127\.0\.0\.1)/.test(host);
+  const scheme = isLocal ? req.protocol : 'https';
+  return `${scheme}://${host}${relativePath}`;
 }
 
 exports.uploadFile = catchAsync(async (req, res, next) => {
