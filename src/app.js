@@ -2,6 +2,7 @@
  * @fileoverview Configuration de l'application Express
  */
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
@@ -53,6 +54,23 @@ app.use((req, res, next) => {
   next();
 });
 
+
+// Fichiers uploadés (cadeaux statiques, previews, etc.).
+// Servis avec helmet par défaut (X-Content-Type-Options, etc.) + un Cache-Control
+// long puisque les noms de fichiers contiennent un timestamp + ID, donc immutables
+// par convention. Mis AVANT /api pour court-circuiter la pile d'auth.
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '..', 'uploads'), {
+    maxAge: '7d',
+    fallthrough: true,
+    setHeaders: (res) => {
+      res.set('Cache-Control', 'public, max-age=604800, immutable');
+      // Empêche le navigateur d'interpréter un fichier inattendu (sécurité).
+      res.set('X-Content-Type-Options', 'nosniff');
+    },
+  })
+);
 
 // Routes de l'API
 app.use('/api', routes);

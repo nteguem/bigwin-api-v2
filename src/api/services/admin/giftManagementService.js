@@ -89,6 +89,7 @@ async function updateGift({ appId, giftId, payload }) {
     'title',
     'description',
     'thumbnail',
+    'previewImageUrl',
     'staticFormat',
     'contentUrl',
     'htmlContent',

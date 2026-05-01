@@ -52,6 +52,7 @@ const adminSubscriptionRoutes = require('./admin/subscriptionRoutes');
 const adminAdminRoutes = require('./admin/adminRoutes');
 const adminGiftRoutes = require('./admin/giftRoutes');
 const adminGiftTierRoutes = require('./admin/giftTierRoutes');
+const adminUploadRoutes = require('./admin/uploadRoutes');
 
 // RBAC management — super_admin only. Mounted first so it has priority.
 router.use('/admin/admins', adminAdminRoutes);
@@ -72,6 +73,9 @@ router.use('/admin/events',          identifyApp, ...ADMIN_PRONO,  adminEventRou
 router.use('/admin/day-off',         identifyApp, ...ADMIN_PRONO,  adminDayOffRoutes);
 
 // Affiliates / commissions / users / affiliate-types / formations — super_admin only
+// Uploads génériques admin (super_admin only — auth dans le subrouter)
+router.use('/admin/uploads',         adminUploadRoutes);
+
 // Gift tiers admin — super_admin only, GLOBAL (pas scopé app)
 router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin'), adminGiftTierRoutes);
 

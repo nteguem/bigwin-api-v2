@@ -101,6 +101,12 @@ const giftSchema = new mongoose.Schema(
 
     thumbnail: { type: String, trim: true },
 
+    // Image preview affichée comme thumbnail dans le catalogue + hero sur
+    // l'écran détail. Toujours une image (PNG/JPG/WebP) — uploadée ou URL externe.
+    // Inspiré des plateformes type Gumroad : on voit toujours un visuel
+    // avant de débloquer.
+    previewImageUrl: { type: String, trim: true },
+
     // ===== Champs static =====
     staticFormat: {
       type: String,
@@ -226,6 +232,7 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     title: pickI18n(obj.title),
     description: pickI18n(obj.description),
     thumbnail: obj.thumbnail || null,
+    previewImageUrl: obj.previewImageUrl || null,
     staticFormat: obj.staticFormat || null,
     outputFormat: obj.outputFormat || null,
     rateLimitPerWeek: obj.rateLimitPerWeek || null,

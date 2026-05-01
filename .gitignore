@@ -19,6 +19,11 @@ logs/
 # Données
 data/
 
+# Fichiers uploadés (cadeaux statiques, previews, etc.)
+# Stockés sur le filesystem, jamais en git pour ne pas polluer le repo
+# avec des binaires lourds. Backup à gérer côté infra (rsync / volume).
+uploads/
+
 # OS
 .DS_Store
 Thumbs.db
