@@ -20,12 +20,21 @@ const creditWalletService = require('./creditWalletService');
 const aiGiftService = require('./aiGiftService');
 
 /**
- * Charge un Gift avec son tier populé. Lève si introuvable ou inactif.
+ * Charge un Gift avec son tier populé.
+ *
+ * @param {Object} opts
+ * @param {String} opts.giftId
+ * @param {String} opts.appId
+ * @param {Boolean} [opts.allowInactive=false] - Si true, on ne filtre PAS sur
+ *   isActive. Utile pour l'accès au contenu d'un cadeau qu'un user a déjà
+ *   débloqué : si l'admin désactive le cadeau plus tard, le user doit
+ *   garder l'accès (sinon on casse son historique).
  */
-async function loadActiveGift({ giftId, appId }) {
-  const gift = await Gift.findOne({ _id: giftId, appId, isActive: true }).populate(
-    'tier'
-  );
+async function loadActiveGift({ giftId, appId, allowInactive = false }) {
+  const filter = { _id: giftId, appId };
+  if (!allowInactive) filter.isActive = true;
+
+  const gift = await Gift.findOne(filter).populate('tier');
   if (!gift) {
     throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
   }
@@ -190,9 +199,14 @@ async function unlockGift({ user, appId, giftId }) {
 /**
  * Récupère le contenu statique d'un cadeau.
  * Free teasers accessibles sans unlock ; sinon unlock requis.
+ *
+ * Si le gift a été désactivé par l'admin APRÈS qu'un user l'ait débloqué,
+ * on autorise quand même l'accès — ne pas casser l'historique du user.
  */
 async function getStaticContent({ user, appId, giftId }) {
-  const gift = await loadActiveGift({ giftId, appId });
+  // On charge d'abord en autorisant inactif. On vérifiera plus bas si l'user
+  // a un unlock — auquel cas l'accès reste valide même si le gift est inactif.
+  const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
 
   if (gift.type !== 'static') {
     throw new AppError(
@@ -205,19 +219,26 @@ async function getStaticContent({ user, appId, giftId }) {
   const cost = Gift.computeEffectiveCost(gift);
   const isFree = gift.isFreeTeaser || cost === 0;
 
-  if (!isFree) {
-    const unlock = await UserGiftUnlock.findOne({
-      appId,
-      user: user._id,
-      gift: gift._id,
-    });
-    if (!unlock) {
-      throw new AppError(
-        "Ce cadeau n'est pas débloqué.",
-        403,
-        ErrorCodes.AUTH_FORBIDDEN || 'FORBIDDEN'
-      );
-    }
+  // Cherche un unlock existant
+  const unlock = await UserGiftUnlock.findOne({
+    appId,
+    user: user._id,
+    gift: gift._id,
+  });
+
+  // Pas de unlock + pas free → accès refusé
+  if (!unlock && !isFree) {
+    throw new AppError(
+      "Ce cadeau n'est pas débloqué.",
+      403,
+      ErrorCodes.AUTH_FORBIDDEN || 'FORBIDDEN'
+    );
+  }
+
+  // Pas de unlock + free + gift INACTIF → on refuse (un free désactivé ne
+  // doit pas être accessible aux nouveaux users)
+  if (!unlock && isFree && !gift.isActive) {
+    throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
   }
 
   return {
@@ -230,9 +251,13 @@ async function getStaticContent({ user, appId, giftId }) {
 
 /**
  * Génère un cadeau IA : check unlock + rate limit + appel Gemini + persistence.
+ *
+ * Comme getStaticContent, on autorise un gift inactif si l'user a déjà un
+ * unlock (ne pas casser l'historique). MAIS on bloque la première génération
+ * si le gift est inactif (pas de nouveau unlock sur cadeau désactivé).
  */
 async function generateAiGift({ user, appId, giftId, formData = {} }) {
-  const gift = await loadActiveGift({ giftId, appId });
+  const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
 
   if (gift.type !== 'ai') {
     throw new AppError(
@@ -249,6 +274,10 @@ async function generateAiGift({ user, appId, giftId, formData = {} }) {
   });
 
   if (!unlock) {
+    // Pas de unlock + gift désactivé → refus d'unlock initial
+    if (!gift.isActive) {
+      throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
+    }
     const cost = Gift.computeEffectiveCost(gift);
     const isFree = gift.isFreeTeaser || cost === 0;
     if (!isFree) {
@@ -313,15 +342,21 @@ async function generateAiGift({ user, appId, giftId, formData = {} }) {
 
 /**
  * Détail d'un unlock pour un user — avec dernière génération si applicable.
+ * Autorise les gifts désactivés si l'user a déjà un unlock (historique).
  */
 async function getMyUnlock({ user, appId, giftId }) {
-  const gift = await loadActiveGift({ giftId, appId });
+  const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
 
   const unlock = await UserGiftUnlock.findOne({
     appId,
     user: user._id,
     gift: gift._id,
   });
+
+  // Si gift inactif ET pas d'unlock → 404 (rien à montrer)
+  if (!gift.isActive && !unlock) {
+    throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
+  }
 
   return { gift, unlock: unlock || null };
 }

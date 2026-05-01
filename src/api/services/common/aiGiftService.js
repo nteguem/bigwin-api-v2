@@ -43,14 +43,31 @@ function sanitizeHtml(raw) {
   else if (clean.startsWith('```')) clean = clean.slice(3);
   if (clean.endsWith('```')) clean = clean.slice(0, -3);
   clean = clean.trim();
-  // Retirer balises script/iframe/object
+  // Retirer balises script/iframe/object + handlers événements
   clean = clean
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
     .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '') // onclick=, onerror= etc.
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
+    // Couvre les 3 styles d'attributs handlers : guillemets doubles, simples,
+    // ET sans guillemets (ex: `<img onerror=alert(1)>` qui passait avant).
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '');
   return clean;
+}
+
+/**
+ * Échappe les caractères spéciaux HTML (pour insertion safe dans `<title>`,
+ * attributs, etc.). Pas une vraie sanitization — juste un escape contextuel.
+ */
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -59,12 +76,15 @@ function sanitizeHtml(raw) {
  */
 function wrapHtmlOutput(htmlBody, { title = 'Mon cadeau', primaryColor = '#1E2ACC' } = {}) {
   // Enveloppe minimaliste, mobile-friendly, light theme.
+  // `title` est échappé : il vient de gift.title.fr (saisi par admin) →
+  // si l'admin écrit `<script>alert(1)</script>` on l'affiche en texte, pas exécuté.
+  const safeTitle = escapeHtml(title);
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-<title>${title}</title>
+<title>${safeTitle}</title>
 <style>
   * { box-sizing: border-box; }
   body {

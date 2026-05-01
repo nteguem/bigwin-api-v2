@@ -18,9 +18,12 @@ const giftTierSchema = new mongoose.Schema(
   {
     // Identifiant stable, lisible. Sert pour le seed, l'export, le code mobile.
     // Immutable une fois créé (l'admin ne devrait jamais avoir à le changer).
+    // `immutable: true` empêche toute modification au niveau Mongoose, en plus
+    // de la garde applicative dans giftTierManagementService.updateTier.
     key: {
       type: String,
       required: [true, 'key requis'],
+      immutable: true,
       trim: true,
       lowercase: true,
       unique: true,

@@ -39,6 +39,24 @@ const errorHandler = (err, req, res, next) => {
     );
   }
 
+  // Multer errors (uploads) : message clair côté client au lieu d'un 500.
+  if (err.name === 'MulterError') {
+    const map = {
+      LIMIT_FILE_SIZE: 'Fichier trop lourd. Vérifie la limite pour ce type de fichier.',
+      LIMIT_FILE_COUNT: 'Trop de fichiers envoyés.',
+      LIMIT_UNEXPECTED_FILE: `Champ de fichier inattendu : ${err.field}`,
+      LIMIT_PART_COUNT: 'Formulaire trop volumineux.',
+      LIMIT_FIELD_KEY: 'Nom de champ trop long.',
+      LIMIT_FIELD_VALUE: 'Valeur de champ trop longue.',
+      LIMIT_FIELD_COUNT: 'Trop de champs dans le formulaire.',
+    };
+    error = new AppError(
+      map[err.code] || `Erreur upload : ${err.message}`,
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    );
+  }
+
   res.status(error.statusCode || 500).json({
     success: false,
     error: {

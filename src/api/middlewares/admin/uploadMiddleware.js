@@ -59,14 +59,30 @@ const PURPOSE_TO_SUBFOLDER = {
   'gift-content-image': 'gifts',
 };
 
+// Garde anti path-traversal : `appId` est composé dans le chemin du dossier
+// d'upload. On le restreint à un format strict (alphanum + underscore + tiret,
+// max 40 chars) pour empêcher des valeurs comme `../../../tmp/foo` qui
+// sortiraient de UPLOADS_ROOT via path.join.
+const APPID_SAFE = /^[a-z0-9_-]{1,40}$/;
+
 // ===== Storage : disk =====
 const storage = multer.diskStorage({
   destination(req, file, cb) {
     const purpose = req.body?.purpose || req.query?.purpose;
-    const appId = (req.body?.appId || req.query?.appId || 'shared').toLowerCase();
+    const rawAppId = (req.body?.appId || req.query?.appId || 'shared').toLowerCase();
+
+    if (!APPID_SAFE.test(rawAppId)) {
+      return cb(new AppError(`appId invalide : "${rawAppId}"`, 400));
+    }
 
     const subfolder = PURPOSE_TO_SUBFOLDER[purpose] || 'misc';
-    const dir = path.join(UPLOADS_ROOT, subfolder, appId);
+    const dir = path.resolve(path.join(UPLOADS_ROOT, subfolder, rawAppId));
+
+    // Defense in depth : le dossier final DOIT être sous UPLOADS_ROOT.
+    const rootResolved = path.resolve(UPLOADS_ROOT);
+    if (!dir.startsWith(rootResolved + path.sep) && dir !== rootResolved) {
+      return cb(new AppError('Chemin de destination invalide', 400));
+    }
 
     fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
