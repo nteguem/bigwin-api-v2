@@ -1,0 +1,160 @@
+// src/api/controllers/user/giftController.js
+//
+// Endpoints user-facing pour le système de cadeaux.
+
+const giftCatalogService = require('../../services/common/giftCatalogService');
+const creditWalletService = require('../../services/common/creditWalletService');
+const catchAsync = require('../../../utils/catchAsync');
+
+/**
+ * GET /user/gifts
+ * Liste le catalogue + statut user pour chaque cadeau.
+ */
+exports.getCatalog = catchAsync(async (req, res) => {
+  const { lang = 'fr' } = req.query;
+  const result = await giftCatalogService.listCatalog({
+    user: req.user,
+    appId: req.appId,
+    lang,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
+ * GET /user/gifts/me/balance
+ * Solde du wallet "cadeaux".
+ */
+exports.getBalance = catchAsync(async (req, res) => {
+  const balance = await creditWalletService.getBalance(req.user._id, req.appId);
+
+  res.status(200).json({
+    success: true,
+    data: { balance },
+  });
+});
+
+/**
+ * POST /user/gifts/:id/unlock
+ * Débloque un cadeau (débit crédits).
+ */
+exports.unlock = catchAsync(async (req, res) => {
+  const result = await giftCatalogService.unlockGift({
+    user: req.user,
+    appId: req.appId,
+    giftId: req.params.id,
+  });
+
+  const { lang = 'fr' } = req.query;
+  const balance = await creditWalletService.getBalance(req.user._id, req.appId);
+
+  res.status(200).json({
+    success: true,
+    message: result.alreadyUnlocked
+      ? 'Cadeau déjà débloqué'
+      : 'Cadeau débloqué avec succès',
+    data: {
+      gift: result.gift.formatForLanguage(lang),
+      unlock: {
+        unlockedAt: result.unlock.unlockedAt,
+        costPaid: result.unlock.costPaid,
+      },
+      balance,
+      alreadyUnlocked: result.alreadyUnlocked,
+    },
+  });
+});
+
+/**
+ * GET /user/gifts/:id/content
+ * Récupère le contenu statique d'un cadeau débloqué.
+ */
+exports.getContent = catchAsync(async (req, res) => {
+  const content = await giftCatalogService.getStaticContent({
+    user: req.user,
+    appId: req.appId,
+    giftId: req.params.id,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: content,
+  });
+});
+
+/**
+ * POST /user/gifts/:id/generate
+ * Génère le contenu IA d'un cadeau (avec rate limit).
+ */
+exports.generate = catchAsync(async (req, res) => {
+  const formData = req.body?.formData || {};
+  const result = await giftCatalogService.generateAiGift({
+    user: req.user,
+    appId: req.appId,
+    giftId: req.params.id,
+    formData,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Cadeau généré avec succès',
+    data: {
+      generation: result.generation,
+    },
+  });
+});
+
+/**
+ * GET /user/gifts/:id/me
+ * Détail de l'unlock du user pour ce cadeau (incl. générations passées).
+ */
+exports.getMyUnlock = catchAsync(async (req, res) => {
+  const result = await giftCatalogService.getMyUnlock({
+    user: req.user,
+    appId: req.appId,
+    giftId: req.params.id,
+  });
+
+  const { lang = 'fr' } = req.query;
+  res.status(200).json({
+    success: true,
+    data: {
+      gift: result.gift.formatForLanguage(lang),
+      unlock: result.unlock
+        ? {
+            unlockedAt: result.unlock.unlockedAt,
+            costPaid: result.unlock.costPaid,
+            generations: (result.unlock.generations || []).map((g) => ({
+              _id: g._id,
+              outputFormat: g.outputFormat,
+              generatedAt: g.generatedAt,
+              // On ne retourne PAS le `output` ici (peut être lourd) — il
+              // est récupéré via une route dédiée si besoin.
+            })),
+            generationsCount: (result.unlock.generations || []).length,
+            // dernière génération (le mobile l'affiche par défaut)
+            lastGeneration:
+              (result.unlock.generations || []).length > 0
+                ? {
+                    output:
+                      result.unlock.generations[
+                        result.unlock.generations.length - 1
+                      ].output,
+                    outputFormat:
+                      result.unlock.generations[
+                        result.unlock.generations.length - 1
+                      ].outputFormat,
+                    generatedAt:
+                      result.unlock.generations[
+                        result.unlock.generations.length - 1
+                      ].generatedAt,
+                  }
+                : null,
+          }
+        : null,
+    },
+  });
+});

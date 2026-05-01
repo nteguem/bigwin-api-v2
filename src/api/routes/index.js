@@ -50,6 +50,8 @@ const adminUserRoutes = require('./admin/userRoutes');
 const adminDayOffRoutes = require('./admin/dayOffRoutes');
 const adminSubscriptionRoutes = require('./admin/subscriptionRoutes');
 const adminAdminRoutes = require('./admin/adminRoutes');
+const adminGiftRoutes = require('./admin/giftRoutes');
+const adminGiftTierRoutes = require('./admin/giftTierRoutes');
 
 // RBAC management — super_admin only. Mounted first so it has priority.
 router.use('/admin/admins', adminAdminRoutes);
@@ -70,6 +72,12 @@ router.use('/admin/events',          identifyApp, ...ADMIN_PRONO,  adminEventRou
 router.use('/admin/day-off',         identifyApp, ...ADMIN_PRONO,  adminDayOffRoutes);
 
 // Affiliates / commissions / users / affiliate-types / formations — super_admin only
+// Gift tiers admin — super_admin only, GLOBAL (pas scopé app)
+router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin'), adminGiftTierRoutes);
+
+// Gifts admin — super_admin only, scoped à l'app
+router.use('/admin/gifts',           identifyApp, ...ADMIN_SUPER,  adminGiftRoutes);
+
 router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliateRoutes);
 router.use('/admin/commissions',     identifyApp, ...ADMIN_SUPER,  adminCommissionRoutes);
 router.use('/admin/affiliate-types', identifyApp, ...ADMIN_SUPER,  adminAffiliateTypeRoutes);
@@ -121,6 +129,7 @@ const googlePlayWebhook = require('./user/googlePlayWebhook');
 const packageRoutes = require('./user/packageRoutes');
 const korapayRoutes = require('./user/korapayRoutes');
 const fedapayRoutes = require('./user/fedapayRoutes');
+const userGiftRoutes = require('./user/giftRoutes');
 
 
 // ===== ROUTES DE PAIEMENT =====
@@ -136,6 +145,7 @@ router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
 router.use('/user/google-play', identifyApp, googlePlayRoutes);
 router.use('/user/packages', identifyApp, packageRoutes);
+router.use('/user/gifts', identifyApp, userGiftRoutes);
 
 // Route générique /user EN DERNIER (sinon elle capture toutes les requêtes /user/*)
 router.use('/user', identifyApp, userSubscriptionRoutes);

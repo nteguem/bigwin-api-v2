@@ -1,6 +1,7 @@
 // src/api/controllers/admin/subscriptionController.js
 
 const subscriptionManagementService = require('../../services/admin/subscriptionManagementService');
+const giftManagementService = require('../../services/admin/giftManagementService');
 const catchAsync = require('../../../utils/catchAsync');
 const { AppError } = require('../../../utils/AppError');
 
@@ -84,5 +85,25 @@ exports.getSubscriptionStats = catchAsync(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: { stats }
+  });
+});
+
+/**
+ * Détail des cadeaux liés à une subscription
+ * GET /api/admin/subscriptions/:id/gifts
+ *
+ * Renvoie : crédits accordés par cette vente, solde wallet courant, et tous
+ * les unlocks de l'user pour cette app (avec stats génération IA).
+ */
+exports.getSubscriptionGifts = catchAsync(async (req, res, next) => {
+  const appId = req.appId;
+  const detail = await giftManagementService.getSubscriptionGiftsDetail({
+    appId,
+    subscriptionId: req.params.id,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: detail,
   });
 });

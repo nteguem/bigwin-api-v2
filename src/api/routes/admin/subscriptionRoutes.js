@@ -21,4 +21,7 @@ router.route('/')
 router.route('/stats')
   .get(subscriptionController.getSubscriptionStats);    // GET /api/admin/subscriptions/stats
 
+router.route('/:id/gifts')
+  .get(subscriptionController.getSubscriptionGifts);    // GET /api/admin/subscriptions/:id/gifts
+
 module.exports = router;

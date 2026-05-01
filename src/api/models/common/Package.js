@@ -129,7 +129,16 @@ const packageSchema = new mongoose.Schema({
     type: mongoose.Schema.ObjectId,
     ref: 'Formation'
   },
-  
+
+  // Nombre de "cadeaux" (crédits) accordés à l'utilisateur lors d'un achat
+  // de ce package. Mappé en mobile : "Tu débloques X cadeaux dans le coffre."
+  // 0 = aucun cadeau.
+  unlockCredits: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
   isActive: {
     type: Boolean,
     default: true
@@ -243,6 +252,7 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
     economy: packageObj.economy instanceof Map ? Object.fromEntries(packageObj.economy) : packageObj.economy,
     formation: formation,
     formationId: typeof packageObj.formationId === 'object' ? packageObj.formationId._id : packageObj.formationId,
+    unlockCredits: packageObj.unlockCredits || 0,
     isActive: packageObj.isActive,
     createdAt: packageObj.createdAt,
     // ===== AJOUT DES CHAMPS GOOGLE PLAY =====
