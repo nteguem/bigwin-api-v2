@@ -77,7 +77,11 @@ async function correctOnePrediction(prediction) {
   }
 
   // 6) Persister
-  const newStatus = correction.correction.expressionResult ? 'won' : 'lost';
+  // ⚠️ BUG CORRIGÉ : Corrector renvoie `result` (booléen vrai/faux de
+  // l'expression évaluée), PAS `expressionResult`. Avant ce fix, la valeur
+  // était toujours `undefined` → toutes les prédictions étaient persistées
+  // comme `'lost'`, peu importe le score réel.
+  const newStatus = correction.correction.result ? 'won' : 'lost';
   prediction.status = newStatus;
   prediction.correctionAttempts = (prediction.correctionAttempts || 0) + 1;
   prediction.correctionMetadata = {
