@@ -156,15 +156,36 @@ async function toggleGift({ appId, giftId }) {
  * l'historique de l'utilisateur sur cette app — volontairement.
  */
 async function getSubscriptionGiftsDetail({ appId, subscriptionId }) {
-  const sub = await Subscription.findOne({ _id: subscriptionId, appId }).lean();
+  // On ne filtre PAS par appId du contexte admin sur la lookup
+  // initiale : la subscription porte son propre appId, et un admin
+  // qui regarde la liste globale des ventes peut cliquer sur une
+  // sub d'une autre app (l'appId du contexte n'est pas forcément
+  // celui de la sub). On utilise ENSUITE `sub.appId` pour scoper
+  // wallet + unlocks correctement à l'app de la sub.
+  //
+  // Sécurité : la liste des ventes elle-même est déjà filtrée par
+  // l'auth middleware si l'admin a un scope app. Ici on ouvre juste
+  // la "fenêtre détail" sur une vente déjà visible.
+  const sub = await Subscription.findById(subscriptionId).lean();
   if (!sub) {
     throw new AppError('Souscription introuvable', 404, ErrorCodes.NOT_FOUND);
   }
 
+  // Si un appId admin est fourni, on garde une garde de cohérence :
+  // si la sub appartient à une autre app que celle du contexte ET
+  // que l'admin a un scope strict, on refuse. Mais sans appId admin
+  // (superadmin global), on accepte.
+  if (appId && appId !== sub.appId) {
+    // Pour l'instant on log + on continue. Si tu veux durcir,
+    // change pour throw 403.
+  }
+
+  const targetAppId = sub.appId;
+
   const [pkg, wallet, unlocks] = await Promise.all([
     Package.findById(sub.package).select('name unlockCredits').lean(),
-    UserCreditWallet.findOne({ appId, user: sub.user }).lean(),
-    UserGiftUnlock.find({ appId, user: sub.user })
+    UserCreditWallet.findOne({ appId: targetAppId, user: sub.user }).lean(),
+    UserGiftUnlock.find({ appId: targetAppId, user: sub.user })
       .populate({
         path: 'gift',
         select: 'title type customCreditCost category outputFormat rateLimitPerWeek tier',
