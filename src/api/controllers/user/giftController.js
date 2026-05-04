@@ -4,6 +4,7 @@
 
 const giftCatalogService = require('../../services/common/giftCatalogService');
 const creditWalletService = require('../../services/common/creditWalletService');
+const giftReviewService = require('../../services/common/giftReviewService');
 const catchAsync = require('../../../utils/catchAsync');
 
 /**
@@ -11,11 +12,12 @@ const catchAsync = require('../../../utils/catchAsync');
  * Liste le catalogue + statut user pour chaque cadeau.
  */
 exports.getCatalog = catchAsync(async (req, res) => {
-  const { lang = 'fr' } = req.query;
+  const { lang = 'fr', country = null } = req.query;
   const result = await giftCatalogService.listCatalog({
     user: req.user,
     appId: req.appId,
     lang,
+    country: country || null,
   });
 
   res.status(200).json({
@@ -73,10 +75,12 @@ exports.unlock = catchAsync(async (req, res) => {
  * Récupère le contenu statique d'un cadeau débloqué.
  */
 exports.getContent = catchAsync(async (req, res) => {
+  const { lang = 'fr' } = req.query;
   const content = await giftCatalogService.getStaticContent({
     user: req.user,
     appId: req.appId,
     giftId: req.params.id,
+    lang,
   });
 
   res.status(200).json({
@@ -157,4 +161,88 @@ exports.getMyUnlock = catchAsync(async (req, res) => {
         : null,
     },
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Avis utilisateurs (reviews)
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /user/gifts/:id/reviews
+ * Crée OU met à jour l'avis du user sur ce cadeau.
+ * Body : { rating: 1-5, comment?: string }
+ */
+exports.submitReview = catchAsync(async (req, res) => {
+  const { rating, comment } = req.body || {};
+  const review = await giftReviewService.submitReview({
+    user: req.user,
+    appId: req.appId,
+    giftId: req.params.id,
+    rating,
+    comment,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: {
+      _id: review._id,
+      rating: review.rating,
+      comment: review.comment || '',
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+    },
+  });
+});
+
+/**
+ * GET /user/gifts/:id/reviews?limit=20&offset=0
+ * Liste paginée des avis (du plus récent).
+ */
+exports.listReviews = catchAsync(async (req, res) => {
+  const { limit = 20, offset = 0 } = req.query;
+  const result = await giftReviewService.listReviews({
+    giftId: req.params.id,
+    limit,
+    offset,
+  });
+
+  res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * GET /user/gifts/:id/reviews/aggregate
+ * Renvoie { average, total, distribution: {1..5} }.
+ */
+exports.getReviewsAggregate = catchAsync(async (req, res) => {
+  const aggregate = await giftReviewService.getAggregate({
+    giftId: req.params.id,
+  });
+
+  res.status(200).json({ success: true, data: aggregate });
+});
+
+/**
+ * GET /user/gifts/:id/reviews/me
+ * L'avis du user courant sur ce cadeau (null si aucun).
+ */
+exports.getMyReview = catchAsync(async (req, res) => {
+  const review = await giftReviewService.getMyReview({
+    user: req.user,
+    giftId: req.params.id,
+  });
+
+  res.status(200).json({ success: true, data: review });
+});
+
+/**
+ * DELETE /user/gifts/:id/reviews/me
+ * Supprime l'avis du user courant. Idempotent.
+ */
+exports.deleteMyReview = catchAsync(async (req, res) => {
+  const result = await giftReviewService.deleteMyReview({
+    user: req.user,
+    giftId: req.params.id,
+  });
+
+  res.status(200).json({ success: true, data: result });
 });

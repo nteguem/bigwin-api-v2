@@ -274,8 +274,15 @@ async function correctAndNotifyTicket(ticketId, appId) {
 
   const result = updatedTicket.result || 'pending';
 
-  // Décision : on n'envoie la notif que si le ticket est réellement gagné
-  if (result !== 'won') {
+  // Décision selon le résultat consolidé :
+  //   - 'won'     → notifier (sécurité OK)
+  //   - 'lost'    → bloquer (sécurité : éviter de prévenir d'un faux gagnant)
+  //   - 'pending' → notifier QUAND MÊME (l'API tiers n'a pas encore les scores
+  //                 mais l'admin sait que le ticket a gagné — le cron 23:57
+  //                 confirmera plus tard, et on évite de bloquer une notif
+  //                 légitime juste parce que le cache des scores est en retard)
+  //   - 'void'    → bloquer (statut explicitement annulé)
+  if (result === 'lost' || result === 'void') {
     return {
       success: false,
       ticketResult: result,
@@ -283,24 +290,30 @@ async function correctAndNotifyTicket(ticketId, appId) {
       skippedReasons: skippedReasons.slice(0, 5),
       message: result === 'lost'
         ? 'Ticket perdu — notification non envoyée (sécurité)'
-        : result === 'pending'
-          ? 'Certains matchs ne sont pas terminés — notification non envoyée'
-          : `Ticket en statut ${result} — notification non envoyée`,
+        : `Ticket annulé — notification non envoyée`,
     };
   }
 
-  // Ticket gagné → on notifie
+  // Ticket gagné OU pending (API pas à jour) → on notifie
   const payload = buildTicketSuccessNotification(updatedTicket, updatedPredictions);
   const notif = await notificationService.sendToAll(appId, payload);
 
-  logger.info(`[correctAndNotifyTicket] Ticket ${ticketId} (${appId}) corrigé+notifié`);
+  const isPending = result === 'pending';
+  logger.info(
+    `[correctAndNotifyTicket] Ticket ${ticketId} (${appId}) ${
+      isPending ? 'PENDING (API pas à jour) — notifié quand même' : 'corrigé+notifié'
+    }`
+  );
 
   return {
     success: true,
-    ticketResult: 'won',
+    ticketResult: result,
     correction: correctionStats,
+    skippedReasons: isPending ? skippedReasons.slice(0, 5) : undefined,
     notification: { id: notif.id, recipients: notif.recipients },
-    message: 'Ticket gagné — notification envoyée',
+    message: isPending
+      ? 'Notification envoyée — scores en attente de correction (cron auto plus tard)'
+      : 'Ticket gagné — notification envoyée',
   };
 }
 
@@ -335,31 +348,41 @@ async function correctAndNotifyPrediction(predictionId, appId) {
   // Re-fetch pour avoir status à jour
   const updated = await Prediction.findById(predictionId).lean();
 
-  if (updated.status !== 'won') {
+  // Même logique que pour les tickets :
+  //   - won     → notifier
+  //   - lost    → bloquer (sécurité)
+  //   - void    → bloquer (annulé)
+  //   - pending → notifier quand même (API pas à jour)
+  if (updated.status === 'lost' || updated.status === 'void') {
     return {
       success: false,
       predictionStatus: updated.status,
       correction: correctionResult,
       message: updated.status === 'lost'
         ? 'Prédiction perdue — notification non envoyée (sécurité)'
-        : updated.status === 'void'
-          ? 'Prédiction annulée — notification non envoyée'
-          : 'Match non terminé — notification non envoyée',
+        : 'Prédiction annulée — notification non envoyée',
     };
   }
 
-  // Prédiction gagnée → notifier
+  // won OU pending (API pas à jour) → on notifie
   const payload = buildPredictionSuccessNotification(updated);
   const notif = await notificationService.sendToAll(appId, payload);
 
-  logger.info(`[correctAndNotifyPrediction] Prédiction ${predictionId} (${appId}) corrigée+notifiée`);
+  const isPending = updated.status === 'pending';
+  logger.info(
+    `[correctAndNotifyPrediction] Prédiction ${predictionId} (${appId}) ${
+      isPending ? 'PENDING (API pas à jour) — notifiée quand même' : 'corrigée+notifiée'
+    }`
+  );
 
   return {
     success: true,
-    predictionStatus: 'won',
+    predictionStatus: updated.status,
     correction: correctionResult,
     notification: { id: notif.id, recipients: notif.recipients },
-    message: 'Prédiction gagnée — notification envoyée',
+    message: isPending
+      ? 'Notification envoyée — score en attente de correction (cron auto plus tard)'
+      : 'Prédiction gagnée — notification envoyée',
   };
 }
 

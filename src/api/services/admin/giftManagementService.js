@@ -101,6 +101,13 @@ async function updateGift({ appId, giftId, payload }) {
     'isFreeTeaser',
     'isActive',
     'sortOrder',
+    // Métadonnées page détail (mobile rich card)
+    'tags',
+    'learningPoints',
+    'pages',
+    'durationMinutes',
+    // Override pays — visible uniquement pour ce code ISO (ex: 'CM').
+    'country',
   ];
   for (const key of allowed) {
     if (payload[key] !== undefined) {

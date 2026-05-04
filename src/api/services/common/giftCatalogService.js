@@ -48,9 +48,27 @@ async function loadActiveGift({ giftId, appId, allowInactive = false }) {
  *   - available : pas encore débloqué + solde suffisant
  *   - locked    : pas encore débloqué + solde insuffisant
  */
-async function listCatalog({ user, appId, lang = 'fr' }) {
+async function listCatalog({ user, appId, lang = 'fr', country = null }) {
+  // Filtre country : on combine les cadeaux universels (country=null/absent)
+  // avec ceux spécifiques au pays demandé. Si pas de country, on ne montre
+  // que les universels (les country-overrides resteraient cachés).
+  const countryFilter = country
+    ? {
+        $or: [
+          { country: { $in: [null, ''] } },
+          { country: { $exists: false } },
+          { country: country.toUpperCase() },
+        ],
+      }
+    : {
+        $or: [
+          { country: { $in: [null, ''] } },
+          { country: { $exists: false } },
+        ],
+      };
+
   const [gifts, unlocks, balance] = await Promise.all([
-    Gift.find({ appId, isActive: true })
+    Gift.find({ appId, isActive: true, ...countryFilter })
       .populate('tier')
       .sort({ sortOrder: 1, createdAt: 1 }),
     UserGiftUnlock.find({ appId, user: user._id })
@@ -203,7 +221,20 @@ async function unlockGift({ user, appId, giftId }) {
  * Si le gift a été désactivé par l'admin APRÈS qu'un user l'ait débloqué,
  * on autorise quand même l'accès — ne pas casser l'historique du user.
  */
-async function getStaticContent({ user, appId, giftId }) {
+/// Helper : résout un champ media (string legacy OU {fr, en}) selon
+/// la langue demandée. Identique au pickLocalizedMedia côté model
+/// mais accessible dans le service où on a juste les valeurs brutes.
+function pickLocalizedMedia(field, lang = 'fr') {
+  if (field == null || field === '') return null;
+  if (typeof field === 'string') return field;
+  if (typeof field === 'object') {
+    const v = field[lang] || field.fr || field.en || null;
+    return (typeof v === 'string' && v.length > 0) ? v : null;
+  }
+  return null;
+}
+
+async function getStaticContent({ user, appId, giftId, lang = 'fr' }) {
   // On charge d'abord en autorisant inactif. On vérifiera plus bas si l'user
   // a un unlock — auquel cas l'accès reste valide même si le gift est inactif.
   const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
@@ -244,8 +275,8 @@ async function getStaticContent({ user, appId, giftId }) {
   return {
     type: 'static',
     staticFormat: gift.staticFormat,
-    contentUrl: gift.contentUrl || null,
-    htmlContent: gift.htmlContent || null,
+    contentUrl: pickLocalizedMedia(gift.contentUrl, lang),
+    htmlContent: pickLocalizedMedia(gift.htmlContent, lang),
   };
 }
 

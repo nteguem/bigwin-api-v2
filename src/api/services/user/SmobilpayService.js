@@ -184,13 +184,23 @@ function cleanMerchantName(merchantName, countryCode) {
 }
 
 /**
- * Formater les services pour la réponse
+ * Formater les services pour la réponse.
+ * Expose explicitement `serviceNumberRegex` quel que soit le nom de la prop
+ * envoyée par Smobilpay → le mobile peut pré-valider le numéro côté UI
+ * et n'afficher que les opérateurs compatibles.
  */
 function formatServicesResponse(services, countryCode) {
   return services.map(service => ({
     ...service,
     merchant: cleanMerchantName(service.merchant, countryCode),
-    originalMerchant: service.merchant
+    originalMerchant: service.merchant,
+    serviceNumberRegex:
+      service.serviceNumberRegex ||
+      service.serviceNumberPattern ||
+      service.servicenumberPattern ||
+      service.servicenumberRegex ||
+      service.regex ||
+      null,
   }));
 }
 
@@ -384,6 +394,38 @@ async function initiatePayment(appId, app, userId, packageId, serviceId, custome
 
     if (!service) {
       throw new AppError(`Service ${serviceId} non trouvé`, 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Pré-validation du format du numéro contre le regex du service.
+    // Évite que l'API Smobilpay renvoie un message technique imbuvable
+    // ("does not comply to regex requirement") qu'on ne peut pas traduire.
+    // Le regex peut être stocké sous différents noms selon les versions API.
+    const regexStr =
+      service.serviceNumberRegex ||
+      service.serviceNumberPattern ||
+      service.servicenumberPattern ||
+      service.servicenumberRegex ||
+      service.regex ||
+      null;
+
+    if (regexStr) {
+      const phoneClean = String(customerData.phoneNumber || '').replace(/\s/g, '');
+      let re;
+      try {
+        re = new RegExp(regexStr);
+      } catch (e) {
+        logger.warn('initiate: regex service invalide, validation skip', {
+          ...ctx, regex: regexStr, error: e.message,
+        });
+      }
+      if (re && !re.test(phoneClean)) {
+        const opName = service.name || service.serviceName || 'cet opérateur';
+        throw new AppError(
+          `Le numéro ${phoneClean} n'est pas compatible avec ${opName}. Vérifie le préfixe ou choisis l'opérateur correspondant à ton numéro.`,
+          400,
+          ErrorCodes.VALIDATION_ERROR
+        );
+      }
     }
 
     const packageDoc = await Package.findOne({ _id: packageId, appId });

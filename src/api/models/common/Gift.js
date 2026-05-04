@@ -99,21 +99,43 @@ const giftSchema = new mongoose.Schema(
       en: { type: String, required: true, trim: true },
     },
 
-    thumbnail: { type: String, trim: true },
+    // ===== Country override =====
+    //
+    // Optionnel — code pays ISO-2 (ex: 'CM', 'CI', 'BJ'…). Si présent,
+    // ce cadeau N'EST visible QUE pour les users de ce pays. Si null,
+    // le cadeau est universel (visible partout dans la langue
+    // applicable). Permet d'avoir des contenus localisés par marché
+    // sans dupliquer toute la BD.
+    //
+    // Logique côté listCatalog :
+    //   country=CM → renvoie [country=null] ∪ [country=CM]
+    //   country=CI → renvoie [country=null] ∪ [country=CI]
+    //   country=null → renvoie [country=null] uniquement (universels)
+    country: {
+      type: String,
+      uppercase: true,
+      trim: true,
+      maxlength: 2,
+      default: null,
+    },
 
-    // Image preview affichée comme thumbnail dans le catalogue + hero sur
-    // l'écran détail. Toujours une image (PNG/JPG/WebP) — uploadée ou URL externe.
-    // Inspiré des plateformes type Gumroad : on voit toujours un visuel
-    // avant de débloquer.
-    previewImageUrl: { type: String, trim: true },
+    // ===== Médias localisables =====
+    //
+    // Stockés en `Mixed` pour accepter :
+    //   - une string simple (legacy, non-localisée) → utilisée pour
+    //     toutes les langues
+    //   - un objet { fr, en } → URL différente par langue
+    // `formatForLanguage` résout au runtime selon le `lang` demandé.
+    thumbnail: { type: mongoose.Schema.Types.Mixed, default: null },
+    previewImageUrl: { type: mongoose.Schema.Types.Mixed, default: null },
 
     // ===== Champs static =====
     staticFormat: {
       type: String,
       enum: ['pdf', 'video', 'audio', 'html', 'zip', 'image'],
     },
-    contentUrl: { type: String, trim: true },
-    htmlContent: { type: String },
+    contentUrl: { type: mongoose.Schema.Types.Mixed, default: null },
+    htmlContent: { type: mongoose.Schema.Types.Mixed, default: null },
 
     // ===== Champs ai =====
     formSchema: [formFieldSchema],
@@ -132,6 +154,42 @@ const giftSchema = new mongoose.Schema(
       type: String,
       default: 'gemini-2.5-flash-lite',
     },
+
+    // ===== Métadonnées d'enrichissement (page de détail mobile) =====
+    //
+    // Ces champs alimentent l'écran détail "rich" inspiré des stores
+    // d'apps/livres : tags pour catégoriser, learning points en bullets,
+    // métriques pages/temps de lecture pour donner une idée du contenu.
+    // Tous OPTIONNELS — un cadeau peut être affiché sans mais ses
+    // sections détail seront masquées si vides.
+
+    /// Tags courts en mode catégorie (ex: ["Pari sportif", "Débutant"]).
+    /// Localisés FR/EN. Affichés en chips sous la description du détail.
+    tags: [
+      {
+        fr: { type: String, trim: true },
+        en: { type: String, trim: true },
+        _id: false,
+      },
+    ],
+
+    /// "Ce que tu vas apprendre" — bullets list des points clés du
+    /// contenu. Localisés. Skippés si vide à l'affichage.
+    learningPoints: [
+      {
+        fr: { type: String, trim: true },
+        en: { type: String, trim: true },
+        _id: false,
+      },
+    ],
+
+    /// Pour les contenus paginables (PDF, Article) — nombre de pages.
+    /// Affiché dans la grid de stats du détail. null si non applicable.
+    pages: { type: Number, min: 0, default: null },
+
+    /// Estimation du temps de lecture/écoute/visionnage en minutes.
+    /// Affiché dans la grid de stats. null si non applicable.
+    durationMinutes: { type: Number, min: 0, default: null },
 
     // Marketing : cadeau accessible aux non-payants comme appât/teaser.
     isFreeTeaser: { type: Boolean, default: false },
@@ -207,6 +265,20 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
   const obj = this.toObject();
   const pickI18n = (f) => (f ? f[lang] || f.fr || '' : '');
 
+  /// Résout un champ "media" qui peut être stocké soit comme :
+  ///   - string legacy → utilisé pour toutes les langues
+  ///   - objet { fr, en } → la bonne URL par langue, fallback sur fr
+  /// Renvoie une string ou null.
+  const pickLocalizedMedia = (field) => {
+    if (field == null || field === '') return null;
+    if (typeof field === 'string') return field;
+    if (typeof field === 'object') {
+      const v = field[lang] || field.fr || field.en || null;
+      return (typeof v === 'string' && v.length > 0) ? v : null;
+    }
+    return null;
+  };
+
   // Sérialisation propre du tier (populé ou non)
   let tierSerialized = null;
   if (obj.tier && typeof obj.tier === 'object' && obj.tier.key) {
@@ -221,6 +293,13 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     };
   }
 
+  // Localisation des collections de strings i18n (tags, learningPoints).
+  // On filtre les entrées vides pour garder un payload propre.
+  const localizeI18nList = (arr) =>
+    (arr || [])
+      .map((it) => pickI18n(it))
+      .filter((s) => typeof s === 'string' && s.length > 0);
+
   return {
     _id: obj._id,
     appId: obj.appId,
@@ -231,14 +310,26 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     category: obj.category,
     title: pickI18n(obj.title),
     description: pickI18n(obj.description),
-    thumbnail: obj.thumbnail || null,
-    previewImageUrl: obj.previewImageUrl || null,
+    thumbnail: pickLocalizedMedia(obj.thumbnail),
+    previewImageUrl: pickLocalizedMedia(obj.previewImageUrl),
+    contentUrl: pickLocalizedMedia(obj.contentUrl),
+    htmlContent: pickLocalizedMedia(obj.htmlContent),
+    country: obj.country || null,
     staticFormat: obj.staticFormat || null,
     outputFormat: obj.outputFormat || null,
     rateLimitPerWeek: obj.rateLimitPerWeek || null,
+
+    // Métadonnées d'enrichissement page détail
+    tags: localizeI18nList(obj.tags),
+    learningPoints: localizeI18nList(obj.learningPoints),
+    pages: obj.pages ?? null,
+    durationMinutes: obj.durationMinutes ?? null,
+
     isFreeTeaser: obj.isFreeTeaser,
     isActive: obj.isActive,
     sortOrder: obj.sortOrder,
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt,
     formSchema:
       obj.type === 'ai'
         ? (obj.formSchema || []).map((f) => ({
