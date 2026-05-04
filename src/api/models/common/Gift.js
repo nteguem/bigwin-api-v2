@@ -194,6 +194,11 @@ const giftSchema = new mongoose.Schema(
     // Marketing : cadeau accessible aux non-payants comme appât/teaser.
     isFreeTeaser: { type: Boolean, default: false },
 
+    // Compteur de lectures — incrémenté atomiquement à chaque ouverture
+    // de contenu (getStaticContent / generate). Sert pour les analytics
+    // et l'affichage social proof côté mobile ("234 lectures").
+    readCount: { type: Number, default: 0, min: 0 },
+
     isActive: { type: Boolean, default: true },
 
     sortOrder: { type: Number, default: 0 },
@@ -324,6 +329,7 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     learningPoints: localizeI18nList(obj.learningPoints),
     pages: obj.pages ?? null,
     durationMinutes: obj.durationMinutes ?? null,
+    readCount: obj.readCount ?? 0,
 
     isFreeTeaser: obj.isFreeTeaser,
     isActive: obj.isActive,

@@ -130,13 +130,16 @@ const packageSchema = new mongoose.Schema({
     ref: 'Formation'
   },
 
-  // Nombre de "cadeaux" (crédits) accordés à l'utilisateur lors d'un achat
-  // de ce package. Mappé en mobile : "Tu débloques X cadeaux dans le coffre."
-  // 0 = aucun cadeau.
-  unlockCredits: {
-    type: Number,
-    default: 0,
-    min: 0
+  // Tier de cadeaux débloqué par ce package. Un user avec une sub active
+  // sur ce package peut débloquer N'IMPORTE QUEL cadeau dont le tier a un
+  // displayOrder ≤ celui de `giftTier` (modèle cumulatif : Or débloque
+  // Bronze + Argent + Or, Diamant débloque tout sauf rien-de-supérieur,
+  // etc.). null = ce package ne donne accès à aucun cadeau payant (les
+  // cadeaux gratuits/teasers restent toujours accessibles à tous).
+  giftTier: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'GiftTier',
+    default: null
   },
 
   isActive: {
@@ -252,7 +255,23 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
     economy: packageObj.economy instanceof Map ? Object.fromEntries(packageObj.economy) : packageObj.economy,
     formation: formation,
     formationId: typeof packageObj.formationId === 'object' ? packageObj.formationId._id : packageObj.formationId,
-    unlockCredits: packageObj.unlockCredits || 0,
+    // giftTier peut être un ObjectId brut ou un doc populé. On expose
+    // une shape minimale serialisée pour le mobile/admin consumer.
+    giftTier: (() => {
+      const gt = packageObj.giftTier;
+      if (!gt) return null;
+      if (typeof gt === 'object' && gt.key) {
+        return {
+          _id: gt._id,
+          key: gt.key,
+          label: gt.label?.[lang] || gt.label?.fr || gt.key,
+          emoji: gt.emoji || '',
+          color: gt.color || '6B7280',
+          displayOrder: gt.displayOrder,
+        };
+      }
+      return gt;
+    })(),
     isActive: packageObj.isActive,
     createdAt: packageObj.createdAt,
     // ===== AJOUT DES CHAMPS GOOGLE PLAY =====

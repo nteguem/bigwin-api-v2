@@ -6,7 +6,6 @@
 const Gift = require('../../models/common/Gift');
 const GiftTier = require('../../models/common/GiftTier');
 const UserGiftUnlock = require('../../models/common/UserGiftUnlock');
-const UserCreditWallet = require('../../models/common/UserCreditWallet');
 const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
@@ -182,40 +181,20 @@ async function getSubscriptionGiftsDetail({ appId, subscriptionId }) {
 
   const targetAppId = sub.appId;
 
-  const [pkg, wallet, unlocks] = await Promise.all([
-    Package.findById(sub.package).select('name unlockCredits').lean(),
-    UserCreditWallet.findOne({ appId: targetAppId, user: sub.user }).lean(),
+  const [pkg, unlocks] = await Promise.all([
+    Package.findById(sub.package)
+      .select('name giftTier')
+      .populate({ path: 'giftTier', select: 'key label displayOrder color emoji' })
+      .lean(),
     UserGiftUnlock.find({ appId: targetAppId, user: sub.user })
       .populate({
         path: 'gift',
-        select: 'title type customCreditCost category outputFormat rateLimitPerWeek tier',
-        populate: { path: 'tier', select: 'key label defaultCreditCost emoji color' },
+        select: 'title type category outputFormat rateLimitPerWeek tier',
+        populate: { path: 'tier', select: 'key label displayOrder emoji color' },
       })
       .sort({ unlockedAt: -1 })
       .lean(),
   ]);
-
-  let creditedFromThisSale = 0;
-  if (wallet && Array.isArray(wallet.history)) {
-    const entry = wallet.history.find(
-      (h) =>
-        h.source === 'subscription' &&
-        h.refId &&
-        h.refId.toString() === sub._id.toString()
-    );
-    if (entry) creditedFromThisSale = entry.delta || 0;
-  }
-
-  const balance = wallet
-    ? {
-        totalCredits: wallet.totalCredits || 0,
-        usedCredits: wallet.usedCredits || 0,
-        availableCredits: Math.max(
-          0,
-          (wallet.totalCredits || 0) - (wallet.usedCredits || 0)
-        ),
-      }
-    : { totalCredits: 0, usedCredits: 0, availableCredits: 0 };
 
   return {
     subscriptionId: sub._id,
@@ -223,11 +202,18 @@ async function getSubscriptionGiftsDetail({ appId, subscriptionId }) {
       ? {
           _id: pkg._id,
           name: pkg.name,
-          unlockCredits: pkg.unlockCredits || 0,
+          giftTier: pkg.giftTier
+            ? {
+                _id: pkg.giftTier._id,
+                key: pkg.giftTier.key,
+                label: pkg.giftTier.label,
+                displayOrder: pkg.giftTier.displayOrder,
+                color: pkg.giftTier.color,
+                emoji: pkg.giftTier.emoji,
+              }
+            : null,
         }
       : null,
-    creditedFromThisSale,
-    balance,
     unlocks: unlocks.map((u) => ({
       _id: u._id,
       gift: u.gift, // déjà populé avec tier

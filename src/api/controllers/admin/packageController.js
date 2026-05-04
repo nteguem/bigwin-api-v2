@@ -130,7 +130,7 @@ exports.createPackage = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   const { lang = 'fr' } = req.query;
 
-  const { name, description, pricing, duration, categories, badge, economy, formationId } = req.body;
+  const { name, description, pricing, duration, categories, badge, economy, formationId, giftTier } = req.body;
 
   // Validation des champs obligatoires
   if (!name?.fr || !name?.en || !pricing?.XAF || !duration) {
@@ -163,7 +163,8 @@ exports.createPackage = catchAsync(async (req, res, next) => {
     categories: categories || [],
     badge,
     economy,
-    formationId
+    formationId,
+    giftTier: giftTier || null,
   });
 
   // Populer les relations pour la réponse
@@ -186,7 +187,7 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
   // ⭐ Récupérer appId
   const appId = req.appId;
   
-  const { name, description, pricing, duration, categories, badge, economy, formationId, isActive } = req.body;
+  const { name, description, pricing, duration, categories, badge, economy, formationId, giftTier, isActive } = req.body;
 
   // ⭐ Vérifier que le package existe DANS CETTE APP
   let package = await Package.findOne({ _id: req.params.id, appId });
@@ -220,6 +221,9 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
   if (badge !== undefined) updateData.badge = badge;
   if (economy !== undefined) updateData.economy = economy;
   if (formationId !== undefined) updateData.formationId = formationId;
+  // giftTier accepte explicitement null pour "retirer le tier" — on
+  // distingue undefined (pas modifié) de null (mis à null volontairement).
+  if (giftTier !== undefined) updateData.giftTier = giftTier || null;
   if (isActive !== undefined) updateData.isActive = isActive;
 
   // ⭐ Filtrer par appId

@@ -150,40 +150,6 @@ subscriptionSchema.post('save', async function (doc) {
         );
       });
 
-      // 1bis) Crédite le wallet de cadeaux selon le package.unlockCredits.
-      //
-      // IDÉMPOTENT : creditWalletService.creditWallet skip si une entrée
-      // d'history existe déjà pour (source='subscription', refId=doc._id).
-      // Donc même en cas de replay du hook, le user n'est crédité qu'une fois.
-      //
-      // Fire-and-forget : si ça foire on log mais on ne bloque pas la save.
-      // Le backfill script peut rattraper.
-      (async () => {
-        const logger = require('../../../utils/logger');
-        try {
-          const mongoose = require('mongoose');
-          const Package = mongoose.model('Package');
-          const pkg = await Package.findById(doc.package).select('unlockCredits name').lean();
-          const credits = pkg?.unlockCredits || 0;
-          if (credits > 0) {
-            const creditWalletService = require('./../../services/common/creditWalletService');
-            await creditWalletService.creditWallet({
-              user: doc.user,
-              appId: doc.appId,
-              amount: credits,
-              source: 'subscription',
-              refId: doc._id,
-              refModel: 'Subscription',
-              note: `Achat package ${pkg?.name?.fr || ''}`.trim(),
-            });
-          }
-        } catch (creditErr) {
-          logger.error(
-            `[Subscription hook] Crédit wallet KO user=${doc.user} sub=${doc._id}: ${creditErr.message}`
-          );
-        }
-      })();
-
       // 2) Email transactionnel "Forfait activé".
       //    On skip pour les souscriptions ADMIN (cadeaux/loyalty gifts) car
       //    `createAdminSubscription` envoie un mail dédié avec un contenu

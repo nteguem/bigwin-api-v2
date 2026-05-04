@@ -26,12 +26,13 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   
   // ⭐ MODIFIÉ : Inclure les packages partagés
-  const packages = await Package.find({ 
+  const packages = await Package.find({
     appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
-    isActive: true 
+    isActive: true
   })
     .populate('categories', 'name description isVip')
-    .populate('formationId');
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   // Trier manuellement par prix dans la devise demandée
   const sortedPackages = packages.sort((a, b) => {
@@ -78,12 +79,13 @@ exports.getPackage = catchAsync(async (req, res, next) => {
   const appId = req.appId;
   
   // ⭐ MODIFIÉ : Inclure les packages partagés
-  const package = await Package.findOne({ 
+  const package = await Package.findOne({
     _id: req.params.id,
-    appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
-    isActive: true 
+    appId: { $in: [appId, "shared"] },
+    isActive: true
   }).populate('categories', 'name description isVip')
-    .populate('formationId');
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   if (!package) {
     return next(new AppError('Package non trouvé ou non disponible', 404, ErrorCodes.NOT_FOUND));
@@ -135,12 +137,13 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
   const appId = req.appId;
 
   // ⭐ MODIFIÉ : Inclure les packages partagés
-  const packages = await Package.find({ 
-    appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
+  const packages = await Package.find({
+    appId: { $in: [appId, "shared"] },
     isActive: true,
     categories: categoryId
   }).populate('categories', 'name description isVip')
-    .populate('formationId');
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   // Trier manuellement par prix dans la devise demandée
   const sortedPackages = packages.sort((a, b) => {

@@ -1,22 +1,25 @@
 // src/api/services/common/giftCatalogService.js
 //
-// Couche métier user-facing pour les cadeaux.
+// Couche métier user-facing pour les cadeaux. Modèle "tier access" (pas
+// de wallet/crédits) :
 //   • listCatalog : ce que voit l'utilisateur dans l'écran "Cadeaux".
-//   • unlockGift  : débite les crédits + crée UserGiftUnlock (atomique).
+//   • unlockGift  : crée UserGiftUnlock si l'user a une sub active dont
+//     le `giftTier.displayOrder` est ≥ celui du cadeau cible. Cumulatif :
+//     un user "Or" peut débloquer Bronze + Argent + Or.
 //   • generateAiGift : appelle Gemini si IA, persiste la génération.
 //   • getMyUnlock : retrouve l'unlock + dernière génération pour le mobile.
 //
-// Le coût effectif d'un cadeau dépend de son tier (populé) + customCreditCost.
-// On utilise toujours `Gift.computeEffectiveCost(gift)` pour ne JAMAIS
-// hardcoder.
+// Pas de débit/refund — le déblocage est gratuit (le coût a été payé via
+// le package). Un cadeau débloqué reste accessible à vie même si la sub
+// expire (on ne casse pas l'historique de l'user).
 
 const Gift = require('../../models/common/Gift');
 const UserGiftUnlock = require('../../models/common/UserGiftUnlock');
 const App = require('../../models/common/App');
+const Subscription = require('../../models/common/Subscription');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const logger = require('../../../utils/logger');
 
-const creditWalletService = require('./creditWalletService');
 const aiGiftService = require('./aiGiftService');
 
 /**
@@ -42,16 +45,63 @@ async function loadActiveGift({ giftId, appId, allowInactive = false }) {
 }
 
 /**
+ * Calcule le tier MAX accessible à l'user via ses subs actives.
+ * Renvoie `{ maxTierOrder, packages }` :
+ *   - maxTierOrder : displayOrder du tier le plus haut (0 si aucune sub
+ *     ou aucun package n'a de giftTier configuré).
+ *   - packages : liste des packages actifs avec leur tier (pour debug
+ *     ou affichage admin).
+ *
+ * On ne considère que les subs ACTIVES (status='active' ET endDate > now).
+ * Si plusieurs subs cumulent (rare mais possible), on prend le max.
+ */
+async function getUserMaxTierOrder(userId, appId) {
+  if (!userId) return { maxTierOrder: 0, packages: [] };
+
+  const subs = await Subscription.find({
+    user: userId,
+    appId,
+    status: 'active',
+    endDate: { $gt: new Date() },
+  })
+    .populate({
+      path: 'package',
+      select: 'name giftTier',
+      populate: { path: 'giftTier', select: 'key label displayOrder color emoji' },
+    })
+    .lean();
+
+  let maxTierOrder = 0;
+  const packages = [];
+  for (const sub of subs) {
+    const pkg = sub.package;
+    if (!pkg) continue;
+    const tier = pkg.giftTier;
+    if (tier && typeof tier.displayOrder === 'number') {
+      if (tier.displayOrder > maxTierOrder) maxTierOrder = tier.displayOrder;
+      packages.push({
+        packageId: pkg._id,
+        packageName: pkg.name,
+        tier: {
+          _id: tier._id,
+          key: tier.key,
+          label: tier.label,
+          displayOrder: tier.displayOrder,
+        },
+      });
+    }
+  }
+  return { maxTierOrder, packages };
+}
+
+/**
  * Liste le catalogue avec, pour chaque cadeau, le statut user :
  *   - free      : gratuit (isFreeTeaser ou tier=free)
  *   - unlocked  : déjà débloqué
- *   - available : pas encore débloqué + solde suffisant
- *   - locked    : pas encore débloqué + solde insuffisant
+ *   - available : pas encore débloqué + tier accessible via sub active
+ *   - locked    : pas encore débloqué + tier non accessible
  */
 async function listCatalog({ user, appId, lang = 'fr', country = null }) {
-  // Filtre country : on combine les cadeaux universels (country=null/absent)
-  // avec ceux spécifiques au pays demandé. Si pas de country, on ne montre
-  // que les universels (les country-overrides resteraient cachés).
   const countryFilter = country
     ? {
         $or: [
@@ -67,14 +117,20 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
         ],
       };
 
-  const [gifts, unlocks, balance] = await Promise.all([
+  const isAnonymous = !user || !user._id;
+
+  const [gifts, unlocks, tierAccess] = await Promise.all([
     Gift.find({ appId, isActive: true, ...countryFilter })
       .populate('tier')
       .sort({ sortOrder: 1, createdAt: 1 }),
-    UserGiftUnlock.find({ appId, user: user._id })
-      .select('gift unlockedAt generations')
-      .lean(),
-    creditWalletService.getBalance(user._id, appId),
+    isAnonymous
+      ? Promise.resolve([])
+      : UserGiftUnlock.find({ appId, user: user._id })
+          .select('gift unlockedAt generations')
+          .lean(),
+    isAnonymous
+      ? Promise.resolve({ maxTierOrder: 0, packages: [] })
+      : getUserMaxTierOrder(user._id, appId),
   ]);
 
   const unlockedMap = {};
@@ -91,15 +147,18 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
 
   const items = gifts.map((g) => {
     const formatted = g.formatForLanguage(lang);
-    const cost = Gift.computeEffectiveCost(g);
     const unlock = unlockedMap[g._id.toString()] || null;
+    const giftTierOrder =
+      g.tier && typeof g.tier === 'object' && typeof g.tier.displayOrder === 'number'
+        ? g.tier.displayOrder
+        : 0;
 
     let status;
     if (unlock) {
       status = 'unlocked';
-    } else if (g.isFreeTeaser || cost === 0) {
+    } else if (g.isFreeTeaser || g.tier?.key === 'free' || giftTierOrder === 0) {
       status = 'free';
-    } else if (balance.availableCredits >= cost) {
+    } else if (!isAnonymous && tierAccess.maxTierOrder >= giftTierOrder) {
       status = 'available';
     } else {
       status = 'locked';
@@ -112,12 +171,17 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
     };
   });
 
-  return { items, balance };
+  // Le `tierAccess` remplace l'ancien `balance`. On expose le tier max
+  // de l'user (label + key) pour que le mobile affiche "Tu as accès Or".
+  return { items, tierAccess };
 }
 
 /**
- * Débloque un cadeau pour l'utilisateur.
- * Atomique : débit + création unlock + idempotence sur double-clic.
+ * Débloque un cadeau pour l'utilisateur. Pas de débit — l'user paie via
+ * le package qui lui donne accès au tier. On vérifie juste que son
+ * tier-access couvre le tier du cadeau, puis on crée l'unlock.
+ *
+ * Idempotent : si l'unlock existe déjà, on le renvoie sans erreur.
  */
 async function unlockGift({ user, appId, giftId }) {
   const gift = await loadActiveGift({ giftId, appId });
@@ -134,28 +198,21 @@ async function unlockGift({ user, appId, giftId }) {
     return { gift, unlock: existing, alreadyUnlocked: true };
   }
 
-  const cost = Gift.computeEffectiveCost(gift);
+  // Cadeaux gratuits : déblocage sans check de tier.
+  const giftTierOrder =
+    gift.tier && typeof gift.tier.displayOrder === 'number'
+      ? gift.tier.displayOrder
+      : 0;
+  const isFree = gift.isFreeTeaser || gift.tier?.key === 'free' || giftTierOrder === 0;
 
-  if (cost > 0) {
-    try {
-      await creditWalletService.debitWallet({
-        user: user._id,
-        appId,
-        amount: cost,
-        source: 'gift_unlock',
-        refId: gift._id,
-        refModel: 'Gift',
-        note: `Unlock ${gift.title?.fr || gift._id}`,
-      });
-    } catch (err) {
-      if (err.code === 'NOT_ENOUGH_CREDITS') {
-        throw new AppError(
-          "Tu n'as pas assez de cadeaux pour débloquer celui-ci.",
-          402,
-          ErrorCodes.VALIDATION_ERROR
-        );
-      }
-      throw err;
+  if (!isFree) {
+    const { maxTierOrder } = await getUserMaxTierOrder(user._id, appId);
+    if (maxTierOrder < giftTierOrder) {
+      throw new AppError(
+        "Ce cadeau n'est pas inclus dans ton abonnement actuel. Souscris à un forfait supérieur pour le débloquer.",
+        402,
+        ErrorCodes.VALIDATION_ERROR
+      );
     }
   }
 
@@ -165,48 +222,18 @@ async function unlockGift({ user, appId, giftId }) {
       appId,
       user: user._id,
       gift: gift._id,
-      costPaid: cost,
+      costPaid: 0,
       unlockedAt: new Date(),
     });
   } catch (err) {
-    // E11000 = race avec un autre process ; on rembourse et on retourne
-    // l'unlock existant.
     if (err.code === 11000) {
-      if (cost > 0) {
-        await creditWalletService.creditWallet({
-          user: user._id,
-          appId,
-          amount: cost,
-          source: 'admin_adjust',
-          refId: gift._id,
-          refModel: 'Gift',
-          note: 'Refund: race condition unlock',
-        });
-      }
+      // Race avec un autre process — on retourne l'existant.
       const existingUnlock = await UserGiftUnlock.findOne({
         appId,
         user: user._id,
         gift: gift._id,
       });
       return { gift, unlock: existingUnlock, alreadyUnlocked: true };
-    }
-    // Autre erreur : on rembourse pour ne pas pénaliser l'utilisateur
-    if (cost > 0) {
-      try {
-        await creditWalletService.creditWallet({
-          user: user._id,
-          appId,
-          amount: cost,
-          source: 'admin_adjust',
-          refId: gift._id,
-          refModel: 'Gift',
-          note: `Refund: échec création unlock (${err.message})`,
-        });
-      } catch (refundErr) {
-        logger.error(
-          `[giftCatalog] CRITIQUE: refund échoué après échec unlock — user=${user._id} gift=${gift._id} amount=${cost}: ${refundErr.message}`
-        );
-      }
     }
     throw err;
   }
@@ -221,9 +248,6 @@ async function unlockGift({ user, appId, giftId }) {
  * Si le gift a été désactivé par l'admin APRÈS qu'un user l'ait débloqué,
  * on autorise quand même l'accès — ne pas casser l'historique du user.
  */
-/// Helper : résout un champ media (string legacy OU {fr, en}) selon
-/// la langue demandée. Identique au pickLocalizedMedia côté model
-/// mais accessible dans le service où on a juste les valeurs brutes.
 function pickLocalizedMedia(field, lang = 'fr') {
   if (field == null || field === '') return null;
   if (typeof field === 'string') return field;
@@ -235,8 +259,6 @@ function pickLocalizedMedia(field, lang = 'fr') {
 }
 
 async function getStaticContent({ user, appId, giftId, lang = 'fr' }) {
-  // On charge d'abord en autorisant inactif. On vérifiera plus bas si l'user
-  // a un unlock — auquel cas l'accès reste valide même si le gift est inactif.
   const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
 
   if (gift.type !== 'static') {
@@ -247,17 +269,18 @@ async function getStaticContent({ user, appId, giftId, lang = 'fr' }) {
     );
   }
 
-  const cost = Gift.computeEffectiveCost(gift);
-  const isFree = gift.isFreeTeaser || cost === 0;
+  const giftTierOrder =
+    gift.tier && typeof gift.tier.displayOrder === 'number'
+      ? gift.tier.displayOrder
+      : 0;
+  const isFree = gift.isFreeTeaser || gift.tier?.key === 'free' || giftTierOrder === 0;
 
-  // Cherche un unlock existant
   const unlock = await UserGiftUnlock.findOne({
     appId,
     user: user._id,
     gift: gift._id,
   });
 
-  // Pas de unlock + pas free → accès refusé
   if (!unlock && !isFree) {
     throw new AppError(
       "Ce cadeau n'est pas débloqué.",
@@ -266,11 +289,16 @@ async function getStaticContent({ user, appId, giftId, lang = 'fr' }) {
     );
   }
 
-  // Pas de unlock + free + gift INACTIF → on refuse (un free désactivé ne
-  // doit pas être accessible aux nouveaux users)
   if (!unlock && isFree && !gift.isActive) {
     throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
   }
+
+  // Increment readCount atomiquement après les checks d'accès. Fire and
+  // forget — si l'$inc échoue (très rare), on log mais on ne casse pas
+  // l'expérience user. C'est un compteur d'analytics, pas critique.
+  Gift.updateOne({ _id: gift._id }, { $inc: { readCount: 1 } }).catch((err) =>
+    logger.warn(`[giftCatalog] readCount inc failed gift=${gift._id}: ${err.message}`)
+  );
 
   return {
     type: 'static',
@@ -281,11 +309,13 @@ async function getStaticContent({ user, appId, giftId, lang = 'fr' }) {
 }
 
 /**
- * Génère un cadeau IA : check unlock + rate limit + appel Gemini + persistence.
+ * Génère un cadeau IA : check tier-access ou unlock + rate limit + appel
+ * Gemini + persistence.
  *
  * Comme getStaticContent, on autorise un gift inactif si l'user a déjà un
- * unlock (ne pas casser l'historique). MAIS on bloque la première génération
- * si le gift est inactif (pas de nouveau unlock sur cadeau désactivé).
+ * unlock (ne pas casser l'historique). MAIS on bloque la première
+ * génération si le gift est inactif (pas de nouveau unlock sur cadeau
+ * désactivé).
  */
 async function generateAiGift({ user, appId, giftId, formData = {} }) {
   const gift = await loadActiveGift({ giftId, appId, allowInactive: true });
@@ -305,18 +335,23 @@ async function generateAiGift({ user, appId, giftId, formData = {} }) {
   });
 
   if (!unlock) {
-    // Pas de unlock + gift désactivé → refus d'unlock initial
     if (!gift.isActive) {
       throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
     }
-    const cost = Gift.computeEffectiveCost(gift);
-    const isFree = gift.isFreeTeaser || cost === 0;
+    const giftTierOrder =
+      gift.tier && typeof gift.tier.displayOrder === 'number'
+        ? gift.tier.displayOrder
+        : 0;
+    const isFree = gift.isFreeTeaser || gift.tier?.key === 'free' || giftTierOrder === 0;
     if (!isFree) {
-      throw new AppError(
-        "Tu dois d'abord débloquer ce cadeau.",
-        403,
-        ErrorCodes.AUTH_FORBIDDEN || 'FORBIDDEN'
-      );
+      const { maxTierOrder } = await getUserMaxTierOrder(user._id, appId);
+      if (maxTierOrder < giftTierOrder) {
+        throw new AppError(
+          "Tu dois d'abord débloquer ce cadeau (souscris à un forfait incluant ce tier).",
+          403,
+          ErrorCodes.AUTH_FORBIDDEN || 'FORBIDDEN'
+        );
+      }
     }
     unlock = await UserGiftUnlock.create({
       appId,
@@ -357,6 +392,11 @@ async function generateAiGift({ user, appId, giftId, formData = {} }) {
   });
   await unlock.save();
 
+  // Une génération IA réussie = une lecture supplémentaire. Fire and forget.
+  Gift.updateOne({ _id: gift._id }, { $inc: { readCount: 1 } }).catch((err) =>
+    logger.warn(`[giftCatalog] readCount inc failed gift=${gift._id}: ${err.message}`)
+  );
+
   const generation = unlock.generations[unlock.generations.length - 1];
 
   return {
@@ -384,7 +424,6 @@ async function getMyUnlock({ user, appId, giftId }) {
     gift: gift._id,
   });
 
-  // Si gift inactif ET pas d'unlock → 404 (rien à montrer)
   if (!gift.isActive && !unlock) {
     throw new AppError('Cadeau introuvable', 404, ErrorCodes.NOT_FOUND);
   }
@@ -420,4 +459,5 @@ module.exports = {
   getStaticContent,
   generateAiGift,
   getMyUnlock,
+  getUserMaxTierOrder,
 };

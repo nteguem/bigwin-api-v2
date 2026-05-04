@@ -49,6 +49,40 @@ exports.protect = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * Middleware d'authentification SOFT — attache `req.user` si un token
+ * valide est fourni, mais ne refuse PAS la requête en l'absence de token.
+ *
+ * Usage : routes publiques où on veut quand même connaître l'user si
+ * connecté (catalog cadeaux navigable sans login mais qui montre
+ * unlocked/balance si auth présent). Si le token est présent mais
+ * invalide, on ignore silencieusement (pas d'erreur 401).
+ */
+exports.optional = catchAsync(async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  const appId = req.appId;
+  if (!appId) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = authService.verifyToken(token, 'user');
+    const user = await User.findOne({ _id: decoded.id, appId });
+    req.user = user && user.isActive ? user : null;
+  } catch (_) {
+    // Token invalide / expiré → on traite comme anonyme. Pas d'erreur.
+    req.user = null;
+  }
+  next();
+});
+
+/**
  * Middleware pour vérifier les refresh tokens user
  */
 exports.verifyRefreshToken = catchAsync(async (req, res, next) => {

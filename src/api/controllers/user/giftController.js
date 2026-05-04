@@ -3,7 +3,6 @@
 // Endpoints user-facing pour le système de cadeaux.
 
 const giftCatalogService = require('../../services/common/giftCatalogService');
-const creditWalletService = require('../../services/common/creditWalletService');
 const giftReviewService = require('../../services/common/giftReviewService');
 const catchAsync = require('../../../utils/catchAsync');
 
@@ -27,21 +26,25 @@ exports.getCatalog = catchAsync(async (req, res) => {
 });
 
 /**
- * GET /user/gifts/me/balance
- * Solde du wallet "cadeaux".
+ * GET /user/gifts/me/tier
+ * Renvoie le tier max accessible à l'user via ses subs actives.
+ * Remplace l'ancien /me/balance (le concept de "solde de crédits" n'existe
+ * plus — c'est un accès à un tier qui inclut les tiers inférieurs).
  */
-exports.getBalance = catchAsync(async (req, res) => {
-  const balance = await creditWalletService.getBalance(req.user._id, req.appId);
-
+exports.getMyTierAccess = catchAsync(async (req, res) => {
+  const access = await giftCatalogService.getUserMaxTierOrder(
+    req.user._id,
+    req.appId
+  );
   res.status(200).json({
     success: true,
-    data: { balance },
+    data: access,
   });
 });
 
 /**
  * POST /user/gifts/:id/unlock
- * Débloque un cadeau (débit crédits).
+ * Débloque un cadeau si l'user a une sub active dont le tier le couvre.
  */
 exports.unlock = catchAsync(async (req, res) => {
   const result = await giftCatalogService.unlockGift({
@@ -51,7 +54,6 @@ exports.unlock = catchAsync(async (req, res) => {
   });
 
   const { lang = 'fr' } = req.query;
-  const balance = await creditWalletService.getBalance(req.user._id, req.appId);
 
   res.status(200).json({
     success: true,
@@ -62,9 +64,7 @@ exports.unlock = catchAsync(async (req, res) => {
       gift: result.gift.formatForLanguage(lang),
       unlock: {
         unlockedAt: result.unlock.unlockedAt,
-        costPaid: result.unlock.costPaid,
       },
-      balance,
       alreadyUnlocked: result.alreadyUnlocked,
     },
   });
@@ -130,7 +130,6 @@ exports.getMyUnlock = catchAsync(async (req, res) => {
       unlock: result.unlock
         ? {
             unlockedAt: result.unlock.unlockedAt,
-            costPaid: result.unlock.costPaid,
             generations: (result.unlock.generations || []).map((g) => ({
               _id: g._id,
               outputFormat: g.outputFormat,
