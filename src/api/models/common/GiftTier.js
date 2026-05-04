@@ -35,13 +35,6 @@ const giftTierSchema = new mongoose.Schema(
       en: { type: String, required: true, trim: true },
     },
 
-    // Coût par défaut en crédits. Un Gift peut surcharger via `customCreditCost`.
-    defaultCreditCost: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-
     emoji: { type: String, trim: true, default: '' },
 
     // Couleur d'accent (HEX sans #) pour les badges UI mobile/admin.
@@ -78,7 +71,6 @@ giftTierSchema.methods.formatForLanguage = function (lang = 'fr') {
     _id: obj._id,
     key: obj.key,
     label: obj.label[lang] || obj.label.fr,
-    defaultCreditCost: obj.defaultCreditCost,
     emoji: obj.emoji || '',
     color: obj.color || '6B7280',
     displayOrder: obj.displayOrder,

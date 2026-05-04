@@ -52,10 +52,6 @@ const userGiftUnlockSchema = new mongoose.Schema({
 
   unlockedAt: { type: Date, default: Date.now },
 
-  // Snapshot du coût payé au moment du déblocage
-  // (au cas où l'admin change le creditCost après)
-  costPaid: { type: Number, default: 0 },
-
   generations: [generationSchema],
 
   createdAt: { type: Date, default: Date.now },

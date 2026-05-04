@@ -222,7 +222,6 @@ async function unlockGift({ user, appId, giftId }) {
       appId,
       user: user._id,
       gift: gift._id,
-      costPaid: 0,
       unlockedAt: new Date(),
     });
   } catch (err) {
@@ -357,7 +356,6 @@ async function generateAiGift({ user, appId, giftId, formData = {} }) {
       appId,
       user: user._id,
       gift: gift._id,
-      costPaid: 0,
     });
   }
 

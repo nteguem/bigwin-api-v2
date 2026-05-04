@@ -83,7 +83,6 @@ async function updateGift({ appId, giftId, payload }) {
   const allowed = [
     'type',
     'tier',
-    'customCreditCost',
     'category',
     'title',
     'description',
@@ -218,7 +217,6 @@ async function getSubscriptionGiftsDetail({ appId, subscriptionId }) {
       _id: u._id,
       gift: u.gift, // déjà populé avec tier
       unlockedAt: u.unlockedAt,
-      costPaid: u.costPaid || 0,
       generationsCount: (u.generations || []).length,
       lastGenerationAt:
         (u.generations || []).length > 0

@@ -1,19 +1,13 @@
 // src/api/models/common/Gift.js
 //
-// Catalogue de cadeaux débloquables via crédits.
+// Catalogue de cadeaux. Modèle "tier access" : un Gift est attaché à un
+// tier (Bronze/Argent/Or/Diamant/…). L'utilisateur a accès à un cadeau si
+// son `package.giftTier.displayOrder` >= celui du cadeau (cumulatif).
 //
 // 2 types :
 //   - 'static' : contenu fixe (PDF/HTML/audio/vidéo). Un déblocage = accès à vie.
 //   - 'ai'    : contenu généré à la demande via IA, à partir d'un formulaire.
 //               Un déblocage + rate-limit pour les générations futures.
-//
-// Le tier (Bronze/Argent/Or/Diamant/…) est référencé via le modèle GiftTier.
-// Le coût effectif d'un cadeau = `customCreditCost` si défini,
-// sinon `tier.defaultCreditCost`.
-//
-// Pas de cascade automatique : modifier un GiftTier ne change pas
-// rétroactivement les Gifts qui n'ont pas customCreditCost. Le calcul est
-// fait au runtime (via populate). Cohérent et prévisible.
 
 const mongoose = require('mongoose');
 
@@ -59,20 +53,12 @@ const giftSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Référence vers le tier (Bronze, Or, …). Source de vérité du coût par
-    // défaut. Toujours populé en lecture pour calculer effectiveCost.
+    // Référence vers le tier (Bronze, Or, …). Détermine quels users ont
+    // accès à ce cadeau via leur sub active.
     tier: {
       type: mongoose.Schema.ObjectId,
       ref: 'GiftTier',
       required: [true, 'tier requis'],
-    },
-
-    // Override admin du coût défaut du tier. null/undefined → utiliser
-    // tier.defaultCreditCost.
-    customCreditCost: {
-      type: Number,
-      min: 0,
-      default: null,
     },
 
     category: {
@@ -245,27 +231,7 @@ giftSchema.pre('save', function (next) {
   next();
 });
 
-// ===== Calcul du coût effectif (nécessite un tier populé) =====
-//
-// Convention : on appelle ce helper UNIQUEMENT après populate('tier').
-// En cas d'absence de tier populé, on retourne customCreditCost (ou 0).
-function computeEffectiveCost(gift) {
-  if (gift.isFreeTeaser) return 0;
-  if (gift.customCreditCost !== null && gift.customCreditCost !== undefined) {
-    return gift.customCreditCost;
-  }
-  // tier peut être un ObjectId (non populé) ou un doc populé
-  if (gift.tier && typeof gift.tier === 'object' && 'defaultCreditCost' in gift.tier) {
-    return gift.tier.defaultCreditCost;
-  }
-  return 0;
-}
-
 // ===== Methods =====
-giftSchema.methods.getEffectiveCost = function () {
-  return computeEffectiveCost(this);
-};
-
 giftSchema.methods.formatForLanguage = function (lang = 'fr') {
   const obj = this.toObject();
   const pickI18n = (f) => (f ? f[lang] || f.fr || '' : '');
@@ -291,7 +257,6 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
       _id: obj.tier._id,
       key: obj.tier.key,
       label: pickI18n(obj.tier.label),
-      defaultCreditCost: obj.tier.defaultCreditCost,
       emoji: obj.tier.emoji || '',
       color: obj.tier.color || '6B7280',
       displayOrder: obj.tier.displayOrder,
@@ -310,8 +275,6 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     appId: obj.appId,
     type: obj.type,
     tier: tierSerialized,
-    customCreditCost: obj.customCreditCost ?? null,
-    creditCost: computeEffectiveCost(this),
     category: obj.category,
     title: pickI18n(obj.title),
     description: pickI18n(obj.description),
@@ -356,11 +319,7 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
 giftSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.__v;
-  obj.creditCost = computeEffectiveCost(this);
   return obj;
 };
-
-// ===== Helper exposé =====
-giftSchema.statics.computeEffectiveCost = computeEffectiveCost;
 
 module.exports = mongoose.model('Gift', giftSchema);

@@ -52,7 +52,7 @@ async function updateTier(tierId, payload) {
     );
   }
 
-  const allowed = ['label', 'defaultCreditCost', 'emoji', 'color', 'displayOrder', 'isActive'];
+  const allowed = ['label', 'emoji', 'color', 'displayOrder', 'isActive'];
   for (const k of allowed) {
     if (payload[k] !== undefined) tier[k] = payload[k];
   }
