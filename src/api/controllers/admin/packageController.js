@@ -26,7 +26,8 @@ exports.getAllPackages = catchAsync(async (req, res, next) => {
   // Récupération des packages selon le filtre
   const packages = await Package.find(filter)
     .populate('categories', 'name description isVip')
-    .populate('formationId');
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   let finalPackages = packages;
 
@@ -106,7 +107,8 @@ exports.getPackage = catchAsync(async (req, res, next) => {
   // ⭐ Filtrer par appId
   const package = await Package.findOne({ _id: req.params.id, appId })
     .populate('categories', 'name description isVip')
-    .populate('formationId');
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   if (!package) {
     return next(new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND));
@@ -170,6 +172,7 @@ exports.createPackage = catchAsync(async (req, res, next) => {
   // Populer les relations pour la réponse
   await package.populate('categories', 'name isVip');
   await package.populate('formationId');
+  await package.populate('giftTier', 'key label emoji color displayOrder');
 
   res.status(201).json({
     success: true,
@@ -231,7 +234,10 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
     { _id: req.params.id, appId }, // ⭐ AJOUT
     updateData,
     { new: true, runValidators: true }
-  ).populate('categories', 'name isVip').populate('formationId');
+  )
+    .populate('categories', 'name isVip')
+    .populate('formationId')
+    .populate('giftTier', 'key label emoji color displayOrder');
 
   const { lang = 'fr' } = req.query;
 
