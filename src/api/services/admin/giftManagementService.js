@@ -105,7 +105,7 @@ async function updateGift({ appId, giftId, payload }) {
     'pages',
     'durationMinutes',
     // Override pays — visible uniquement pour ce code ISO (ex: 'CM').
-    'country',
+    'countries',
   ];
   for (const key of allowed) {
     if (payload[key] !== undefined) {

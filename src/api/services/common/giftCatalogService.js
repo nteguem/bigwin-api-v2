@@ -102,18 +102,24 @@ async function getUserMaxTierOrder(userId, appId) {
  *   - locked    : pas encore débloqué + tier non accessible
  */
 async function listCatalog({ user, appId, lang = 'fr', country = null }) {
-  const countryFilter = country
+  // Filtre multi-pays :
+  //   - cadeau universel = `countries` array vide ou absent
+  //   - cadeau ciblé     = `countries` contient le code pays user
+  // Si l'user n'a pas de country (anonyme/geo non détectée), on ne lui
+  // remonte QUE les universels (impossible de matcher un targeting).
+  const userCountry = country ? country.toUpperCase() : null;
+  const countryFilter = userCountry
     ? {
         $or: [
-          { country: { $in: [null, ''] } },
-          { country: { $exists: false } },
-          { country: country.toUpperCase() },
+          { countries: { $exists: false } },
+          { countries: { $size: 0 } },
+          { countries: userCountry },
         ],
       }
     : {
         $or: [
-          { country: { $in: [null, ''] } },
-          { country: { $exists: false } },
+          { countries: { $exists: false } },
+          { countries: { $size: 0 } },
         ],
       };
 

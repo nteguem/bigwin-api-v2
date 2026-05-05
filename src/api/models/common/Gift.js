@@ -85,24 +85,22 @@ const giftSchema = new mongoose.Schema(
       en: { type: String, required: true, trim: true },
     },
 
-    // ===== Country override =====
+    // ===== Country targeting (multi-pays) =====
     //
-    // Optionnel — code pays ISO-2 (ex: 'CM', 'CI', 'BJ'…). Si présent,
-    // ce cadeau N'EST visible QUE pour les users de ce pays. Si null,
-    // le cadeau est universel (visible partout dans la langue
-    // applicable). Permet d'avoir des contenus localisés par marché
-    // sans dupliquer toute la BD.
+    // Liste optionnelle de codes pays ISO-2 (ex: ['CM', 'CI', 'BJ']).
+    //   - Tableau VIDE ou ABSENT → cadeau universel (visible partout)
+    //   - Tableau avec codes      → visible UNIQUEMENT aux users de
+    //                              ces pays
     //
     // Logique côté listCatalog :
-    //   country=CM → renvoie [country=null] ∪ [country=CM]
-    //   country=CI → renvoie [country=null] ∪ [country=CI]
-    //   country=null → renvoie [country=null] uniquement (universels)
-    country: {
-      type: String,
-      uppercase: true,
-      trim: true,
-      maxlength: 2,
-      default: null,
+    //   user country=CM → renvoie [countries vide] ∪ [countries contient 'CM']
+    //   user country=null → renvoie [countries vide] uniquement
+    countries: {
+      type: [String],
+      default: [],
+      set: (arr) => (arr || [])
+        .map((c) => (typeof c === 'string' ? c.trim().toUpperCase() : ''))
+        .filter((c) => c.length === 2),
     },
 
     // ===== Médias localisables =====
@@ -282,7 +280,7 @@ giftSchema.methods.formatForLanguage = function (lang = 'fr') {
     previewImageUrl: pickLocalizedMedia(obj.previewImageUrl),
     contentUrl: pickLocalizedMedia(obj.contentUrl),
     htmlContent: pickLocalizedMedia(obj.htmlContent),
-    country: obj.country || null,
+    countries: Array.isArray(obj.countries) ? obj.countries : [],
     staticFormat: obj.staticFormat || null,
     outputFormat: obj.outputFormat || null,
     rateLimitPerWeek: obj.rateLimitPerWeek || null,
