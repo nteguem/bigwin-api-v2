@@ -95,6 +95,65 @@ async function getUserMaxTierOrder(userId, appId) {
 }
 
 /**
+ * Calcule le nombre de "tokens de déblocage" disponibles pour l'user.
+ *
+ * Règle métier : 1 sub (achetée OU offerte) = 1 token. Le token est
+ * consommé quand l'user débloque un cadeau PAYANT. Tokens cumulables
+ * et lifetime — ils survivent à l'expiration des subs.
+ *
+ *   tokens = countSubs(lifetime) - countPaidUnlocks(lifetime)
+ *
+ * On compte TOUTES les subs (active, expired, cancelled) car l'user a
+ * "gagné" son token au moment de la création de la sub.
+ *
+ * On EXCLUT les unlocks de cadeaux free teaser / tier=free du compte —
+ * sinon un user qui ouvre les free teasers (visibles sans abonnement)
+ * verrait son quota de tokens diminuer alors qu'il n'a "consommé" aucun
+ * de ses droits payants. Bug constaté en prod (un unlock free retrouvé
+ * en BD plombait le quota d'un user payant).
+ */
+async function getUnlockTokens(userId, appId) {
+  if (!userId) return 0;
+  const [subsCount, paidUnlocksAgg] = await Promise.all([
+    Subscription.countDocuments({ user: userId, appId }),
+    UserGiftUnlock.aggregate([
+      { $match: { user: userId, appId } },
+      {
+        $lookup: {
+          from: 'gifts',
+          localField: 'gift',
+          foreignField: '_id',
+          as: 'gift',
+        },
+      },
+      { $unwind: { path: '$gift', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'gifttiers',
+          localField: 'gift.tier',
+          foreignField: '_id',
+          as: 'tier',
+        },
+      },
+      { $unwind: { path: '$tier', preserveNullAndEmptyArrays: true } },
+      // Exclut les unlocks de cadeaux free (isFreeTeaser ou tier.key='free')
+      {
+        $match: {
+          'gift.isFreeTeaser': { $ne: true },
+          $or: [
+            { tier: null },
+            { 'tier.key': { $ne: 'free' } },
+          ],
+        },
+      },
+      { $count: 'count' },
+    ]),
+  ]);
+  const paidUnlocksCount = (paidUnlocksAgg[0] && paidUnlocksAgg[0].count) || 0;
+  return Math.max(0, subsCount - paidUnlocksCount);
+}
+
+/**
  * Liste le catalogue avec, pour chaque cadeau, le statut user :
  *   - free      : gratuit (isFreeTeaser ou tier=free)
  *   - unlocked  : déjà débloqué
@@ -125,7 +184,7 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
 
   const isAnonymous = !user || !user._id;
 
-  const [gifts, unlocks, tierAccess] = await Promise.all([
+  const [gifts, unlocks, tierAccess, unlockTokens] = await Promise.all([
     Gift.find({ appId, isActive: true, ...countryFilter })
       .populate('tier')
       .sort({ sortOrder: 1, createdAt: 1 }),
@@ -137,6 +196,7 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
     isAnonymous
       ? Promise.resolve({ maxTierOrder: 0, packages: [] })
       : getUserMaxTierOrder(user._id, appId),
+    isAnonymous ? Promise.resolve(0) : getUnlockTokens(user._id, appId),
   ]);
 
   const unlockedMap = {};
@@ -178,8 +238,9 @@ async function listCatalog({ user, appId, lang = 'fr', country = null }) {
   });
 
   // Le `tierAccess` remplace l'ancien `balance`. On expose le tier max
-  // de l'user (label + key) pour que le mobile affiche "Tu as accès Or".
-  return { items, tierAccess };
+  // de l'user (label + key) pour que le mobile affiche "Tu as accès Or"
+  // + `unlockTokens` (quota de déblocages restants : 1 sub = 1 token).
+  return { items, tierAccess: { ...tierAccess, unlockTokens } };
 }
 
 /**
@@ -216,6 +277,17 @@ async function unlockGift({ user, appId, giftId }) {
     if (maxTierOrder < giftTierOrder) {
       throw new AppError(
         "Ce cadeau n'est pas inclus dans ton abonnement actuel. Souscris à un forfait supérieur pour le débloquer.",
+        402,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    // Quota : 1 sub = 1 token. Bloque si l'user n'a plus de token (a déjà
+    // débloqué autant de cadeaux qu'il a de subs lifetime).
+    const tokens = await getUnlockTokens(user._id, appId);
+    if (tokens <= 0) {
+      throw new AppError(
+        "Tu as utilisé tes droits de déblocage. Souscris à un autre forfait pour en débloquer un nouveau.",
         402,
         ErrorCodes.VALIDATION_ERROR
       );
