@@ -13,6 +13,7 @@
 // le package). Un cadeau débloqué reste accessible à vie même si la sub
 // expire (on ne casse pas l'historique de l'user).
 
+const mongoose = require('mongoose');
 const Gift = require('../../models/common/Gift');
 const UserGiftUnlock = require('../../models/common/UserGiftUnlock');
 const App = require('../../models/common/App');
@@ -97,60 +98,86 @@ async function getUserMaxTierOrder(userId, appId) {
 /**
  * Calcule le nombre de "tokens de déblocage" disponibles pour l'user.
  *
- * Règle métier : 1 sub (achetée OU offerte) = 1 token. Le token est
- * consommé quand l'user débloque un cadeau PAYANT. Tokens cumulables
- * et lifetime — ils survivent à l'expiration des subs.
+ * Règle métier : 1 sub ACTIVE (status='active' ET endDate > now) = 1 token.
+ * Le token est consommé quand l'user débloque un cadeau PAYANT. Si la sub
+ * expire sans avoir été utilisée, le token est perdu — par contre un cadeau
+ * déjà débloqué reste accessible à vie.
  *
- *   tokens = countSubs(lifetime) - countPaidUnlocks(lifetime)
+ *   tokens = countActiveSubs - countPaidUnlocksSinceOldestActiveSub
  *
- * On compte TOUTES les subs (active, expired, cancelled) car l'user a
- * "gagné" son token au moment de la création de la sub.
+ * On compte uniquement les subs ENCORE actives. On compte les unlocks
+ * effectués depuis le début de la plus ancienne sub active courante —
+ * pour ne pas pénaliser un user qui revient avec une nouvelle sub après
+ * une période sans abonnement (ses anciens unlocks ne mangent pas son
+ * nouveau token).
  *
  * On EXCLUT les unlocks de cadeaux free teaser / tier=free du compte —
- * sinon un user qui ouvre les free teasers (visibles sans abonnement)
- * verrait son quota de tokens diminuer alors qu'il n'a "consommé" aucun
- * de ses droits payants. Bug constaté en prod (un unlock free retrouvé
- * en BD plombait le quota d'un user payant).
+ * sinon un user qui ouvre les free teasers verrait son quota diminuer
+ * alors qu'il n'a "consommé" aucun de ses droits payants.
  */
 async function getUnlockTokens(userId, appId) {
   if (!userId) return 0;
-  const [subsCount, paidUnlocksAgg] = await Promise.all([
-    Subscription.countDocuments({ user: userId, appId }),
-    UserGiftUnlock.aggregate([
-      { $match: { user: userId, appId } },
-      {
-        $lookup: {
-          from: 'gifts',
-          localField: 'gift',
-          foreignField: '_id',
-          as: 'gift',
-        },
+
+  const now = new Date();
+  const activeSubs = await Subscription.find({
+    user: userId,
+    appId,
+    status: 'active',
+    endDate: { $gt: now },
+  })
+    .select('startDate')
+    .sort({ startDate: 1 })
+    .lean();
+
+  if (activeSubs.length === 0) return 0;
+
+  // Date de référence pour ne compter QUE les unlocks effectués pendant
+  // la période courante de subscription. Un user qui débloque un cadeau
+  // en avril, voit sa sub expirer, puis souscrit en mai → son ancien
+  // unlock ne mange pas son nouveau token (ce qui est juste).
+  const oldestActiveStartDate = activeSubs[0].startDate;
+
+  const paidUnlocksAgg = await UserGiftUnlock.aggregate([
+    {
+      $match: {
+        user:
+          typeof userId === 'string'
+            ? new mongoose.Types.ObjectId(userId)
+            : userId,
+        appId,
+        unlockedAt: { $gte: oldestActiveStartDate },
       },
-      { $unwind: { path: '$gift', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'gifttiers',
-          localField: 'gift.tier',
-          foreignField: '_id',
-          as: 'tier',
-        },
+    },
+    {
+      $lookup: {
+        from: 'gifts',
+        localField: 'gift',
+        foreignField: '_id',
+        as: 'gift',
       },
-      { $unwind: { path: '$tier', preserveNullAndEmptyArrays: true } },
-      // Exclut les unlocks de cadeaux free (isFreeTeaser ou tier.key='free')
-      {
-        $match: {
-          'gift.isFreeTeaser': { $ne: true },
-          $or: [
-            { tier: null },
-            { 'tier.key': { $ne: 'free' } },
-          ],
-        },
+    },
+    { $unwind: { path: '$gift', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'gifttiers',
+        localField: 'gift.tier',
+        foreignField: '_id',
+        as: 'tier',
       },
-      { $count: 'count' },
-    ]),
+    },
+    { $unwind: { path: '$tier', preserveNullAndEmptyArrays: true } },
+    // Exclut les unlocks de cadeaux free (isFreeTeaser ou tier.key='free')
+    {
+      $match: {
+        'gift.isFreeTeaser': { $ne: true },
+        $or: [{ tier: null }, { 'tier.key': { $ne: 'free' } }],
+      },
+    },
+    { $count: 'count' },
   ]);
+
   const paidUnlocksCount = (paidUnlocksAgg[0] && paidUnlocksAgg[0].count) || 0;
-  return Math.max(0, subsCount - paidUnlocksCount);
+  return Math.max(0, activeSubs.length - paidUnlocksCount);
 }
 
 /**
