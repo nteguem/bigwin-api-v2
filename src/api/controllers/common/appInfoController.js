@@ -7,6 +7,7 @@
 // à hardcoder ces valeurs côté client.
 
 const App = require('../../models/common/App');
+const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
 const catchAsync = require('../../../utils/catchAsync');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
@@ -38,9 +39,14 @@ exports.getAppInfo = catchAsync(async (req, res) => {
     );
   }
 
-  const app = await App.findOne({ appId, isActive: true })
-    .select(PUBLIC_FIELDS.join(' '))
-    .lean();
+  const [app, affiliateConfig] = await Promise.all([
+    App.findOne({ appId, isActive: true })
+      .select(PUBLIC_FIELDS.join(' '))
+      .lean(),
+    AffiliateConfig.findOne({ appId })
+      .select('isEnabled payoutCountries')
+      .lean(),
+  ]);
 
   if (!app) {
     throw new AppError(
@@ -49,6 +55,16 @@ exports.getAppInfo = catchAsync(async (req, res) => {
       ErrorCodes.NOT_FOUND
     );
   }
+
+  // Codes pays activés pour l'affiliation (uppercase normalisé). Permet
+  // au mobile non authentifié de cacher le bouton "Gagner de l'argent"
+  // si le pays détecté par IP n'est pas dans cette liste.
+  const enabledCountryCodes =
+    affiliateConfig?.isEnabled === false
+      ? []
+      : (affiliateConfig?.payoutCountries || [])
+          .filter((c) => c.enabled !== false)
+          .map((c) => (c.code || '').toUpperCase());
 
   res.status(200).json({
     success: true,
@@ -62,6 +78,10 @@ exports.getAppInfo = catchAsync(async (req, res) => {
       supportEmail: app.supportEmail || null,
       googlePlay: {
         packageName: app.googlePlay?.packageName || null,
+      },
+      affiliate: {
+        enabled: !!affiliateConfig?.isEnabled,
+        enabledCountryCodes,
       },
     },
   });
