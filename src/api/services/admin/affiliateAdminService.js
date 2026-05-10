@@ -17,6 +17,7 @@ const Commission = require('../../models/affiliate/Commission');
 const PayoutRequest = require('../../models/affiliate/PayoutRequest');
 const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
 const AdminFundingRequest = require('../../models/affiliate/AdminFundingRequest');
+const afribaPayPayoutService = require('./afribaPayPayoutService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 class AffiliateAdminService {
@@ -360,16 +361,18 @@ class AffiliateAdminService {
   }
 
   /**
-   * Marque une PayoutRequest comme PAYÉE (validation manuelle admin
-   * après virement effectif via AfribaPay/autre). Effets :
-   *   - PayoutRequest.status passe à 'paid' + paidAt + audit trail
-   *   - Toutes les Commissions liées passent de 'locked' à 'paid'
-   *   - User.affiliate.activePayoutId est unset (l'affilié peut
-   *     re-demander un retrait)
+   * Valide une PayoutRequest = déclenche le payout AfribaPay, puis
+   * marque la demande comme payée si AfribaPay confirme. Effets :
+   *   1. Appel AfribaPay /v1/pay/payout (si erreur → throw, rien ne change)
+   *   2. Si AfribaPay SUCCESS ou PENDING : status='paid', stocker
+   *      transaction_id réel, commissions locked → paid, lock User unset
+   *   3. Si AfribaPay FAILED : throw, l'admin peut Rejeter manuellement
    *
    * @param {string} appId
    * @param {string} payoutId
-   * @param {Object} adminInfo - { adminId, transferReference?, note? }
+   * @param {Object} adminInfo - { adminId, note? }
+   *   `transferReference` est ignoré : on prend le transaction_id réel
+   *   d'AfribaPay au lieu d'une saisie admin.
    */
   async markPayoutPaid(appId, payoutId, adminInfo = {}) {
     const pr = await PayoutRequest.findOne({ _id: payoutId, appId });
@@ -388,22 +391,60 @@ class AffiliateAdminService {
       );
     }
 
-    const now = new Date();
-    pr.status = 'paid';
-    pr.paidAt = now;
-    if (adminInfo.transferReference) {
-      pr.afribaPayTransactionId = adminInfo.transferReference;
+    // ===== 1. Appel AfribaPay payout =====
+    let afribaResult;
+    try {
+      afribaResult = await afribaPayPayoutService.triggerPayout({
+        operator: pr.operator,
+        country: pr.country,
+        phoneNumber: pr.phoneNumber,
+        amount: pr.amount,
+        currency: pr.currency,
+        orderId: pr.afribaPayOrderId || `payout-${pr._id}`,
+        referenceId: `affiliate-${pr.user}`,
+        notifyUrl: process.env.AFRIBAPAY_PAYOUT_NOTIFY_URL || undefined,
+      });
+    } catch (err) {
+      // Audit le tentative échouée pour traçabilité, sans changer le status
+      pr.attempts.push({
+        at: new Date(),
+        type: 'admin_action',
+        status: pr.status,
+        actor: adminInfo.adminId ? String(adminInfo.adminId) : 'admin',
+        error: err.message,
+        payload: {
+          action: 'trigger_afribapay',
+          afribaResponse: err.responseData || null,
+        },
+      });
+      await pr.save();
+      // On relève l'erreur pour que l'admin la voie à l'écran
+      throw new AppError(
+        err.message || 'Échec AfribaPay',
+        err.statusCode || 502,
+        ErrorCodes.OPERATION_FAILED
+      );
     }
+
+    // ===== 2. AfribaPay a accepté (SUCCESS ou PENDING) =====
+    const now = new Date();
+    pr.status = 'paid'; // V1 : on accepte SUCCESS et PENDING comme paid
+    pr.paidAt = now;
+    pr.afribaPayTransactionId = afribaResult.transactionId;
+    pr.afribaPayProviderId = afribaResult.providerId;
+    pr.afribaPayLastResponse = afribaResult.raw;
     pr.attempts.push({
       at: now,
       type: 'admin_action',
       status: 'paid',
       actor: adminInfo.adminId ? String(adminInfo.adminId) : 'admin',
       payload: {
-        action: 'mark_paid',
-        transferReference: adminInfo.transferReference || null,
+        action: 'trigger_afribapay',
+        afribaStatus: afribaResult.status,
+        transactionId: afribaResult.transactionId,
         note: adminInfo.note || null,
       },
+      response: afribaResult.raw,
     });
     await pr.save();
 
