@@ -198,10 +198,14 @@ class AffiliateService {
           }
         }
       }
+      // commissionRate exposé même en pré-activation pour que l'écran
+      // "Devenir affilié" puisse afficher clairement ce que l'user va gagner.
+      const cfg = await this.getOrCreateConfig(appId);
       return {
         isAffiliate: false,
         canActivate,
         defaultCountry, // pré-sélection du select pays côté UI
+        commissionRate: cfg.defaultCommissionRate ?? 15,
         // Pré-remplissage du form d'activation côté mobile (modifiable
         // pour les users dont firstName/lastName sont des pseudos).
         prefill: {
@@ -271,6 +275,7 @@ class AffiliateService {
       country: user.affiliate.country,
       countryName: countryDoc?.countryName || null,
       currency: countryCfg?.currency || null,
+      commissionRate: config.defaultCommissionRate ?? 15,
       firstName: user.affiliate.firstName || null,
       lastName: user.affiliate.lastName || null,
       email: user.email || null,
