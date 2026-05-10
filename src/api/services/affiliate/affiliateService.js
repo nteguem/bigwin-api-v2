@@ -40,14 +40,12 @@ class AffiliateService {
   /**
    * Active le rôle affilié pour un User existant.
    *
-   * V1 minimaliste : on demande uniquement le pays (avec défaut =
-   * user.countryCode). PAS d'opérateur ni de numéro mobile money à
-   * l'activation — ces infos sont saisies UNE SEULE FOIS au moment du
-   * premier retrait, puis figées à vie.
+   * V1 : on demande pays + firstName + lastName (identité pour AfribaPay).
+   * PAS d'opérateur ni de numéro mobile money à l'activation — ces infos
+   * sont saisies UNE SEULE FOIS au moment du premier retrait, figées à vie.
    *
    * @param {Object} user - User document Mongoose
-   * @param {Object} [opts] - { country?: string } — pays choisi par l'user
-   *                          (si omis, on prend user.countryCode)
+   * @param {Object} [opts] - { country?, firstName, lastName }
    */
   async activate(user, opts = {}) {
     if (!user || !user._id) {
@@ -95,6 +93,17 @@ class AffiliateService {
       );
     }
 
+    // Identité affilié — requise pour les payouts AfribaPay
+    const firstName = (opts.firstName || '').trim();
+    const lastName = (opts.lastName || '').trim();
+    if (!firstName || !lastName) {
+      throw new AppError(
+        'Prénom et nom requis pour activer le compte affilié.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
     const code = await User.generateAffiliateCode(user.appId);
 
     user.affiliate = {
@@ -102,6 +111,8 @@ class AffiliateService {
       code,
       tier: config.defaultTier,
       country: requestedCountry,
+      firstName,
+      lastName,
       // payoutMethod omis : sera défini au premier retrait
       activatedAt: new Date(),
       suspended: false,
@@ -186,6 +197,13 @@ class AffiliateService {
         isAffiliate: false,
         canActivate,
         defaultCountry, // pré-sélection du select pays côté UI
+        // Pré-remplissage du form d'activation côté mobile (modifiable
+        // pour les users dont firstName/lastName sont des pseudos).
+        prefill: {
+          firstName: user.firstName || null,
+          lastName: user.lastName || null,
+          email: user.email || null,
+        },
       };
     }
 
@@ -248,6 +266,9 @@ class AffiliateService {
       country: user.affiliate.country,
       countryName: countryDoc?.countryName || null,
       currency: countryCfg?.currency || null,
+      firstName: user.affiliate.firstName || null,
+      lastName: user.affiliate.lastName || null,
+      email: user.email || null,
       payoutMethod: user.affiliate.payoutMethod || null,
       hasPayoutMethod: !!user.affiliate.payoutMethod?.operator,
       activatedAt: user.affiliate.activatedAt,

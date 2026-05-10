@@ -142,8 +142,13 @@ const userSchema = new mongoose.Schema({
       type: String,
       uppercase: true,
       trim: true
-      // ISO-2, copié de User.countryCode au moment de l'activation. Figé.
+      // ISO-2, choisi à l'activation (défaut user.countryCode). Figé.
     },
+    // Identité utilisée pour les paiements AfribaPay. Saisie à l'activation
+    // (séparée du profil User.firstName/lastName qui peut être vide ou
+    // contenir un pseudo). Modifiable tant que pas affilié, puis figée.
+    firstName: { type: String, trim: true },
+    lastName: { type: String, trim: true },
     payoutMethod: {
       operator: String,    // 'orange' | 'mtn' | 'wave' | 'moov' | ...
       phoneNumber: String  // sans dial code

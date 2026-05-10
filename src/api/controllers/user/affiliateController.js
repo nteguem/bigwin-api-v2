@@ -10,17 +10,18 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 /**
  * POST /user/affiliate/activate
- * Body: { country?: string }   (pays choisi par l'user, défaut user.countryCode)
- * Active le rôle affilié pour le user authentifié.
+ * Body: { country?, firstName, lastName }
+ * - country : pays choisi (défaut user.countryCode)
+ * - firstName / lastName : identité réelle pour les payouts AfribaPay
  */
 exports.activate = catchAsync(async (req, res, next) => {
-  const { country } = req.body || {};
+  const { country, firstName, lastName } = req.body || {};
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
   }
 
-  await affiliateService.activate(user, { country });
+  await affiliateService.activate(user, { country, firstName, lastName });
 
   const state = await affiliateService.getMyState(user);
   res.status(200).json({
