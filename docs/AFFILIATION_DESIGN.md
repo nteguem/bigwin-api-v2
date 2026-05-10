@@ -163,17 +163,22 @@
 
 ## TL;DR
 
-L'objectif n'est pas un "petit programme de parrainage". C'est de **transformer chaque user satisfait en commercial actif**, avec un produit affilié digne d'une plateforme SaaS sérieuse (équivalent Dropbox, Shopify, Spotify Premium).
+**Programme d'affiliation production-grade**, pas amateur. Transforme chaque user satisfait en commercial actif rémunéré automatiquement.
 
-5 piliers :
+**6 piliers** :
 
-1. **Architecture clean** : un user devient affilié en 1 tap, pas un compte parallèle
-2. **Tracking ultra-précis** : deep links + attribution multi-touch, fini les "j'ai oublié de taper le code"
-3. **Programme rémunérateur et progressif** : tiers dynamiques, commission récurrente capée, bonus de performance
-4. **Affilié hub mobile premium** : dashboard temps réel, marketing kit prêt à partager, mini-CRM
-5. **Anti-fraude + payouts automatisés** : device fingerprinting, mobile money sortant, chargeback handling
+1. **Architecture clean** : affilié = rôle dans User (sous-doc `User.affiliate`), pas un compte parallèle. 1 sub-doc par app, scope per-app.
+2. **Scope pays strict** : un affilié ne touche que sur les filleuls de son pays (figé au signup via `User.countryCode` IP). Mismatch = pas de commission.
+3. **Tracking natif** : Google Play Install Referrer (gratuit, fiable, déjà utilisé en prod). Pas de Branch.io / AppsFlyer.
+4. **Programme configurable** : taux, tiers, bonus, threshold — tout configurable depuis le backoffice par app, sans déploiement.
+5. **Payouts automatisés AfribaPay** : workflow `requested → processing → paid` avec webhook + reconciliation. Stratégie **pay-on-demand** : pas de pré-financement, le compte payout d'un pays est alimenté manuellement quand un affilié de ce pays demande son 1ᵉʳ retrait.
+6. **Robustesse production-grade** : HMAC webhook, idempotency, lock atomique MongoDB, reconciliation cron, audit immuable, surveillance balance AfribaPay.
 
-Délai estimé : **6 semaines** pour l'ensemble (1 dev temps plein), dont 1 semaine de wipe + foundation.
+**V1 démarrage** : Cameroun seul (XAF, Orange + MTN). Les 13 autres pays AfribaPay s'activent dynamiquement à la demande.
+
+**Plateforme V1** : Android only (iOS hors scope).
+
+Délai estimé : **6-7 semaines** pour l'ensemble (1 dev temps plein), dont 3-4 jours de wipe ancien système.
 
 ---
 
@@ -233,10 +238,42 @@ User (auth phone+pwd)
 
 **Scope (Option A)** : le sous-doc `affiliate` est porté par le `User` qui est lui-même scopé par `appId`. Donc un même téléphone sur BIGWIN et COACHING = 2 Users distincts = 2 sous-docs `affiliate` distincts = 2 comptes affiliés indépendants. Naturel.
 
+### 3.1.bis Scope pays — règle métier capitale
+
+> **Décision** : un affilié ne touche de commission **que sur les filleuls de son propre pays**. Un filleul d'un autre pays peut s'inscrire via le lien (rien ne l'en empêche) mais aucune commission n'est créée.
+
+**Implémentation** :
+- `User.countryCode` est déjà rempli automatiquement à la création du compte (résolution IP au signup, déjà existant en BD pour tous les users actuels).
+- À l'activation du rôle affilié, on copie `User.countryCode` dans `User.affiliate.country` et c'est **figé à vie** (pas de modification possible — anti-arbitrage).
+- Au moment de la création de la `Commission` (webhook paiement filleul réussi), on compare :
+  ```js
+  if (filleul.countryCode !== parrain.affiliate.country) {
+    // skip silencieux + log analytics
+    return;
+  }
+  ```
+- Pas d'écran de "choix du pays" dans le parcours signup affilié — le pays est imposé par l'IP de signup utilisateur. Si l'user veut changer de pays, contact admin (rare).
+
 ### 3.2 Modèles core (nouveaux)
 
 ```
-User { ..., affiliate: { isActive, code, tier, payoutMethod, ... } }
+User {
+  ...,
+  countryCode,                         // déjà existant — dérivé de l'IP au signup
+  affiliate: {
+    isActive: Boolean,
+    code: String (8 chars unique),
+    tier: String ('rookie' | ...),
+    country: String (ISO-2),           // FIGÉ au signup affilié, copié de User.countryCode
+    payoutMethod: {
+      operator: String ('orange' | 'mtn' | 'wave' | 'moov' | ...),
+      phoneNumber: String,             // sans dial code
+    },
+    activatedAt: Date,
+    suspended: Boolean,
+    suspendedReason: String,
+  }
+}
 
 Referral
   - code (8 chars unique)
@@ -533,6 +570,7 @@ L'écran principal de l'affilié dans l'app, avec 5 sections en swipe horizontal
 
 | Signal | Action |
 |--------|--------|
+| **Pays mismatch** (filleul.countryCode ≠ parrain.affiliate.country) | **Pas de commission créée** (skip silencieux + log analytics `country_mismatch`) |
 | Même `phone` que l'affilié (self-ref) | Commission créée en `cancelled` directement, log + notif admin |
 | Filleul refunde / chargeback | Commission `available` ou `locked` → `cancelled` (auto via webhook refund) |
 | Filleul cancel sub avant 30 j (si recurring activé plus tard) | Cancel des futures commissions recurring |
@@ -556,9 +594,9 @@ Les nouveaux affiliés ont accès au programme **immédiatement**, sans validati
 
 ---
 
-## 8. Payouts — workflow 100 % manuel par l'admin
+## 8. Payouts — automatisés via AfribaPay (stratégie "pay-on-demand")
 
-> **Décision** : pas d'API mobile money sortant, pas d'automatisation. L'admin reçoit la demande, fait le virement à la main (mobile money / banque), upload une preuve d'envoi, marque le payout comme effectué. Simple, transparent, contrôlable.
+> **Décision finale** : payouts automatisés via l'API AfribaPay sortant (`api-payout.afribapay.com`). Architecture **pay-on-demand** : l'affilié peut s'inscrire dans n'importe quel pays AfribaPay supporté ; quand il demande un retrait, on tente le payout. Si AfribaPay répond "insufficient funds" sur ce pays, on bascule en `awaiting_funds`, on notifie l'admin qui alimente le compte AfribaPay du pays concerné, puis le payout retry automatiquement. Aucun pré-financement de comptes inutilisés.
 
 ### 8.1 Modèle `PayoutRequest`
 
@@ -567,109 +605,268 @@ PayoutRequest {
   appId,
   user,                              // affilié qui demande
   amount, currency,
-  method: 'mobile_money' | 'bank_transfer' | 'other',
-  destination: {                     // remplie par l'affilié à la demande
-    mobileMoneyNumber, mobileMoneyOperator,  // si mobile_money
-    bankName, bankAccountName, bankAccountNumber, bankRib,  // si bank_transfer
-  },
-  status: 'requested' | 'approved' | 'processing' | 'paid' | 'rejected',
-  commissionsIncluded: [ObjectId],   // les Commission agrégées dans ce payout
+  country,                           // ISO-2, copié de user.affiliate.country
+  operator,                          // 'orange' | 'mtn' | 'wave' | 'moov' | ...
+  phoneNumber,                       // mobile money number (sans dial code)
+
+  status:
+    | 'queued'           // créé, en attente du worker
+    | 'processing'       // POST AfribaPay envoyé, attente webhook ou réconciliation
+    | 'awaiting_funds'   // AfribaPay refus pour solde insuffisant — admin doit alimenter
+    | 'paid'             // webhook AfribaPay confirme SUCCESS
+    | 'failed'           // échec définitif (numéro invalide, etc.)
+    | 'cancelled',       // annulé par admin
+
+  commissionsIncluded: [ObjectId],   // Commission agrégées dans ce payout (locked)
+
+  // AfribaPay tracking
+  afribaPayOrderId,                  // = `payout-${this._id}` — idempotency key
+  afribaPayTransactionId,            // POM... renvoyé par AfribaPay
+  afribaPayProviderId,               // provider_id (ex: pt-1tf343fvr11nt)
+  afribaPayLastResponse,             // dernier payload reçu (debug)
+
+  // Audit immuable
+  attempts: [{
+    at,
+    type: 'request' | 'webhook' | 'reconciliation' | 'admin_action',
+    status,
+    payload,
+    response,
+    error,
+  }],
+
+  failureReason,                     // user-facing si échec
+  webhookReceivedAt,
+  reconciledAt,
   requestedAt,
-  processedAt,
   paidAt,
-  proofUrl,                          // upload S3 / local — capture du virement
-  adminNote,
-  rejectionReason,
 }
 ```
 
-### 8.2 Flow côté affilié (mobile)
+### 8.2 Flow côté affilié (mobile + portail web)
 
-1. Affilié ouvre l'onglet **Wallet** dans son hub
-2. S'il a une balance disponible ≥ seuil configuré (ex: 5 000 XAF), il voit le bouton "Demander un retrait"
-3. Tap → modal avec :
-   - Montant à retirer (par défaut = balance dispo, modifiable)
-   - Méthode : `Mobile money` ou `Virement bancaire`
-   - Champs correspondants (numéro mobile money + opérateur, ou RIB)
-4. Confirm → `PayoutRequest` créé en statut `requested`
-5. Push notif à l'affilié : "Ta demande de retrait de X XAF a bien été enregistrée. Délai indicatif : sous 7 jours."
-6. L'affilié peut suivre le statut dans son historique de retraits
+1. Affilié ouvre **Wallet** → bouton "Demander un retrait" si balance ≥ 100 (min AfribaPay)
+2. Modal :
+   - Montant à retirer (max = balance disponible, max AfribaPay = 2 500 000)
+   - Coordonnées mobile money pré-remplies depuis `user.affiliate` (modifiables)
+3. Confirm → `PayoutRequest` créé en `queued`
+4. Push notif : "Demande enregistrée, traitement sous quelques minutes."
+5. L'affilié suit le statut en temps réel :
+   - `queued` → "En file d'attente"
+   - `processing` → "En cours de traitement par AfribaPay"
+   - `awaiting_funds` → "Notre service de paiement a besoin d'être réapprovisionné, ton retrait sera traité sous 24h"
+   - `paid` → "Envoyé ✅" + lien vers détail (référence AfribaPay)
+   - `failed` → "Échec : {raison}" + bouton "Re-tenter" (si récupérable)
 
-### 8.3 Flow côté admin (backoffice)
-
-1. **Tab "Demandes de retrait"** dans le backoffice — liste des `PayoutRequest` triées par ancienneté
-2. Clic sur une demande → écran de détail :
-   - Infos affilié (nom, téléphone, app)
-   - Montant + devise
-   - Méthode + coordonnées de paiement (visible en clair pour faire le virement)
-   - Liste des commissions incluses (vérifiable)
-3. Boutons :
-   - **Approuver** → statut passe à `approved` (ou `processing`) — débite le wallet de l'affilié (commissions passent en `paid` côté commission, mais le PayoutRequest reste en `processing`)
-   - **Rejeter** → statut `rejected` avec raison obligatoire — réintègre les commissions au wallet
-4. L'admin fait le virement à la main (mobile money ou banque) **hors plateforme**
-5. Une fois le virement effectué, l'admin :
-   - Upload la **preuve de paiement** (screenshot du SMS mobile money / reçu bancaire)
-   - Optionnel : saisie d'une référence (numéro de transaction)
-   - Marque comme **`paid`**
-6. Push notif à l'affilié : "Ton retrait de X XAF a été envoyé. Preuve disponible dans ton historique."
-
-### 8.4 Threshold (seuil minimum)
-
-Configurable par app dans `AffiliateConfig.payoutThreshold`. Défaut suggéré : **5 000 XAF** (ou équivalent).
-
-Affichage côté affilié : "Plus que X pour pouvoir retirer."
-
-### 8.5 Statut wallet — cycle de vie
+### 8.3 Service `AfribaPayService` (backend, singleton)
 
 ```
-Webhook paiement filleul reçu   → Commission créée + status: available (immédiat)
-Self-ref détecté (même phone)   → status: cancelled (auto, pas de validation humaine)
-Webhook refund / chargeback     → status: cancelled (auto)
-Incluse dans PayoutRequest      → status: locked (en cours de retrait)
-PayoutRequest marqué paid       → status: paid
-PayoutRequest rejected          → status: available (réintégrée au wallet)
+class AfribaPayService {
+  ensureToken()           → cache JWT, refresh à T-1h (TTL 24h chez AfribaPay)
+  triggerPayout(req)      → POST api-payout.afribapay.com/v1/pay/payout
+  getPayoutStatus(orderId) → GET api.afribapay.com/v1/status?order_id=X
+  getBalance()            → GET api.afribapay.com/v1/balance
+  verifyWebhookSignature(rawBody, headerSign)
+                          → HMAC SHA-256 du body avec api_key
+}
 ```
 
-> **Décision-clé** : la **commission est créée et validée automatiquement** dès la réception du webhook de paiement réussi. Pas de "review anti-fraude" qui hold les commissions, pas d'attente d'admin. Le seul moment où l'humain intervient, c'est pour **valider le payout** (le retrait de cash demandé par l'affilié).
+### 8.4 Worker payout (job runner)
 
-**Pas d'auto-virement.** Mais validation auto des commissions. L'admin pilote uniquement la sortie d'argent.
+Cron Node simple toutes les 30s avec lock atomique MongoDB :
+
+```
+1. find PayoutRequest { status: 'queued' } limit 10
+   findOneAndUpdate({ _id, status: 'queued' }, { $set: { status: 'processing' } })
+   → atomique, évite double traitement par 2 workers
+
+2. Pour chaque payout pickup :
+   - Construit payload AfribaPay :
+     {
+       operator, country, phone_number, amount, currency,
+       order_id: `payout-${_id}`,           // idempotency
+       merchant_key: env.AFRIBAPAY_MERCHANT_KEY,
+       reference_id: `${appId}-${affilieId}`,
+       lang: 'fr',
+       notify_url: `${BASE_URL}/api/afribapay/payout-webhook`,
+     }
+   - POST AfribaPay /v1/pay/payout (timeout 15s, retry 3× exponential backoff)
+   - Si réponse 200 + status PENDING :
+     → save afribaPayTransactionId, afribaPayProviderId
+     → log dans attempts[]
+   - Si réponse 200 + status FAILED avec message "insufficient funds" / "balance too low" :
+     → status = 'awaiting_funds'
+     → notif admin URGENTE (push + email) avec : pays, devise, montant manquant
+     → log dans attempts[]
+   - Si autre erreur (4xx, 5xx, timeout) :
+     → status = 'queued' (re-tente plus tard) si erreur réseau
+     → status = 'failed' si erreur métier (numéro invalide, etc.)
+```
+
+### 8.5 Webhook AfribaPay `/api/afribapay/payout-webhook`
+
+```
+1. Récupère raw body + header `Afribapay-Sign`
+2. Vérifie HMAC SHA-256 (rejette 403 si mismatch)
+3. Parse body, extrait order_id
+4. Trouve PayoutRequest correspondant (par afribaPayOrderId)
+5. Si déjà traité (paid/failed) → retourne 200 (idempotent, skip)
+6. Selon status reçu :
+   SUCCESS :
+     → PayoutRequest.status = 'paid'
+     → Commissions liées : status passe de 'locked' à 'paid'
+     → Décrémente définitivement le wallet de l'affilié
+     → Push notif user : "Ton retrait de X XAF a été envoyé ✅"
+     → Save attempts[]
+   FAILED :
+     → PayoutRequest.status = 'failed'
+     → Commissions liées : status revient à 'available' (réintégrées au wallet)
+     → Push notif user : "Échec : {raison}"
+7. TOUJOURS retourner 200 (sinon AfribaPay retry indéfiniment)
+```
+
+### 8.6 Cron de réconciliation
+
+Pour gérer les cas où le webhook ne nous parvient pas (réseau, AfribaPay down) :
+
+```
+Toutes les 15 min :
+  find PayoutRequest {
+    status: 'processing',
+    requestedAt: { $lt: now - 15min },
+    webhookReceivedAt: null
+  }
+  Pour chaque :
+    → GET AfribaPay /v1/status?order_id=payout-{_id}
+    → Applique transition si terminé (paid / failed)
+    → Save reconciledAt
+```
+
+### 8.7 Workflow `awaiting_funds` — validation admin manuelle (PAS de cron)
+
+> **Décision finale** : aucun retry automatique. Toute relance de payout après "insufficient funds" passe par une **action humaine de l'admin** dans le backoffice. Pas de cron qui surveille les balances et retente automatiquement.
+
+**Flow complet** :
+
+```
+1. AfribaPay rejette le payout pour "insufficient funds"
+   → PayoutRequest.status = 'awaiting_funds'
+   → Création d'une AdminFundingRequest liée au payout
+   → Notif URGENTE à l'admin (push + email) :
+     "Recharge AfribaPay nécessaire — pays: XX, devise: YYY,
+      affilié: <name>, montant: <amount>"
+
+2. L'affilié voit dans son dashboard :
+   "Ton retrait est en cours de traitement par notre équipe.
+    Tu seras notifié dès qu'il est envoyé."
+   → Pas de bouton "réessayer" affiché à l'affilié.
+
+3. Admin va sur bigwin-admin → section Affiliation → "Demandes de validation"
+   → Liste des AdminFundingRequest en attente
+
+4. Admin alimente manuellement le compte AfribaPay du pays
+   (virement bancaire, hors plateforme)
+
+5. Admin clique "Valider et relancer" sur la demande
+   → Backend re-soumet le payout à AfribaPay (avec le solde maintenant dispo)
+   → status = 'processing'
+   → Si AfribaPay accepte → flow normal (webhook → paid)
+   → Si AfribaPay refuse encore → retour à 'awaiting_funds' (rare, admin re-traite)
+```
+
+**Important** :
+- L'affilié ne re-déclenche PAS la demande. Sa demande initiale est conservée et relancée par l'admin.
+- L'admin peut aussi rejeter la demande (raison obligatoire) → commissions réintégrées au wallet.
+
+### 8.8 Surveillance balance AfribaPay (proactive)
+
+Cron quotidien :
+```
+GET /v1/balance
+Pour chaque payout {country, currency} :
+  si balance < seuil_critique[country] (ex: 50 000 XAF pour CM)
+    → email + notif admin "Solde payout faible"
+  si balance < seuil_bloquant (ex: 10 000 XAF)
+    → email URGENT + bloque automatiquement les nouveaux retraits du pays
+       (les nouveaux PayoutRequest atterrissent en `awaiting_funds`)
+```
+
+### 8.9 Cycle de vie complet d'une commission
+
+```
+Webhook paiement filleul reçu (AfribaPay payin)
+  → Vérification scope pays : if (filleul.countryCode !== parrain.affiliate.country) → SKIP
+  → Vérification self-ref : if (filleul.phone === parrain.phone) → SKIP
+  → Commission créée, status: available
+
+  [optionnel webhook refund filleul]
+  → status: cancelled (clawback automatique)
+
+Affilié demande retrait
+  → Commissions agrégées sélectionnées (FIFO ou somme libre)
+  → status: locked
+
+Worker tente AfribaPay payout
+  → Si succès webhook : status: paid (versement effectif)
+  → Si échec définitif : status: available (réintégrées au wallet)
+```
+
+### 8.10 Limites & sécurité
+
+| Mesure | Valeur |
+|---|---|
+| Min payout | 100 (min AfribaPay) |
+| Max payout | 2 500 000 (max AfribaPay) |
+| Max payouts en cours par affilié | 1 |
+| Max payouts par mois par affilié | 2 (configurable par tier) |
+| Token JWT cache TTL | 23h (rafraîchi avant expiration) |
+| Timeout API AfribaPay | 15s |
+| Retry HTTP (erreurs réseau) | 3× exponential backoff (2s, 5s, 15s) |
+| Webhook signature | HMAC SHA-256, reject 403 si invalide |
+| Replay attack | Idempotent par order_id (ignore webhook déjà traité) |
+| Lock distribué | findOneAndUpdate atomique sur status transition |
+| Audit immuable | append-only sur `attempts[]` |
 
 ---
 
-## 9. Admin power tools
+## 9. Admin power tools (`bigwin-admin` — section Affiliation)
 
 ### 9.1 Dashboard live
-
 - Top 20 affiliés du mois
 - Funnel temps réel : clics → installs → signups → convertis
 - Heatmap géographique des conversions
-- LTV moyen par affilié (qualité, pas seulement quantité)
-- Alerts en bandeau rouge si fraud rate > seuil
+- LTV moyen par affilié
+- Alerts en bandeau rouge : fraud rate, payouts `awaiting_funds`, balance AfribaPay basse
 
-### 9.2 Anti-fraud queue
+### 9.2 Surveillance balance AfribaPay (CRITIQUE)
+- Card temps réel par pays/devise (refresh GET /v1/balance toutes les heures + on-demand)
+- Indicateur visuel : 🟢 OK (> 50k) / 🟠 Attention (< 50k) / 🔴 Critique (< 10k, retraits bloqués)
+- Bouton "Recharger" qui ouvre le détail (montant à transférer + IBAN AfribaPay du pays)
+- Historique des recharges effectuées (manuelle, saisie admin)
 
-- Liste des commissions flaggées
-- Détail signaux + score
-- 3 boutons : Approve, Reject, Investigate
-- Bulk actions
+### 9.3 PayoutRequests dashboard
+- Liste filtrable par statut (queued / processing / awaiting_funds / paid / failed)
+- Détail : audit trail complet (`attempts[]`), réponse AfribaPay brute, raison échec
+- Action manuelle : "Re-tenter ce payout" (utile si admin vient d'alimenter le compte)
+- Action manuelle : "Annuler" (refund vers le wallet affilié, raison obligatoire)
 
-### 9.3 Payout queue
+### 9.4 Anti-fraude
+- Liste affiliés avec ratio refund / conversion suspect
+- Affiliés avec > X filleuls qui cancel < 30j
+- Country mismatch : top affiliés qui drainent du trafic hors zone (analytics)
+- Bouton "Suspendre" l'affilié (gel commissions futures + bloque payouts en attente)
 
-- Liste des demandes de payout en attente
-- Bouton "Process all eligible" (1 clic → traite toute la queue auto-validable)
-- Manual override pour cas spéciaux
-
-### 9.4 Config
-
+### 9.5 Configuration
 - Taux de commission par tier × par app
-- Threshold payout par app/devise
-- Activation/désactivation par app
-- Custom rates par campagne (ex: code spécial influenceur à 30 %)
+- Liste des pays AfribaPay supportés (sync depuis `/v1/countries` + toggle activation)
+- Seuils par pays : threshold payout, balance critique, balance bloquante
+- Limites par tier : nb max payouts/mois, montant max
+- Custom rates par campagne (ex: code influenceur à 30 %)
 
-### 9.5 Analytics export
-
+### 9.6 Analytics export
 - CSV des commissions par mois (pour la compta)
-- Stats par affilié (pour évaluer top performers et leur proposer Elite/Legend)
+- CSV des payouts (pour reconciliation AfribaPay)
+- Stats par affilié et par pays
 
 ---
 
@@ -752,35 +949,61 @@ Cas où Mehdi n'a pas encore de compte mobile, ou veut s'inscrire directement de
 
 > Pas d'attente de 7 jours, pas de validation admin. Si refund plus tard, la commission est annulée auto via webhook refund (cf. 10.5).
 
-### 10.4 Mehdi demande son retrait
+### 10.4 Mehdi demande son retrait — payout AfribaPay automatique
 
-1. Balance disponible : 12 500 XAF (au-dessus du seuil 5 000)
-2. Sur mobile OU portail web : "Demander un retrait"
-3. Choisit méthode (mobile money) + montant + confirme
-4. `PayoutRequest` créé en statut `requested`
-5. Push à Mehdi : "Ta demande de 12 500 XAF est enregistrée. Délai indicatif sous 7 jours."
+1. Balance disponible : 12 500 XAF (Mehdi est CM affilié)
+2. Sur mobile OU portail web : "Demander un retrait" → modal pré-rempli avec ses coordonnées mobile money
+3. Confirm → `PayoutRequest` créé en `queued` (idempotency via `_id`)
+4. Push immédiat : "Demande enregistrée, traitement sous quelques minutes."
+5. **Worker backend (cron 30s)** picke le payout :
+   - Lock atomique → status passe à `processing`
+   - POST AfribaPay `api-payout.afribapay.com/v1/pay/payout` avec `order_id=payout-<_id>`
+   - AfribaPay répond 200 PENDING avec `transaction_id=POM...`
+6. **Webhook AfribaPay** (sous 1-2 min en moyenne) `POST /api/afribapay/payout-webhook` :
+   - HMAC vérifié → match `order_id` → status passe à `paid`
+   - Commissions de Mehdi passent en `paid` (versement effectif)
+   - Push à Mehdi : "Ton retrait de 12 500 XAF a été envoyé ✅ — Référence: POM..."
+7. Mehdi reçoit le SMS Orange/MTN sur son téléphone avec le crédit.
 
-### 10.5 L'admin traite le retrait
+⏱ **Quelques minutes** du tap au cash sur le téléphone. Aucune intervention humaine.
 
-1. Admin ouvre `bigwin-admin` → section Affiliation → Demandes de retrait → voit la demande de Mehdi
-2. Vérifie les coordonnées (numéro mobile money + opérateur)
-3. Approuve la demande → wallet de Mehdi débité, commissions passent en `locked`
-4. **Hors plateforme** : admin ouvre son app Mobile Money / banque, fait le virement de 12 500 XAF
-5. Retourne dans le backoffice :
-   - Upload la **preuve d'envoi** (screenshot du SMS confirmation mobile money)
-   - Saisit la référence transaction (optionnel)
-   - Marque comme `paid`
-6. Push à Mehdi : "Ton retrait de 12 500 XAF a été envoyé ✅. Preuve disponible dans ton historique."
+### 10.4.bis Cas pay-on-demand — Aïssatou (CI) demande son 1ᵉʳ retrait
 
-### 10.6 Sarah refunde son achat — clawback auto
+1. Aïssatou est affiliée CI (pays sans solde payout AfribaPay encore alimenté chez nous)
+2. Elle demande un retrait de 8 000 XOF
+3. Worker tente AfribaPay → réponse "insufficient funds for CI XOF"
+4. `PayoutRequest.status = 'awaiting_funds'`
+5. Backend envoie email + push URGENT à l'admin :
+   > Recharge AfribaPay nécessaire — pays: CI, devise: XOF, montant en attente: 8 000
+6. Push à Aïssatou : "Ton retrait est en cours de traitement, peut prendre jusqu'à 24h."
+7. Admin alimente manuellement le compte payout AfribaPay CI XOF (virement bancaire)
+8. **Cron de retry (toutes 6h)** :
+   - Détecte `PayoutRequest awaiting_funds` pour CI XOF
+   - Check balance AfribaPay → solde maintenant > 8 000 XOF
+   - Repasse status à `queued` → worker la traite normalement
+9. Webhook AfribaPay → `paid` → push à Aïssatou.
+
+⏱ **Premier retrait CI** : ~24h (le temps que l'admin alimente). **Suivants** : minutes.
+
+### 10.5 Sarah refunde son achat — clawback auto
 
 1. Sarah obtient un refund (chargeback ou demande validée)
 2. Webhook refund → backend détecte la commission liée
 3. Si commission encore `available` ou `locked` → passe à `cancelled`
-4. Si commission déjà `paid` → flag pour reconciliation manuelle (rare)
+4. Si commission déjà `paid` → flag pour reconciliation manuelle (rare, traité par admin)
 5. Notif transparente à Mehdi : "La commission de Sarah (450 XAF) a été annulée car son achat a été remboursé"
-4. Notification push à Mehdi (transparente) : "La commission de Sarah (300 XAF) a été annulée car son achat a été remboursé"
-5. Pas de drama, balance reste cohérent
+
+### 10.6 Cas filleul d'un autre pays — pas de commission
+
+1. Mehdi (CM) partage son lien
+2. Cheikh (Sénégalais, `User.countryCode = 'SN'`) clique, s'inscrit, achète un pack
+3. Webhook paiement reçu → backend tente la création de Commission :
+   ```
+   filleul.countryCode = 'SN'  ≠  parrain.affiliate.country = 'CM'
+   → SKIP, log analytics 'country_mismatch'
+   ```
+4. Aucune commission créée. Mehdi voit dans son dashboard : "1 install hors zone (non comptabilisé)"
+5. Cheikh utilise normalement l'app, pas de différence pour lui.
 
 ---
 
@@ -952,46 +1175,89 @@ Pourquoi un portail web séparé pour les affiliés :
 
 ---
 
-## 13. Décisions verrouillées et questions restantes
+## 13. Décisions verrouillées (toutes finalisées)
 
-### ✅ Décisions verrouillées
+### ✅ Architecture & scope
+1. **Multi-app** : Option A — 1 compte affilié par app, indépendants
+2. **Cross-app** : NON, scope strict per-app
+3. **Scope pays** : un affilié ne touche de commission **que sur les filleuls de son pays**. Pays figé à vie au signup (copié depuis `User.countryCode` existant). Mismatch → commission non créée.
+4. **Plateforme V1** : Android uniquement, iOS hors scope
 
-1. **Architecture multi-app** : Option A — 1 compte affilié par app, totalement indépendants
-2. **Tracking** : Google Play Install Referrer natif (pas de Branch.io/AppsFlyer)
-3. **Liens** : URL Play Store directes avec `?referrer=utm_source%3DCODE`
-4. **Plateforme V1** : **Android uniquement**, iOS hors scope
-5. **Commissions** : 100 % configurables depuis le backoffice admin (`AffiliateConfig`) — pas hardcodées
-6. **Tiers** : configurables par admin (CRUD complet — peut démarrer avec 1 seul tier flat puis évoluer)
-7. **Validation des commissions** : **automatique** dès la réception du webhook de paiement réussi. Pas de review humaine, pas de hold.
-8. **Payouts** : 100 % manuels — l'affilié demande, l'admin valide + vire à la main + upload preuve
-9. **Création de compte affilié** : pas d'approbation admin, actif immédiatement
-10. **Inscription affilié** : possible via app mobile OU directement via le portail web `bigwin-affiliate-portal` (avec même email géré proprement)
-11. **2 projets React** : `bigwin-admin` (existant, ajout section Affiliation) + `bigwin-affiliate-portal` (nouveau)
-12. **Cross-app** : NON, scope strict per-app
-13. **Anti-fraude V1** : checks auto basiques (self-ref par phone, refund clawback). Pas de scoring complexe.
+### ✅ Inscription affilié
+5. Création de compte sans approbation admin, actif immédiatement
+6. Inscription possible via app mobile OU portail web `bigwin-affiliate-portal`
+7. Cas même email : si l'email matche un User existant → propose Google Sign-In ou magic link set-password
+8. **Pas de selector pays au signup** — pays imposé par `User.countryCode` (résolution IP, déjà existant)
 
-### 🟡 Questions restantes à trancher (paramètres business)
+### ✅ Tracking
+9. Google Play Install Referrer natif (pas de Branch.io/AppsFlyer)
+10. Liens Play Store directes avec `?referrer=utm_source=CODE`
+11. Nouveau service Flutter `AffiliateReferrerService` — réécrit from scratch (pas de réutilisation de l'ancien)
 
-| # | Question | Proposition par défaut |
-|---|----------|------------------------|
-| 1 | Taux de commission de démarrage (configurable, juste la valeur initiale) | **15 %** sur le prix du forfait |
-| 2 | Recurring commissions activées dès le début ? | **Non** — 1 commission par achat. Le recurring sera ajouté en V2 si pertinent |
-| 3 | Cap commission lifetime par filleul | **3× prix du forfait** (ex: forfait 3 000 XAF → max 9 000 XAF par filleul) |
-| 4 | Threshold payout par défaut | **5 000 XAF** (configurable par app et devise) |
-| 5 | Bonus first win | **500 XAF** (activé par défaut, désactivable dans la config) |
-| 6 | Visibilité du parrainage côté filleul | **OUI** ("Tu as été parrainé par Mehdi" → social proof) |
-| 7 | Bonus filleul (réduction sur 1ᵉʳ forfait) | **Non en V1** — ajout V2 si conversion à booster |
-| 8 | Marketing kit (templates WhatsApp pré-faits) | **Phase 5** (après MVP) |
-| 9 | Mini-CRM filleuls avec relance | **Phase 5** |
-| 10 | Gamification (leaderboard, badges) | **Plus tard** (V2) |
-| 11 | Domaine du portail web | À choisir — `affiliate.bigwin.com` ou autre |
+### ✅ Commissions
+12. Configurables depuis le backoffice admin (`AffiliateConfig`) — aucune valeur hardcodée
+13. Tiers configurables par admin (CRUD complet, peut démarrer avec 1 seul tier flat)
+14. Validation auto dès webhook paiement (pas de review humaine, pas de hold)
+15. Refund / chargeback → clawback automatique
+16. **Taux démarrage : 15 %** sur le prix du forfait
+17. **Recurring V1 : NON** (1 commission par achat). V2 si pertinent.
+18. **Cap lifetime par filleul : 3× prix du forfait**
+19. **Bonus first win : 500 XAF** (activable, configurable)
+20. Visibilité parrainage côté filleul : OUI ("Tu as été parrainé par Mehdi")
+21. Bonus filleul (réduction 1ᵉʳ forfait) : NON en V1
+
+### ✅ Payouts AfribaPay (architecture pay-on-demand)
+22. **Provider : AfribaPay sortant** (`api-payout.afribapay.com`)
+23. **Stratégie pay-on-demand** : pas de pré-financement. Affilié peut s'inscrire dans n'importe quel pays AfribaPay supporté ; au 1ᵉʳ retrait, si "insufficient funds" → admin alerté + alimentation manuelle + retry auto.
+24. **Démarrage : Cameroun (CM XAF) seul pays alimenté.** Les 13 autres s'activent on-demand.
+25. **Transfert vers AfribaPay** : manuel par l'admin (virement bancaire vers IBAN AfribaPay du pays)
+26. **Seuil retrait minimum : 100** (min AfribaPay), pas de seuil métier additionnel
+27. **Seuil critique balance AfribaPay** : 50 000 XAF (alerte admin), 10 000 (bloque nouveaux retraits)
+28. **Limite anti-abus** : 1 payout en cours max + 2 par mois par affilié (configurable par tier)
+29. **Webhook signature** : HMAC SHA-256 vérifiée (rejette 403 si invalide)
+30. **Idempotency** : `order_id = payout-${PayoutRequest._id}`
+31. **Reconciliation cron** : 15 min sur `processing` sans webhook (uniquement pour récupérer les webhooks perdus)
+32. **Pas de retry auto sur `awaiting_funds`** : relance déclenchée uniquement par action admin manuelle dans le backoffice, après alimentation du compte AfribaPay
+
+### ✅ Frontend
+33. **2 projets React** : `bigwin-admin` (existant + section Affiliation) + `bigwin-affiliate-portal` (nouveau)
+34. Domaine portail à choisir (suggéré `affiliate.bigwin.com`)
+
+### ✅ Anti-fraude V1
+35. Checks auto : pays mismatch, self-ref par phone, refund clawback, rate-limit code
+36. Pas de scoring complexe ni file de review. Détection a posteriori via dashboard admin.
+
+### ✅ Phase 0 (wipe)
+37. Suppression complète de l'ancien système amateur (16 fichiers backend + dispersé dans 5 apps mobile)
+38. Aucune réutilisation de code legacy
+
+### ✅ Implémentation
+39. **Job worker** : cron Node simple + lock atomique MongoDB (pas de BullMQ pour démarrer)
+40. **URL webhook** : `https://api-new.proxidream.com/api/afribapay/payout-webhook`
+41. **Compte AfribaPay** : creds prod déjà disponibles (Postman fourni)
+
+### 🟡 Reste à fixer (avant Phase 4)
+
+| # | Item | Action |
+|---|------|--------|
+| 1 | Domaine portail web | À choisir avant Phase 4 |
+| 2 | Variables `.env` AfribaPay | Ajouter au backend : `AFRIBAPAY_API_USER`, `AFRIBAPAY_API_KEY`, `AFRIBAPAY_MERCHANT_KEY`, `AFRIBAPAY_BASE_URL`, `AFRIBAPAY_PAYOUT_URL` |
+| 3 | Marketing kit + Mini-CRM + Gamification | Phase 5+ après MVP |
 
 ---
 
-## 14. Décision
+## 14. On attaque ?
 
-> Tes 7 décisions clés sont verrouillées. Pour les 11 questions restantes, je propose les valeurs par défaut ci-dessus. Tu valides en bloc ou tu ajustes points par points.
+**Tout est verrouillé.** Toutes les décisions techniques sont prises, toutes les questions tranchées.
 
-**Prochaine étape proposée** : tu valides les 11 défauts (ou tu en ajustes), et j'écris les specs détaillées de la Phase 0 (wipe) + Phase 1 (foundation MVP). On attaque ensuite l'implémentation.
+**Prochaine étape** : Phase 0 — wipe complet de l'ancien système amateur :
+- Backend (`c:/DEV/ROLAND/bigwin v2`) : 16 fichiers à supprimer + 7 fichiers à éditer
+- 5 apps mobile : `auth_service.dart`, `auth_provider.dart`, `user_model.dart`, `utm_referrer_service.dart` (bigwin), etc.
+- Migration BD : drop `affiliates`, `affiliatetypes`, `commissions` ; nettoyer `User.referredBy`
+- Vérification : `grep` clean sur 5 repos + `flutter analyze` 0 erreur + smoke test
 
-Phase 1 cible : **MVP fonctionnel basique** — un user devient affilié, partage son lien Play Store, capture du code à l'install (Android), commission créée à l'achat, demande de retrait, admin valide manuellement. ≈ 2 semaines.
+Estimation Phase 0 : 3-4 jours.
+
+Ensuite Phase 1 (Foundation backend) puis Phase 2 (mobile MVP), Phase 3 (admin), Phase 4 (portail web), Phase 5 (anti-fraude robuste + payout AfribaPay), Phase 6 (beta).
+
+**Tu valides — j'attaque la Phase 0 maintenant ?**

@@ -93,9 +93,8 @@ class UserManagementService {
     // 🔍 DEBUG - Afficher la query finale
     console.log('📊 [UserService] Query MongoDB finale:', JSON.stringify(query));
 
-    // Exécution de la requête avec population
+    // Exécution de la requête
     const users = await User.find(query)
-      .populate('referredBy', 'firstName lastName affiliateCode')
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit))
@@ -162,9 +161,7 @@ class UserManagementService {
    * @param {String} userId - ID de l'utilisateur
    */
   async getUserById(appId, userId) {
-    const user = await User.findOne({ _id: userId, appId })
-      .populate('referredBy', 'firstName lastName affiliateCode email')
-      .lean();
+    const user = await User.findOne({ _id: userId, appId }).lean();
 
     if (!user) {
       throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);
@@ -222,7 +219,7 @@ class UserManagementService {
       { _id: userId, appId },
       updates,
       { new: true, runValidators: true }
-    ).populate('referredBy', 'firstName lastName affiliateCode');
+    );
 
     if (!user) {
       throw new AppError('Utilisateur non trouvé', 404, ErrorCodes.NOT_FOUND);

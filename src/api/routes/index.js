@@ -24,14 +24,12 @@ const appsRoleGuard = (req, res, next) => {
 
 // ===== ROUTES D'AUTHENTIFICATION =====
 const adminAuthRoutes = require('./admin/authRoutes');
-const affiliateAuthRoutes = require('./affiliate/authRoutes');
 const userAuthRoutes = require('./user/authRoutes');
 
 // Admin: appId optionnel (un admin peut gérer plusieurs apps)
 router.use('/admin/auth', identifyAppOptional, adminAuthRoutes);
 
-// Affiliate & User: appId OBLIGATOIRE (chaque affilié/user appartient à une app)
-router.use('/affiliate/auth', identifyApp, affiliateAuthRoutes);
+// User: appId OBLIGATOIRE (chaque user appartient à une app)
 router.use('/user/auth', identifyApp, userAuthRoutes);
 
 // ===== ROUTES ADMIN =====
@@ -42,9 +40,6 @@ const adminTicketRoutes = require('./admin/ticketRoutes');
 const adminPredictionRoutes = require('./admin/predictionRoutes');
 const adminSportsRoutes = require('./admin/sportsRoutes');
 const adminEventRoutes = require('./admin/eventRoutes');
-const adminAffiliateRoutes = require('./admin/affiliateRoutes');
-const adminCommissionRoutes = require('./admin/commissionRoutes');
-const adminAffiliateTypeRoutes = require('./admin/affiliateTypeRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes');
 const adminUserRoutes = require('./admin/userRoutes');
 const adminDayOffRoutes = require('./admin/dayOffRoutes');
@@ -72,7 +67,7 @@ router.use('/admin/sports',          identifyApp, ...ADMIN_PRONO,  adminSportsRo
 router.use('/admin/events',          identifyApp, ...ADMIN_PRONO,  adminEventRoutes);
 router.use('/admin/day-off',         identifyApp, ...ADMIN_PRONO,  adminDayOffRoutes);
 
-// Affiliates / commissions / users / affiliate-types / formations — super_admin only
+// Users / formations — super_admin only
 // Uploads génériques admin (super_admin only — auth dans le subrouter)
 router.use('/admin/uploads',         adminUploadRoutes);
 
@@ -82,9 +77,6 @@ router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin')
 // Gifts admin — super_admin only, scoped à l'app
 router.use('/admin/gifts',           identifyApp, ...ADMIN_SUPER,  adminGiftRoutes);
 
-router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliateRoutes);
-router.use('/admin/commissions',     identifyApp, ...ADMIN_SUPER,  adminCommissionRoutes);
-router.use('/admin/affiliate-types', identifyApp, ...ADMIN_SUPER,  adminAffiliateTypeRoutes);
 router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
 // Users: stats accessible aux investisseurs (read-only, scoped à leurs apps); le reste reste super_admin only
 const adminUserController = require('../controllers/admin/userController');
@@ -114,11 +106,6 @@ router.use('/admin/analytics', adminAuth.protect, authorize('super_admin'), admi
 // se fait via le query param `?appId=xxx` géré dans le controller.
 const adminLogsRoutes = require('./admin/logsRoutes');
 router.use('/admin/logs', adminAuth.protect, authorize('super_admin'), adminLogsRoutes);
-
-// ===== ROUTES AFFILIATE =====
-const affiliateDashboardRoutes = require('./affiliate/dashboardRoutes');
-
-router.use('/affiliate/dashboard', identifyApp, affiliateDashboardRoutes);
 
 // ===== ROUTES USER =====
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
@@ -188,7 +175,6 @@ router.get('/', (req, res) => {
         packages: 'GET /admin/packages - Gestion des packages',
         categories: 'GET /admin/categories - Gestion des catégories',
         tickets: 'GET /admin/tickets - Gestion des tickets',
-        affiliates: 'GET /admin/affiliates - Gestion des affiliés',
         users: 'GET /admin/users - Gestion des utilisateurs',
         config: 'GET /admin/config - Gestion des configurations pays'
       },
@@ -197,9 +183,6 @@ router.get('/', (req, res) => {
         subscriptions: 'GET /user/subscriptions - Abonnements',
         packages: 'GET /user/packages - Packages disponibles',
         googlePlay: 'POST /user/google-play/validate - Paiements Google Play'
-      },
-      affiliate: {
-        dashboard: 'GET /affiliate/dashboard - Tableau de bord affilié'
       },
       common: {
         config: 'POST /config - Obtenir config par IP',

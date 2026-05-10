@@ -55,7 +55,6 @@ exports.getAppStats = catchAsync(async (req, res) => {
 
   // Compter les ressources de cette app
   const User = require('../../models/user/User');
-  const Affiliate = require('../../models/affiliate/Affiliate');
   const Package = require('../../models/common/Package');
   const Category = require('../../models/common/Category');
   const Ticket = require('../../models/common/Ticket');
@@ -63,14 +62,12 @@ exports.getAppStats = catchAsync(async (req, res) => {
 
   const [
     usersCount,
-    affiliatesCount,
     packagesCount,
     categoriesCount,
     ticketsCount,
     subscriptionsCount
   ] = await Promise.all([
     User.countDocuments({ appId }),
-    Affiliate.countDocuments({ appId }),
     Package.countDocuments({ appId }),
     Category.countDocuments({ appId }),
     Ticket.countDocuments({ appId }),
@@ -84,7 +81,6 @@ exports.getAppStats = catchAsync(async (req, res) => {
       name: app.displayName,
       stats: {
         users: usersCount,
-        affiliates: affiliatesCount,
         packages: packagesCount,
         categories: categoriesCount,
         tickets: ticketsCount,

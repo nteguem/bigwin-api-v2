@@ -123,7 +123,7 @@ class GoogleAuthService {
    * Créer ou connecter un utilisateur Google
    * @param {String} appId - ID de l'application
    * @param {Object} googleData - Données extraites du token Google
-   * @param {Object} additionalData - Données additionnelles (city, countryCode, affiliateCode)
+   * @param {Object} additionalData - Données additionnelles (city, countryCode)
    */
   async findOrCreateGoogleUser(appId, googleData, additionalData = {}) {
     try {
@@ -165,20 +165,7 @@ class GoogleAuthService {
       
       // 3. Créer un nouveau compte Google POUR CETTE APP
       const pseudo = await this.generateUniquePseudo(appId, googleData);
-      
-      // Valider le code affilié si fourni
-      let referredBy = null;
-      if (additionalData.affiliateCode) {
-        const authService = require('./authService');
-        try {
-          const affiliate = await authService.validateAffiliateCode(appId, additionalData.affiliateCode);
-          referredBy = affiliate?._id;
-        } catch (error) {
-          console.log(`⚠️  Code affilié invalide (${additionalData.affiliateCode}) - App: ${appId}`);
-          // On continue sans affilié
-        }
-      }
-      
+
       // Acquisition : capturer si le mobile a envoyé une source valide
       const acquisition = additionalData.acquisitionSource &&
         ['google_ads', 'organique'].includes(additionalData.acquisitionSource)
@@ -209,7 +196,6 @@ class GoogleAuthService {
         // Infos additionnelles de l'app
         city: additionalData.city || '',
         countryCode: additionalData.countryCode || '',
-        referredBy,
 
         // Statut
         isActive: true,

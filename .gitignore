@@ -39,3 +39,7 @@ Thumbs.db
 .yarn
 coverage/
 .nyc_output/
+
+# Backups locaux (données sensibles : hash mdp, tokens, infos paiement)
+backup-*/
+backup-affiliation-legacy/

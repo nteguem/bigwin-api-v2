@@ -15,7 +15,7 @@ const SERVICE = 'auth';
  * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phoneNumber, countryCode, dialCode, password, pseudo, affiliateCode, city, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
+  const { phoneNumber, countryCode, dialCode, password, pseudo, city, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -24,26 +24,16 @@ exports.register = catchAsync(async (req, res, next) => {
   if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-  
+
   // Vérifier si le numéro existe déjà POUR CETTE APP
   const existingUser = await User.findOne({ appId, phoneNumber });
   if (existingUser) {
     return next(new AppError('Ce numéro de téléphone est déjà utilisé', 400, ErrorCodes.VALIDATION_ERROR));
   }
-  
-  // Valider le code affilié si fourni
-  let affiliate = null;
-  if (affiliateCode) {
-    try {
-      affiliate = await authService.validateAffiliateCode(appId, affiliateCode);
-    } catch (error) {
-      return next(error);
-    }
-  }
-  
+
   // Générer l'email automatiquement avec vérification d'unicité POUR CETTE APP
   const generatedEmail = await generateUniqueUserEmail(appId, phoneNumber, pseudo, countryCode);
-  
+
   // Construire l'objet acquisition uniquement si le mobile a envoyé une source
   // valide (sinon laisser null pour les anciens clients pré-sprint tracking)
   const acquisition = acquisitionSource && ['google_ads', 'organique'].includes(acquisitionSource)
@@ -66,7 +56,6 @@ exports.register = catchAsync(async (req, res, next) => {
     city,
     authProvider: 'local',
     emailVerified: false,
-    referredBy: affiliate?._id,
     firebaseAppInstanceId: firebaseAppInstanceId || null,
     ...(acquisition && { acquisition })
   });
@@ -208,16 +197,16 @@ exports.login = catchAsync(async (req, res, next) => {
  * Authentification avec Google (login + register combiné)
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
-  const { idToken, affiliateCode, city, countryCode, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
-  
+  const { idToken, city, countryCode, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
+
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
-  
+
   // Validation
   if (!idToken) {
     return next(new AppError('Token Google requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-  
+
   try {
     // 1. Vérifier et décoder le token Google - ⭐ PASSER APPID
     const googleData = await googleAuthService.verifyGoogleToken(appId, idToken);
@@ -226,10 +215,9 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
       category: 'googleAuth',
       email: googleData.email,
     });
-    
+
     // 2. Créer ou récupérer l'utilisateur POUR CETTE APP - ⭐ PASSER APPID
     const { user, isNewUser } = await googleAuthService.findOrCreateGoogleUser(appId, googleData, {
-      affiliateCode,
       city,
       countryCode,
       acquisitionSource,
@@ -406,10 +394,9 @@ exports.refresh = catchAsync(async (req, res, next) => {
 exports.getMe = catchAsync(async (req, res, next) => {
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
-  
-  // Populer les infos de l'affilié parrain si existant
-  const user = await User.findById(req.user._id).populate('referredBy', 'firstName lastName affiliateCode');
-  
+
+  const user = await User.findById(req.user._id);
+
   // Vérifier s'il a un abonnement actif
   const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(appId, req.user._id, req.query?.lang || 'fr');
   
