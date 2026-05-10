@@ -456,7 +456,23 @@ class AffiliateAdminService {
       );
     }
 
-    // ===== 1. Appel AfribaPay payout =====
+    // ===== 1. Vérification config webhook (CRITIQUE) =====
+    // Sans notifyUrl, AfribaPay ne webhookra jamais et le payout
+    // restera stuck à "processing" à vie. Mieux vaut throw maintenant
+    // que créer un payout fantôme.
+    const notifyUrl = process.env.AFRIBAPAY_PAYOUT_NOTIFY_URL;
+    if (!notifyUrl) {
+      throw new AppError(
+        'AFRIBAPAY_PAYOUT_NOTIFY_URL non configuré dans le .env. ' +
+          'Sans cette URL, AfribaPay ne pourra jamais confirmer le ' +
+          'paiement et le retrait restera bloqué. Configure cette ' +
+          'variable d\'env avant de valider un retrait.',
+        500,
+        ErrorCodes.INTERNAL_ERROR
+      );
+    }
+
+    // ===== 2. Appel AfribaPay payout =====
     let afribaResult;
     try {
       afribaResult = await afribaPayPayoutService.triggerPayout(app, {
@@ -467,7 +483,7 @@ class AffiliateAdminService {
         currency: pr.currency,
         orderId: pr.afribaPayOrderId || `payout-${pr._id}`,
         referenceId: `affiliate-${pr.user}`,
-        notifyUrl: process.env.AFRIBAPAY_PAYOUT_NOTIFY_URL || undefined,
+        notifyUrl,
       });
     } catch (err) {
       // Audit la tentative échouée pour traçabilité, sans changer le status

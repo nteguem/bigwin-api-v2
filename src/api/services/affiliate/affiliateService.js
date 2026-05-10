@@ -810,10 +810,14 @@ class AffiliateService {
     }
 
     if (commission.status === 'locked' && commission.payoutRequest) {
-      // Retire de la liste du payout en cours
+      // Retire de la liste du payout en cours ET décrémente le montant
+      // total du payout (sinon l'affilié toucherait trop).
       await PayoutRequest.updateOne(
         { _id: commission.payoutRequest },
-        { $pull: { commissionsIncluded: commission._id } }
+        {
+          $pull: { commissionsIncluded: commission._id },
+          $inc: { amount: -Math.abs(commission.amount) },
+        }
       );
     }
 
@@ -982,7 +986,10 @@ class AffiliateService {
         );
       }
 
-      // Crée la PayoutRequest puis lock les commissions atomiquement
+      // Crée la PayoutRequest puis lock les commissions atomiquement.
+      // afribaPayOrderId est set DANS le create() (et pas via un save()
+      // séparé) pour que le webhook puisse le matcher dès l'instant t0
+      // — pas de race window entre create et update.
       const commissionIds = commissions.map((c) => c._id);
 
       const pr = await PayoutRequest.create({
@@ -997,6 +1004,7 @@ class AffiliateService {
         status: 'queued',
         commissionsIncluded: commissionIds,
         requestedAt: new Date(),
+        afribaPayOrderId: `payout-${newPayoutId}`,
         attempts: [
           {
             type: 'request',
@@ -1006,10 +1014,6 @@ class AffiliateService {
           },
         ],
       });
-
-      // afribaPayOrderId = `payout-${pr._id}` (idempotency key)
-      pr.afribaPayOrderId = `payout-${pr._id}`;
-      await pr.save();
 
       // Lock les commissions
       await Commission.updateMany(

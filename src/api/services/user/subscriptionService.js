@@ -350,6 +350,22 @@ class SubscriptionService {
     // Annuler l'abonnement Mobile Money
     await subscription.cancel();
 
+    // Clawback affiliation : annule la commission liée si elle existe.
+    // Silencieux : si ça échoue on log mais on ne casse pas l'annulation
+    // de l'abonnement (l'affiliation est secondaire).
+    try {
+      const affiliateService = require('../affiliate/affiliateService');
+      await affiliateService.cancelCommissionForSubscription(
+        subscription,
+        'subscription_cancelled'
+      );
+    } catch (err) {
+      console.warn(
+        '[subscriptionService] cancelCommissionForSubscription failed:',
+        err?.message || err
+      );
+    }
+
     return subscription;
   }
 
