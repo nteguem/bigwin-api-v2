@@ -171,21 +171,21 @@ class AffiliateService {
     const isAffiliate = !!user.affiliate?.isActive;
 
     if (!isAffiliate) {
-      // canActivate est true si AU MOINS un pays est activé dans la config
-      // (l'user pourra choisir parmi ces pays au moment de l'activation,
-      // avec son countryCode comme défaut).
+      // canActivate est true uniquement si le pays détecté de l'user est
+      // dans la liste des pays activés. Logique restrictive cohérente avec
+      // l'intention business : on ne propose le programme qu'aux users
+      // dont le pays est supporté.
       let canActivate = false;
       let defaultCountry = null;
       if (user.countryCode) {
         const config = await this.getOrCreateConfig(appId);
         if (config.isEnabled) {
           const userCountry = user.countryCode.toUpperCase();
-          const enabledCountries = (config.payoutCountries || []).filter(
-            (c) => c.enabled !== false
+          const userCfg = (config.payoutCountries || []).find(
+            (c) => c.code === userCountry && c.enabled !== false
           );
-          canActivate = enabledCountries.length > 0;
-          const userCfg = enabledCountries.find((c) => c.code === userCountry);
           if (userCfg) {
+            canActivate = true;
             defaultCountry = {
               code: userCfg.code,
               currency: userCfg.currency,
