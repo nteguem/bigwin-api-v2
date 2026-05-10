@@ -22,5 +22,6 @@ router.get('/commissions', affiliateController.listCommissions);
 router.get('/commissions/:id', affiliateController.getCommissionDetail);
 router.post('/payout', affiliateController.requestPayout);
 router.get('/payouts', affiliateController.listPayouts);
+router.get('/payouts/:id', affiliateController.getPayoutDetail);
 
 module.exports = router;

@@ -184,6 +184,19 @@ exports.requestPayout = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * GET /user/affiliate/payouts/:id
+ * Détail d'une PayoutRequest + commissions incluses + audit trail.
+ */
+exports.getPayoutDetail = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const detail = await affiliateService.getMyPayoutDetail(user, req.params.id);
+  res.status(200).json({ success: true, data: detail });
+});
+
+/**
  * GET /user/affiliate/payouts?page=1&limit=20&status=queued
  */
 exports.listPayouts = catchAsync(async (req, res, next) => {

@@ -1045,6 +1045,83 @@ class AffiliateService {
   }
 
   /**
+   * Détail d'une PayoutRequest de l'affilié. Inclut les commissions
+   * incluses dans le payout (avec le filleul source pour chacune)
+   * et les attempts récents (audit trail simplifié).
+   *
+   * Sécurité : vérifie que la PayoutRequest appartient bien au user
+   * courant.
+   */
+  async getMyPayoutDetail(user, payoutId) {
+    if (!user.affiliate?.isActive) {
+      throw new AppError(
+        "Vous n'êtes pas affilié.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const pr = await PayoutRequest.findOne({
+      _id: payoutId,
+      appId: user.appId,
+      user: user._id,
+    }).lean();
+
+    if (!pr) {
+      throw new AppError('Demande introuvable.', 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Charger les commissions liées (avec referee pseudo pour l'UI)
+    const commissions = await Commission.find({
+      _id: { $in: pr.commissionsIncluded || [] },
+    })
+      .populate('referee', 'pseudo countryCode')
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // Audit trail simplifié — on cache les payloads internes (parfois
+    // sensibles) et on garde juste les types et statuts.
+    const auditTrail = (pr.attempts || []).map((a) => ({
+      at: a.at,
+      type: a.type,
+      status: a.status,
+      actor: a.actor,
+      error: a.error || null,
+    }));
+
+    return {
+      _id: pr._id,
+      amount: pr.amount,
+      currency: pr.currency,
+      country: pr.country,
+      operator: pr.operator,
+      phoneNumber: pr.phoneNumber,
+      status: pr.status,
+      requestedAt: pr.requestedAt,
+      paidAt: pr.paidAt || null,
+      cancelledAt: pr.cancelledAt || null,
+      cancelReason: pr.cancelReason || null,
+      failureReason: pr.failureReason || null,
+      afribaPayTransactionId: pr.afribaPayTransactionId || null,
+      commissions: commissions.map((c) => ({
+        _id: c._id,
+        amount: c.amount,
+        currency: c.currency,
+        rate: c.commissionRate,
+        status: c.status,
+        createdAt: c.createdAt,
+        referee: c.referee
+          ? {
+              pseudo: c.referee.pseudo,
+              country: c.referee.countryCode,
+            }
+          : null,
+      })),
+      attempts: auditTrail,
+    };
+  }
+
+  /**
    * Liste paginée des PayoutRequest de l'affilié.
    */
   async listMyPayouts(user, { page = 1, limit = 20, status } = {}) {
