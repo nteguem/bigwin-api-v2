@@ -99,24 +99,33 @@ class AffiliateAdminService {
     ]);
 
     // Stats par affilié (dans une seule aggregation pour limiter les queries)
+    // Groupé par status x currency pour matcher le format attendu côté UI :
+    //   stats: { available: { XAF: { amount, count } }, paid: {...}, ... }
+    // Cohérent avec le format retourné par getAffiliateDetail.
     const ids = items.map((u) => u._id);
     const stats = await Commission.aggregate([
       { $match: { appId, referrer: { $in: ids } } },
       {
         $group: {
-          _id: { referrer: '$referrer', status: '$status' },
+          _id: {
+            referrer: '$referrer',
+            status: '$status',
+            currency: '$currency',
+          },
           total: { $sum: '$amount' },
           count: { $sum: 1 },
         },
       },
     ]);
 
-    // Index par userId pour merger
+    // Index par userId puis status puis currency.
     const statsMap = {};
     for (const s of stats) {
       const uid = s._id.referrer.toString();
+      const { status, currency } = s._id;
       statsMap[uid] = statsMap[uid] || {};
-      statsMap[uid][s._id.status] = { amount: s.total, count: s.count };
+      statsMap[uid][status] = statsMap[uid][status] || {};
+      statsMap[uid][status][currency] = { amount: s.total, count: s.count };
     }
 
     return {
