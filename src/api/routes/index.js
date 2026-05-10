@@ -153,11 +153,16 @@ const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');
 const notificationRoutes = require('./common/notificationRoutes');
 const configRoutes = require('./common/configRoutes');
+const appInfoRoutes = require('./common/appInfoRoutes');
 
 router.use('/devices', identifyApp, deviceRoutes);
 router.use('/topics', identifyApp, topicRoutes);
 router.use('/notifications', identifyApp, notificationRoutes);
 router.use('/config', configRoutes);
+
+// App info publique : branding + Play Store + support email
+// (utilisé par le portail affilié, futur landing page, etc.)
+router.use('/app', identifyApp, appInfoRoutes);
 
 /**
  * GET /api/

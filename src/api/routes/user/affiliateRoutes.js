@@ -17,5 +17,7 @@ router.post('/payout-method', affiliateController.updatePayoutMethod);
 router.get('/link', affiliateController.getShareLink);
 router.get('/referrals', affiliateController.listReferrals);
 router.get('/commissions', affiliateController.listCommissions);
+router.post('/payout', affiliateController.requestPayout);
+router.get('/payouts', affiliateController.listPayouts);
 
 module.exports = router;

@@ -72,11 +72,14 @@ class AuthService {
       data: {
         user: {
           id: user._id,
+          appId: user.appId,
           phone: user.phone,
+          phoneNumber: user.phoneNumber,
           email: user.email,
           pseudo: user?.pseudo,
           firstName: user.firstName,
           lastName: user.lastName,
+          countryCode: user.countryCode,
         },
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken

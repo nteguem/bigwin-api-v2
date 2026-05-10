@@ -108,3 +108,38 @@ exports.listCommissions = catchAsync(async (req, res, next) => {
   });
   res.status(200).json({ success: true, data: result });
 });
+
+/**
+ * POST /user/affiliate/payout
+ * Crée une demande de retrait pour la totalité du solde available
+ * dans la devise du pays affilié.
+ */
+exports.requestPayout = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const payout = await affiliateService.requestPayout(user);
+  res.status(201).json({
+    success: true,
+    message: 'Demande de retrait enregistrée',
+    data: payout,
+  });
+});
+
+/**
+ * GET /user/affiliate/payouts?page=1&limit=20&status=queued
+ */
+exports.listPayouts = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const { page = 1, limit = 20, status } = req.query;
+  const result = await affiliateService.listMyPayouts(user, {
+    page: parseInt(page, 10),
+    limit: Math.min(parseInt(limit, 10), 100),
+    status,
+  });
+  res.status(200).json({ success: true, data: result });
+});

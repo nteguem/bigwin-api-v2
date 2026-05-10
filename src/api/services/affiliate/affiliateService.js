@@ -550,6 +550,223 @@ class AffiliateService {
   }
 
   /**
+   * Crée une PayoutRequest "queued" qui retire la totalité du solde
+   * `available` de l'affilié dans la devise de son pays.
+   *
+   * Garde-fous :
+   *   - User affilié actif, non suspendu
+   *   - payoutMethod défini (operator + phoneNumber)
+   *   - Pays activé dans la config
+   *   - Pas de payout en cours (max concurrent)
+   *   - Plafond mensuel (max payouts / mois)
+   *   - Solde available > 0 et >= seuils config
+   *
+   * Lock atomique : toutes les commissions `available` du user en
+   * `currency` passent en `locked` + reçoivent `payoutRequest = pr._id`.
+   * Le worker (Phase 5) prend la PayoutRequest, appelle AfribaPay, et
+   * passe en `paid` ou `awaiting_funds` selon le retour.
+   */
+  async requestPayout(user) {
+    if (!user.affiliate?.isActive) {
+      throw new AppError(
+        "Vous n'êtes pas affilié.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+    if (user.affiliate.suspended) {
+      throw new AppError(
+        'Compte affilié suspendu.',
+        403,
+        ErrorCodes.FORBIDDEN
+      );
+    }
+
+    const { operator, phoneNumber } = user.affiliate.payoutMethod || {};
+    if (!operator || !phoneNumber) {
+      throw new AppError(
+        'Coordonnées mobile money manquantes — configurez votre méthode de retrait.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const country = (user.affiliate.country || '').toUpperCase();
+    if (!country) {
+      throw new AppError(
+        'Pays affilié non défini.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const config = await this.getOrCreateConfig(user.appId);
+    const countryCfg = (config.payoutCountries || []).find(
+      (c) => c.code === country && c.enabled !== false
+    );
+    if (!countryCfg) {
+      throw new AppError(
+        `Retraits non disponibles pour le pays ${country}.`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    // Plafonnement concurrentiel
+    const inFlight = await PayoutRequest.countDocuments({
+      appId: user.appId,
+      user: user._id,
+      status: { $in: ['queued', 'processing', 'awaiting_funds'] },
+    });
+    if (inFlight >= (config.maxConcurrentPayoutsPerUser || 1)) {
+      throw new AppError(
+        'Vous avez déjà une demande de retrait en cours.',
+        409,
+        ErrorCodes.DUPLICATE_OPERATION
+      );
+    }
+
+    // Plafonnement mensuel
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const monthCount = await PayoutRequest.countDocuments({
+      appId: user.appId,
+      user: user._id,
+      requestedAt: { $gte: startOfMonth },
+      status: { $ne: 'cancelled' },
+    });
+    if (monthCount >= (config.maxPayoutsPerMonthPerUser || 2)) {
+      throw new AppError(
+        'Plafond mensuel de retraits atteint.',
+        429,
+        ErrorCodes.RATE_LIMIT_EXCEEDED
+      );
+    }
+
+    // Récupère toutes les commissions available dans la devise du pays
+    const currency = countryCfg.currency;
+    const commissions = await Commission.find({
+      appId: user.appId,
+      referrer: user._id,
+      currency,
+      status: 'available',
+    })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    if (commissions.length === 0) {
+      throw new AppError(
+        'Aucune commission disponible au retrait.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const totalAmount = commissions.reduce((s, c) => s + c.amount, 0);
+
+    if (totalAmount < (countryCfg.minAmountForPayout || 0)) {
+      throw new AppError(
+        `Montant minimum de retrait : ${countryCfg.minAmountForPayout} ${currency}.`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+    if (
+      countryCfg.payoutThreshold &&
+      totalAmount < countryCfg.payoutThreshold
+    ) {
+      throw new AppError(
+        `Seuil de retrait : ${countryCfg.payoutThreshold} ${currency}.`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+    if (totalAmount > (countryCfg.maxAmountForPayout || Infinity)) {
+      throw new AppError(
+        `Montant maximum de retrait : ${countryCfg.maxAmountForPayout} ${currency}.`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    // Crée la PayoutRequest puis lock les commissions atomiquement
+    const commissionIds = commissions.map((c) => c._id);
+
+    const pr = await PayoutRequest.create({
+      appId: user.appId,
+      user: user._id,
+      amount: totalAmount,
+      currency,
+      country,
+      operator,
+      phoneNumber,
+      status: 'queued',
+      commissionsIncluded: commissionIds,
+      requestedAt: new Date(),
+      attempts: [
+        {
+          type: 'request',
+          status: 'queued',
+          actor: String(user._id),
+          payload: { amount: totalAmount, currency, operator, phoneNumber },
+        },
+      ],
+    });
+
+    // afribaPayOrderId = `payout-${pr._id}` (idempotency key)
+    pr.afribaPayOrderId = `payout-${pr._id}`;
+    await pr.save();
+
+    // Lock les commissions
+    await Commission.updateMany(
+      { _id: { $in: commissionIds }, status: 'available' },
+      { $set: { status: 'locked', payoutRequest: pr._id } }
+    );
+
+    return pr;
+  }
+
+  /**
+   * Liste paginée des PayoutRequest de l'affilié.
+   */
+  async listMyPayouts(user, { page = 1, limit = 20, status } = {}) {
+    if (!user.affiliate?.isActive) {
+      throw new AppError(
+        "Vous n'êtes pas affilié.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const filter = { appId: user.appId, user: user._id };
+    if (status) filter.status = status;
+
+    const skip = (Math.max(1, page) - 1) * limit;
+    const [items, total] = await Promise.all([
+      PayoutRequest.find(filter)
+        .select(
+          'amount currency country operator phoneNumber status requestedAt paidAt failureReason afribaPayTransactionId'
+        )
+        .sort({ requestedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      PayoutRequest.countDocuments(filter),
+    ]);
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
    * Liste paginée des commissions de l'affilié.
    */
   async listMyCommissions(user, { page = 1, limit = 20, status } = {}) {
