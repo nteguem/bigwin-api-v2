@@ -17,8 +17,63 @@ const Commission = require('../../models/affiliate/Commission');
 const PayoutRequest = require('../../models/affiliate/PayoutRequest');
 const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
 const AdminFundingRequest = require('../../models/affiliate/AdminFundingRequest');
+const App = require('../../models/common/App');
+const Device = require('../../models/common/Device');
 const afribaPayPayoutService = require('./afribaPayPayoutService');
+const notificationService = require('../common/notificationService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+
+/**
+ * Push notif à l'affilié quand son payout passe paid ou failed.
+ * Fail silently — on ne bloque pas le traitement de la PayoutRequest.
+ */
+async function _notifyAffiliateAboutPayout(payoutRequest, finalStatus) {
+  try {
+    const devices = await Device.find({
+      appId: payoutRequest.appId,
+      user: payoutRequest.user,
+      isActive: true,
+      playerId: { $exists: true, $ne: null },
+    })
+      .select('playerId')
+      .lean();
+    const playerIds = devices.map((d) => d.playerId).filter(Boolean);
+    if (playerIds.length === 0) return;
+
+    const isPaid = finalStatus === 'paid';
+    const headings = isPaid
+      ? { fr: 'Retrait envoyé ✅', en: 'Payout sent ✅' }
+      : { fr: 'Retrait rejeté', en: 'Payout rejected' };
+    const contents = isPaid
+      ? {
+          fr: `Ton retrait de ${payoutRequest.amount} ${payoutRequest.currency} a été envoyé sur ton mobile money.`,
+          en: `Your payout of ${payoutRequest.amount} ${payoutRequest.currency} has been sent to your mobile money.`,
+        }
+      : {
+          fr: `Ton retrait de ${payoutRequest.amount} ${payoutRequest.currency} n'a pas pu être traité. ${payoutRequest.failureReason || ''}`,
+          en: `Your payout of ${payoutRequest.amount} ${payoutRequest.currency} could not be processed. ${payoutRequest.failureReason || ''}`,
+        };
+    await notificationService.sendToUsers(
+      payoutRequest.appId,
+      playerIds,
+      {
+        headings,
+        contents,
+        data: {
+          type: `affiliate.payout_${finalStatus}`,
+          payoutId: String(payoutRequest._id),
+          amount: String(payoutRequest.amount),
+          currency: payoutRequest.currency,
+        },
+      }
+    );
+  } catch (err) {
+    console.warn(
+      '[affiliateAdminService] _notifyAffiliateAboutPayout failed:',
+      err?.message || err
+    );
+  }
+}
 
 class AffiliateAdminService {
   /**
@@ -391,10 +446,20 @@ class AffiliateAdminService {
       );
     }
 
+    // Charge l'app pour récupérer la config AfribaPay
+    const app = await App.findOne({ appId });
+    if (!app) {
+      throw new AppError(
+        `App "${appId}" introuvable.`,
+        404,
+        ErrorCodes.NOT_FOUND
+      );
+    }
+
     // ===== 1. Appel AfribaPay payout =====
     let afribaResult;
     try {
-      afribaResult = await afribaPayPayoutService.triggerPayout({
+      afribaResult = await afribaPayPayoutService.triggerPayout(app, {
         operator: pr.operator,
         country: pr.country,
         phoneNumber: pr.phoneNumber,
@@ -405,7 +470,7 @@ class AffiliateAdminService {
         notifyUrl: process.env.AFRIBAPAY_PAYOUT_NOTIFY_URL || undefined,
       });
     } catch (err) {
-      // Audit le tentative échouée pour traçabilité, sans changer le status
+      // Audit la tentative échouée pour traçabilité, sans changer le status
       pr.attempts.push({
         at: new Date(),
         type: 'admin_action',
@@ -418,7 +483,6 @@ class AffiliateAdminService {
         },
       });
       await pr.save();
-      // On relève l'erreur pour que l'admin la voie à l'écran
       throw new AppError(
         err.message || 'Échec AfribaPay',
         err.statusCode || 502,
@@ -426,17 +490,17 @@ class AffiliateAdminService {
       );
     }
 
-    // ===== 2. AfribaPay a accepté (SUCCESS ou PENDING) =====
+    // ===== 2. AfribaPay a accepté =====
+    // SUCCESS  → paid direct (rare au moment de l'init, vu plus dans le webhook)
+    // PENDING  → processing : commissions restent locked, on attend le webhook
     const now = new Date();
-    pr.status = 'paid'; // V1 : on accepte SUCCESS et PENDING comme paid
-    pr.paidAt = now;
     pr.afribaPayTransactionId = afribaResult.transactionId;
     pr.afribaPayProviderId = afribaResult.providerId;
     pr.afribaPayLastResponse = afribaResult.raw;
     pr.attempts.push({
       at: now,
       type: 'admin_action',
-      status: 'paid',
+      status: afribaResult.status === 'SUCCESS' ? 'paid' : 'processing',
       actor: adminInfo.adminId ? String(adminInfo.adminId) : 'admin',
       payload: {
         action: 'trigger_afribapay',
@@ -446,21 +510,164 @@ class AffiliateAdminService {
       },
       response: afribaResult.raw,
     });
-    await pr.save();
 
-    // Commissions: locked → paid
-    await Commission.updateMany(
-      { _id: { $in: pr.commissionsIncluded }, status: 'locked' },
-      { $set: { status: 'paid', paidAt: now } }
-    );
+    if (afribaResult.status === 'SUCCESS') {
+      pr.status = 'paid';
+      pr.paidAt = now;
+      await pr.save();
 
-    // Unlock User.affiliate.activePayoutId — l'affilié peut re-demander
-    await User.findOneAndUpdate(
-      { _id: pr.user, 'affiliate.activePayoutId': pr._id },
-      { $unset: { 'affiliate.activePayoutId': '' } }
-    );
+      await Commission.updateMany(
+        { _id: { $in: pr.commissionsIncluded }, status: 'locked' },
+        { $set: { status: 'paid', paidAt: now } }
+      );
+
+      await User.findOneAndUpdate(
+        { _id: pr.user, 'affiliate.activePayoutId': pr._id },
+        { $unset: { 'affiliate.activePayoutId': '' } }
+      );
+
+      // Push notif à l'affilié (fire-and-forget)
+      _notifyAffiliateAboutPayout(pr, 'paid');
+    } else {
+      // PENDING : virement initié, attente confirmation webhook
+      pr.status = 'processing';
+      await pr.save();
+      // Commissions restent 'locked', User.activePayoutId reste set.
+      // Le webhook fera la transition finale (paid ou failed).
+    }
 
     return pr;
+  }
+
+  /**
+   * Traite un webhook AfribaPay payout. Appelé par le controller
+   * webhook après vérification HMAC. Le payload contient au moins
+   * order_id et status. Met à jour la PayoutRequest correspondante :
+   *
+   *   SUCCESS  → status='paid' + commissions paid + unlock User
+   *   FAILED   → status='failed' + commissions retournent en available
+   *              + unlock User + failureReason
+   *
+   * Idempotent : si la PayoutRequest est déjà paid/failed, on log et
+   * on ne refait rien (AfribaPay peut renvoyer le webhook plusieurs fois).
+   *
+   * @returns {Object} { handled: bool, payoutRequest, refereeChanges }
+   *   refereeChanges contient les commissions affectées (pour notif).
+   */
+  async handlePayoutWebhook(payload, headers) {
+    const orderId =
+      payload.order_id ||
+      payload.orderId ||
+      payload.data?.order_id;
+    const status = String(
+      payload.status || payload.data?.status || ''
+    ).toUpperCase();
+    const transactionId =
+      payload.transaction_id ||
+      payload.data?.transaction_id ||
+      null;
+
+    if (!orderId) {
+      throw new AppError(
+        'Webhook AfribaPay : order_id manquant.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const pr = await PayoutRequest.findOne({ afribaPayOrderId: orderId });
+    if (!pr) {
+      // Pas notre payout (peut être un payin via le même webhook ?)
+      return { handled: false, reason: 'PayoutRequest not found' };
+    }
+
+    // Idempotence : si déjà finalisé, on log juste l'attempt et on sort
+    if (pr.status === 'paid' || pr.status === 'failed') {
+      pr.attempts.push({
+        at: new Date(),
+        type: 'webhook',
+        status: pr.status,
+        payload,
+        error: 'Webhook reçu après finalisation — ignored (idempotent)',
+      });
+      await pr.save();
+      return { handled: true, payoutRequest: pr, idempotent: true };
+    }
+
+    const now = new Date();
+    pr.webhookReceivedAt = now;
+    if (transactionId) pr.afribaPayTransactionId = transactionId;
+    pr.afribaPayLastResponse = payload;
+
+    if (status === 'SUCCESS') {
+      pr.status = 'paid';
+      pr.paidAt = now;
+      pr.attempts.push({
+        at: now,
+        type: 'webhook',
+        status: 'paid',
+        payload,
+      });
+      await pr.save();
+
+      // Commissions: locked → paid
+      await Commission.updateMany(
+        { _id: { $in: pr.commissionsIncluded }, status: 'locked' },
+        { $set: { status: 'paid', paidAt: now } }
+      );
+
+      // Unlock User
+      await User.findOneAndUpdate(
+        { _id: pr.user, 'affiliate.activePayoutId': pr._id },
+        { $unset: { 'affiliate.activePayoutId': '' } }
+      );
+
+      // Push notif à l'affilié (fire-and-forget)
+      _notifyAffiliateAboutPayout(pr, 'paid');
+
+      return { handled: true, payoutRequest: pr, finalStatus: 'paid' };
+    }
+
+    if (status === 'FAILED') {
+      const reason = payload.message || payload.reason || 'AfribaPay FAILED';
+      pr.status = 'failed';
+      pr.failureReason = reason;
+      pr.attempts.push({
+        at: now,
+        type: 'webhook',
+        status: 'failed',
+        payload,
+        error: reason,
+      });
+      await pr.save();
+
+      // Commissions retournent en available (l'argent n'est pas parti)
+      await Commission.updateMany(
+        { _id: { $in: pr.commissionsIncluded }, status: 'locked' },
+        { $set: { status: 'available' }, $unset: { payoutRequest: '' } }
+      );
+
+      // Unlock User
+      await User.findOneAndUpdate(
+        { _id: pr.user, 'affiliate.activePayoutId': pr._id },
+        { $unset: { 'affiliate.activePayoutId': '' } }
+      );
+
+      // Push notif à l'affilié (fire-and-forget)
+      _notifyAffiliateAboutPayout(pr, 'failed');
+
+      return { handled: true, payoutRequest: pr, finalStatus: 'failed' };
+    }
+
+    // Status non finaux (PENDING ?) : on log juste
+    pr.attempts.push({
+      at: now,
+      type: 'webhook',
+      status: pr.status,
+      payload,
+    });
+    await pr.save();
+    return { handled: true, payoutRequest: pr, transient: true };
   }
 
   /**
@@ -524,6 +731,9 @@ class AffiliateAdminService {
       { _id: pr.user, 'affiliate.activePayoutId': pr._id },
       { $unset: { 'affiliate.activePayoutId': '' } }
     );
+
+    // Push notif à l'affilié (fire-and-forget)
+    _notifyAffiliateAboutPayout(pr, 'failed');
 
     return pr;
   }

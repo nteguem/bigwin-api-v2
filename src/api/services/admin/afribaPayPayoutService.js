@@ -31,39 +31,44 @@ class AfribaPayPayoutError extends Error {
   }
 }
 
-// Cache token en mémoire (process-level). Si plusieurs instances en
-// scaling horizontal, chacune aura son cache — pas grave, expirations
-// gérées indépendamment.
-let cachedToken = null;
-let cachedTokenExpiry = null;
+// Cache tokens par app (multi-tenant). Clé = appId. Chaque app a ses
+// propres credentials donc son propre token.
+const tokenCache = new Map(); // appId → { token, expiresAt }
 
-function _getConfig() {
-  const apiUrl = process.env.AFRIBAPAY_API_URL;
-  const payoutApiUrl =
-    process.env.AFRIBAPAY_PAYOUT_API_URL ||
-    (apiUrl ? apiUrl.replace('api.', 'api-payout.') : null) ||
-    (apiUrl
-      ? apiUrl.replace('api-sandbox.', 'api-payout-sandbox.')
-      : null);
-  const apiUser = process.env.AFRIBAPAY_API_USER;
-  const apiKey = process.env.AFRIBAPAY_API_KEY;
-  const merchantKey = process.env.AFRIBAPAY_MERCHANT_KEY;
-
-  if (!apiUrl || !payoutApiUrl || !apiUser || !apiKey || !merchantKey) {
+/**
+ * Extrait la config AfribaPay d'une app. Lance une erreur claire si
+ * un champ manque, plutôt qu'une 401 cryptique chez AfribaPay.
+ */
+function _getConfigFromApp(app) {
+  if (!app) {
     throw new AfribaPayPayoutError(
-      'Configuration AfribaPay incomplète (vérifie AFRIBAPAY_API_URL, ' +
-        'AFRIBAPAY_PAYOUT_API_URL, AFRIBAPAY_API_USER, AFRIBAPAY_API_KEY, ' +
-        'AFRIBAPAY_MERCHANT_KEY dans le .env).',
+      'App introuvable pour le payout.',
       500
     );
   }
-  return { apiUrl, payoutApiUrl, apiUser, apiKey, merchantKey };
+  const cfg = app.payments?.afribapay || {};
+  const apiUrl = cfg.apiUrl;
+  const payoutApiUrl = cfg.payoutApiUrl;
+  const apiUser = cfg.apiUser;
+  const apiKey = cfg.apiKey;
+  const merchantKey = cfg.merchantKey;
+
+  if (!apiUrl || !payoutApiUrl || !apiUser || !apiKey || !merchantKey) {
+    throw new AfribaPayPayoutError(
+      `Config AfribaPay incomplète sur l'app "${app.appId}". ` +
+        `Champs requis : payments.afribapay.apiUrl + payoutApiUrl + ` +
+        `apiUser + apiKey + merchantKey.`,
+      500
+    );
+  }
+  return { appId: app.appId, apiUrl, payoutApiUrl, apiUser, apiKey, merchantKey };
 }
 
-async function _fetchAccessToken({ apiUrl, apiUser, apiKey }) {
+async function _fetchAccessToken({ appId, apiUrl, apiUser, apiKey }) {
   // Réutilise le cache si encore valide (5 min de marge)
-  if (cachedToken && cachedTokenExpiry && Date.now() < cachedTokenExpiry) {
-    return cachedToken;
+  const cached = tokenCache.get(appId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.token;
   }
 
   const credentials = Buffer.from(`${apiUser}:${apiKey}`).toString('base64');
@@ -88,9 +93,11 @@ async function _fetchAccessToken({ apiUrl, apiUser, apiKey }) {
         res.data
       );
     }
-    cachedToken = token;
-    cachedTokenExpiry = Date.now() + (expiresIn - 300) * 1000; // -5 min de marge
-    logger.info('afribapay token obtained', { service: SERVICE });
+    tokenCache.set(appId, {
+      token,
+      expiresAt: Date.now() + (expiresIn - 300) * 1000,
+    });
+    logger.info('afribapay token obtained', { service: SERVICE, appId });
     return token;
   } catch (err) {
     if (err instanceof AfribaPayPayoutError) throw err;
@@ -103,9 +110,16 @@ async function _fetchAccessToken({ apiUrl, apiUser, apiKey }) {
   }
 }
 
+function _invalidateToken(appId) {
+  tokenCache.delete(appId);
+}
+
 /**
  * Déclenche un payout AfribaPay.
  *
+ * @param {Object} app - le doc App de l'application courante (pour
+ *                       lire payments.afribapay.{apiUrl, payoutApiUrl,
+ *                       apiUser, apiKey, merchantKey}).
  * @param {Object} params
  * @param {string} params.operator    - 'orange', 'mtn', 'wave', etc.
  * @param {string} params.country     - 'CM', 'SN', 'CI', ...
@@ -117,7 +131,7 @@ async function _fetchAccessToken({ apiUrl, apiUser, apiKey }) {
  * @param {string} [params.notifyUrl]
  * @returns {Promise<{ status, transactionId, providerId, raw }>}
  */
-async function triggerPayout({
+async function triggerPayout(app, {
   operator,
   country,
   phoneNumber,
@@ -127,7 +141,7 @@ async function triggerPayout({
   referenceId,
   notifyUrl,
 }) {
-  const cfg = _getConfig();
+  const cfg = _getConfigFromApp(app);
   const token = await _fetchAccessToken(cfg);
 
   const body = {
@@ -156,8 +170,7 @@ async function triggerPayout({
     // Si 401, le token est probablement expiré → on invalide le cache
     // et on relance une fois (auto-retry simple)
     if (err?.response?.status === 401) {
-      cachedToken = null;
-      cachedTokenExpiry = null;
+      _invalidateToken(cfg.appId);
       const freshToken = await _fetchAccessToken(cfg);
       try {
         response = await axios.post(

@@ -148,6 +148,14 @@ router.use('/user', identifyApp, userSubscriptionRoutes);
 // Webhooks: identifyApp pour savoir quelle app est concernée
 router.use('/webhooks', identifyAppOptional, googlePlayWebhook);
 
+// Webhook AfribaPay payout — pas de X-App-Id (l'app est résolue via
+// le order_id de la PayoutRequest) et pas d'auth (sécurisé via HMAC).
+const afribaPayPayoutWebhookCtrl = require('../controllers/common/afribaPayPayoutWebhookController');
+router.post(
+  '/webhooks/afribapay/payout',
+  afribaPayPayoutWebhookCtrl.handlePayoutWebhook
+);
+
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');

@@ -75,6 +75,12 @@ const appSchema = new mongoose.Schema({
     },
     afribapay: {
       apiUrl: String,
+      // URL spécifique pour le service de payout (sortant). Différente
+      // de apiUrl (collect/payin). Ex: https://api-payout.afribapay.com
+      payoutApiUrl: {
+        type: String,
+        default: 'https://api-payout.afribapay.com'
+      },
       apiUser: String,
       apiKey: String,
       merchantKey: String,

@@ -13,12 +13,14 @@
 const mongoose = require('mongoose');
 
 const User = require('../../models/user/User');
+const Device = require('../../models/common/Device');
 const Referral = require('../../models/affiliate/Referral');
 const Commission = require('../../models/affiliate/Commission');
 const PayoutRequest = require('../../models/affiliate/PayoutRequest');
 const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
 const App = require('../../models/common/App');
 const mailService = require('../common/mailService');
+const notificationService = require('../common/notificationService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 class AffiliateService {
@@ -441,6 +443,22 @@ class AffiliateService {
         referrerCountry: referrer.affiliate.country,
         status,
       });
+
+      // Notif push : nouveau filleul (uniquement pour les referrals
+      // éligibles à commission, pas self_ref/country_mismatch).
+      if (status === 'signed_up') {
+        this._notifyAffiliate(
+          referrer._id,
+          referee.appId,
+          { fr: 'Nouveau filleul 🎉', en: 'New referral 🎉' },
+          {
+            fr: `${referee.pseudo || 'Un nouvel utilisateur'} vient de s'inscrire avec ton code.`,
+            en: `${referee.pseudo || 'A new user'} just signed up with your code.`,
+          },
+          { type: 'affiliate.new_referral', referralId: String(referral._id) }
+        ).catch(() => {});
+      }
+
       return referral;
     } catch (err) {
       // Duplicate key (referee déjà parrainé) ou autre erreur : on log silencieusement
@@ -738,6 +756,26 @@ class AffiliateService {
       await referral.save();
     }
 
+    // Notif push à l'affilié : commission gagnée
+    this._notifyAffiliate(
+      referrer._id,
+      sub.appId,
+      {
+        fr: `Commission +${amount} ${commission.currency} 💰`,
+        en: `Commission +${amount} ${commission.currency} 💰`,
+      },
+      {
+        fr: `Tu as gagné ${amount} ${commission.currency} grâce à un achat de ton filleul.`,
+        en: `You earned ${amount} ${commission.currency} from one of your referrals.`,
+      },
+      {
+        type: 'affiliate.new_commission',
+        commissionId: String(commission._id),
+        amount: String(amount),
+        currency: commission.currency,
+      }
+    ).catch(() => {});
+
     return commission;
   }
 
@@ -996,6 +1034,36 @@ class AffiliateService {
         { $unset: { 'affiliate.activePayoutId': '' } }
       ).catch(() => {});
       throw err;
+    }
+  }
+
+  /**
+   * Envoie une push notification OneSignal à l'affilié. Récupère ses
+   * Devices actifs avec playerId puis appelle notificationService. Fail
+   * silently — on ne casse pas le flow si la notif échoue.
+   */
+  async _notifyAffiliate(affiliateUserId, appId, headings, contents, data = {}) {
+    try {
+      const devices = await Device.find({
+        appId,
+        user: affiliateUserId,
+        isActive: true,
+        playerId: { $exists: true, $ne: null },
+      })
+        .select('playerId')
+        .lean();
+      const playerIds = devices.map((d) => d.playerId).filter(Boolean);
+      if (playerIds.length === 0) return; // pas de device → silent
+      await notificationService.sendToUsers(appId, playerIds, {
+        headings,
+        contents,
+        data,
+      });
+    } catch (err) {
+      console.warn(
+        '[affiliateService] _notifyAffiliate failed:',
+        err?.message || err
+      );
     }
   }
 
