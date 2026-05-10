@@ -166,6 +166,108 @@ class AffiliateAdminService {
     return user;
   }
 
+  /**
+   * Reset les coordonnées de retrait d'un affilié (operator + phoneNumber).
+   * Cas d'usage : numéro saisi à la 1ère demande était erroné, ou l'affilié
+   * a changé de numéro mobile money. Au prochain retrait, on lui redemande.
+   */
+  async resetPayoutMethod(appId, userId) {
+    const user = await User.findOne({ _id: userId, appId });
+    if (!user || !user.affiliate?.isActive) {
+      throw new AppError('Affilié introuvable', 404, ErrorCodes.NOT_FOUND);
+    }
+    user.affiliate.payoutMethod = undefined;
+    await user.save();
+    return user;
+  }
+
+  /**
+   * Liste paginée des filleuls d'un affilié, recherche par
+   * pseudo/firstName/lastName/email/phoneNumber du filleul.
+   */
+  async listAffiliateReferrals(appId, userId, { page = 1, limit = 20, q } = {}) {
+    const baseFilter = { appId, referrer: userId };
+
+    if (q && q.trim()) {
+      const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rgx = new RegExp(escaped, 'i');
+      const matchingUsers = await User.find({
+        appId,
+        $or: [
+          { pseudo: rgx },
+          { firstName: rgx },
+          { lastName: rgx },
+          { email: rgx },
+          { phoneNumber: rgx },
+        ],
+      }).select('_id').lean();
+      const ids = matchingUsers.map((u) => u._id);
+      if (ids.length === 0) {
+        return { items: [], pagination: { page, limit, total: 0, totalPages: 0 } };
+      }
+      baseFilter.referee = { $in: ids };
+    }
+
+    const skip = (Math.max(1, page) - 1) * limit;
+    const [items, total] = await Promise.all([
+      Referral.find(baseFilter)
+        .populate('referee', 'pseudo email phoneNumber countryCode createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Referral.countDocuments(baseFilter),
+    ]);
+
+    return {
+      items,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Liste paginée des commissions d'un affilié, filtrable par status.
+   */
+  async listAffiliateCommissions(appId, userId, { page = 1, limit = 20, status } = {}) {
+    const filter = { appId, referrer: userId };
+    if (status) filter.status = status;
+    const skip = (Math.max(1, page) - 1) * limit;
+    const [items, total] = await Promise.all([
+      Commission.find(filter)
+        .populate('referee', 'pseudo')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Commission.countDocuments(filter),
+    ]);
+    return {
+      items,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Liste paginée des PayoutRequest d'un affilié, filtrable par status.
+   */
+  async listAffiliatePayouts(appId, userId, { page = 1, limit = 20, status } = {}) {
+    const filter = { appId, user: userId };
+    if (status) filter.status = status;
+    const skip = (Math.max(1, page) - 1) * limit;
+    const [items, total] = await Promise.all([
+      PayoutRequest.find(filter)
+        .sort({ requestedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      PayoutRequest.countDocuments(filter),
+    ]);
+    return {
+      items,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   // ===== PAYOUT REQUESTS =====
 
   async listPayoutRequests(appId, { page = 1, limit = 20, status } = {}) {

@@ -25,5 +25,9 @@ router.get('/available-countries', ctrl.listAvailableCountries);
 router.get('/:userId', ctrl.getAffiliate);
 router.post('/:userId/suspend', ctrl.suspendAffiliate);
 router.post('/:userId/unsuspend', ctrl.unsuspendAffiliate);
+router.post('/:userId/reset-payout-method', ctrl.resetPayoutMethod);
+router.get('/:userId/referrals', ctrl.listAffiliateReferrals);
+router.get('/:userId/commissions', ctrl.listAffiliateCommissions);
+router.get('/:userId/payouts', ctrl.listAffiliatePayouts);
 
 module.exports = router;

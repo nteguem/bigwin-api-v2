@@ -107,6 +107,69 @@ exports.updateConfig = catchAsync(async (req, res) => {
   });
 });
 
+// Reset les coordonnées de retrait d'un affilié (admin force le reset)
+exports.resetPayoutMethod = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { userId } = req.params;
+  const result = await affiliateAdminService.resetPayoutMethod(appId, userId);
+  res.status(200).json({
+    success: true,
+    message: 'Coordonnées de retrait réinitialisées',
+    data: { affiliate: result.affiliate },
+  });
+});
+
+// Liste paginée des filleuls d'un affilié donné
+exports.listAffiliateReferrals = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { userId } = req.params;
+  const { page = 1, limit = 20, q } = req.query;
+  const result = await affiliateAdminService.listAffiliateReferrals(
+    appId,
+    userId,
+    {
+      page: parseInt(page, 10),
+      limit: Math.min(parseInt(limit, 10), 100),
+      q,
+    }
+  );
+  res.status(200).json({ success: true, data: result });
+});
+
+// Liste paginée des commissions d'un affilié donné
+exports.listAffiliateCommissions = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { userId } = req.params;
+  const { page = 1, limit = 20, status } = req.query;
+  const result = await affiliateAdminService.listAffiliateCommissions(
+    appId,
+    userId,
+    {
+      page: parseInt(page, 10),
+      limit: Math.min(parseInt(limit, 10), 100),
+      status,
+    }
+  );
+  res.status(200).json({ success: true, data: result });
+});
+
+// Liste paginée des PayoutRequests d'un affilié donné
+exports.listAffiliatePayouts = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { userId } = req.params;
+  const { page = 1, limit = 20, status } = req.query;
+  const result = await affiliateAdminService.listAffiliatePayouts(
+    appId,
+    userId,
+    {
+      page: parseInt(page, 10),
+      limit: Math.min(parseInt(limit, 10), 100),
+      status,
+    }
+  );
+  res.status(200).json({ success: true, data: result });
+});
+
 // Marque une PayoutRequest comme payée (validation manuelle admin)
 exports.markPayoutPaid = catchAsync(async (req, res) => {
   const appId = req.appId;
