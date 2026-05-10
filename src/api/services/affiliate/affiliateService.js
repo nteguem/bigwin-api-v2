@@ -156,20 +156,31 @@ class AffiliateService {
     const isAffiliate = !!user.affiliate?.isActive;
 
     if (!isAffiliate) {
-      // Vérifie si le pays user est éligible à devenir affilié
+      // Vérifie si le pays user est éligible à devenir affilié + expose la
+      // devise pour que l'UI mobile puisse afficher "Pays : CM (XAF)" en
+      // read-only au moment de l'activation, sans hardcoder un mapping.
       let canActivate = false;
+      let eligibleCountry = null;
       if (user.countryCode) {
         const config = await this.getOrCreateConfig(appId);
         if (config.isEnabled) {
           const userCountry = user.countryCode.toUpperCase();
-          canActivate = (config.payoutCountries || []).some(
+          const cfg = (config.payoutCountries || []).find(
             (c) => c.code === userCountry && c.enabled !== false
           );
+          if (cfg) {
+            canActivate = true;
+            eligibleCountry = {
+              code: cfg.code,
+              currency: cfg.currency,
+            };
+          }
         }
       }
       return {
         isAffiliate: false,
         canActivate,
+        eligibleCountry,
       };
     }
 
@@ -209,11 +220,19 @@ class AffiliateService {
       return out;
     };
 
+    // Lookup de la devise du pays affilié depuis la config (single source
+    // of truth). Évite que le mobile hardcode un mapping country→currency.
+    const config = await this.getOrCreateConfig(appId);
+    const countryCfg = (config.payoutCountries || []).find(
+      (c) => c.code === (user.affiliate.country || '').toUpperCase()
+    );
+
     return {
       isAffiliate: true,
       code: user.affiliate.code,
       tier: user.affiliate.tier,
       country: user.affiliate.country,
+      currency: countryCfg?.currency || null,
       payoutMethod: user.affiliate.payoutMethod,
       activatedAt: user.affiliate.activatedAt,
       suspended: !!user.affiliate.suspended,
