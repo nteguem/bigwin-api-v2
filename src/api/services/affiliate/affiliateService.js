@@ -471,8 +471,10 @@ class AffiliateService {
 
     const baseFilter = { appId: user.appId, referrer: user._id };
 
-    // Recherche : on cherche d'abord les Users qui matchent (pseudo / email
-    // / phoneNumber), puis on filtre les Referrals par ces userIds.
+    // Recherche : on cherche d'abord les Users qui matchent dans tous les
+    // champs identifiants (pseudo, firstName, lastName, email, phoneNumber),
+    // puis on filtre les Referrals par ces userIds. Regex insensible à la
+    // casse pour rester tolérant aux casse-tête de saisie utilisateur.
     if (q && q.trim()) {
       const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const rgx = new RegExp(escaped, 'i');
@@ -480,6 +482,8 @@ class AffiliateService {
         appId: user.appId,
         $or: [
           { pseudo: rgx },
+          { firstName: rgx },
+          { lastName: rgx },
           { email: rgx },
           { phoneNumber: rgx },
         ],
