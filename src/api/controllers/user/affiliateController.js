@@ -125,6 +125,22 @@ exports.getReferralDetail = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * GET /user/affiliate/commissions/:id
+ * Détail d'une commission + filleul source + subscription + payout.
+ */
+exports.getCommissionDetail = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const detail = await affiliateService.getCommissionDetail(
+    user,
+    req.params.id
+  );
+  res.status(200).json({ success: true, data: detail });
+});
+
+/**
  * GET /user/affiliate/commissions?page=1&limit=20&status=available
  */
 exports.listCommissions = catchAsync(async (req, res, next) => {

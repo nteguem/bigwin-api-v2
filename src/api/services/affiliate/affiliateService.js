@@ -1004,6 +1004,125 @@ class AffiliateService {
   }
 
   /**
+   * Détail d'une commission de l'affilié. Inclut le filleul source, la
+   * subscription qui l'a générée, et le payout associé si elle est en
+   * cours d'encaissement (status=locked|paid).
+   *
+   * Sécurité : vérifie que la commission appartient bien au user courant
+   * pour ne pas leak des montants entre affiliés.
+   */
+  async getCommissionDetail(user, commissionId) {
+    if (!user.affiliate?.isActive) {
+      throw new AppError(
+        "Vous n'êtes pas affilié.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const com = await Commission.findOne({
+      _id: commissionId,
+      appId: user.appId,
+      referrer: user._id,
+    })
+      .populate(
+        'referee',
+        'pseudo email phoneNumber dialCode countryCode createdAt'
+      )
+      .lean();
+
+    if (!com) {
+      throw new AppError('Commission introuvable.', 404, ErrorCodes.NOT_FOUND);
+    }
+
+    const Subscription = require('../../models/common/Subscription');
+    const sub = com.subscription
+      ? await Subscription.findById(com.subscription)
+          .populate('package', 'name')
+          .lean()
+      : null;
+
+    let payout = null;
+    if (com.payoutRequest) {
+      const PayoutRequest = require('../../models/affiliate/PayoutRequest');
+      payout = await PayoutRequest.findById(com.payoutRequest)
+        .select(
+          'amount currency status requestedAt paidAt operator phoneNumber'
+        )
+        .lean();
+    }
+
+    // Helpers de masquage (mêmes règles que getReferralDetail)
+    const maskedEmail = (e) => {
+      if (!e || typeof e !== 'string' || !e.includes('@')) return null;
+      const [local, domain] = e.split('@');
+      return `${local.slice(0, 1)}${'*'.repeat(
+        Math.max(2, local.length - 1)
+      )}@${domain}`;
+    };
+    const maskedPhone = (dial, phone) => {
+      if (!phone) return null;
+      const tail = phone.slice(-2);
+      const masked = '*'.repeat(Math.max(0, phone.length - 2)) + tail;
+      return dial ? `${dial} ${masked}` : masked;
+    };
+
+    // Extraction de packageName depuis l'objet bilingue
+    const pkgName = sub?.package?.name;
+    const packageNameStr =
+      (pkgName && typeof pkgName === 'object'
+        ? pkgName.fr || pkgName.en
+        : pkgName) || null;
+
+    return {
+      _id: com._id,
+      amount: com.amount,
+      currency: com.currency,
+      rate: com.commissionRate,
+      status: com.status,
+      createdAt: com.createdAt,
+      paidAt: com.paidAt || null,
+      cancelledAt: com.cancelledAt || null,
+      cancelReason: com.cancelReason || null,
+      referee: com.referee
+        ? {
+            pseudo: com.referee.pseudo,
+            country: com.referee.countryCode,
+            email: maskedEmail(com.referee.email),
+            phoneNumber: maskedPhone(
+              com.referee.dialCode,
+              com.referee.phoneNumber
+            ),
+            joinedAt: com.referee.createdAt,
+          }
+        : null,
+      subscription: sub
+        ? {
+            _id: sub._id,
+            packageName: packageNameStr,
+            amount: sub.pricing?.amount || 0,
+            currency: sub.pricing?.currency || null,
+            startedAt: sub.startDate || sub.createdAt,
+            expiresAt: sub.endDate || null,
+            status: sub.status || null,
+          }
+        : null,
+      payout: payout
+        ? {
+            _id: payout._id,
+            amount: payout.amount,
+            currency: payout.currency,
+            status: payout.status,
+            requestedAt: payout.requestedAt,
+            paidAt: payout.paidAt || null,
+            operator: payout.operator,
+            phoneNumber: maskedPhone(null, payout.phoneNumber),
+          }
+        : null,
+    };
+  }
+
+  /**
    * Liste paginée des commissions de l'affilié.
    */
   async listMyCommissions(user, { page = 1, limit = 20, status } = {}) {
