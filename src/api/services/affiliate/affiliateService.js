@@ -679,9 +679,13 @@ class AffiliateService {
    *
    * Garde-fous (silencieux — jamais de throw qui casserait le paiement) :
    *   - Pas de Referral pour ce User → return null
-   *   - Referral.status ≠ 'signed_up' (self_ref / country_mismatch) → skip
+   *   - Referral.status ∉ {'signed_up', 'converted'} (self_ref / country_mismatch) → skip
    *   - Affilié suspendu → skip
    *   - Commission déjà créée pour cette Subscription → skip (idempotent)
+   *
+   * Note : 'converted' = ≥1 commission déjà créée. On l'accepte pour que les
+   * achats SUIVANTS d'un filleul (renouvellements, autres forfaits) génèrent
+   * aussi des commissions au parrain — sinon seul le premier achat compterait.
    *
    * @param {Object} subscription - doc Subscription Mongoose populé ou _id-only
    * @returns {Object|null} Commission créée, ou null
@@ -704,11 +708,15 @@ class AffiliateService {
     });
     if (existing) return existing;
 
-    // Trouve le Referral éligible (status='signed_up' uniquement)
+    // Trouve le Referral éligible. 'signed_up' = pas encore converti.
+    // 'converted' = au moins une commission déjà créée — on accepte aussi
+    // pour que les achats SUIVANTS du même filleul génèrent une nouvelle
+    // commission (renouvellement, autre forfait). On exclut explicitement
+    // 'self_ref' et 'country_mismatch' qui sont des cas non éligibles.
     const referral = await Referral.findOne({
       appId: sub.appId,
       referee: sub.user,
-      status: 'signed_up',
+      status: { $in: ['signed_up', 'converted'] },
     });
     if (!referral) return null;
 
