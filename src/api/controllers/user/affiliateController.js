@@ -94,20 +94,34 @@ exports.getShareLink = catchAsync(async (req, res, next) => {
 });
 
 /**
- * GET /user/affiliate/referrals?page=1&limit=20
- * Liste paginée des filleuls (anonymisés).
+ * GET /user/affiliate/referrals?page=1&limit=20&q=...
+ * Liste paginée des filleuls (anonymisés). `q` cherche dans pseudo/email/phone.
  */
 exports.listReferrals = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
   }
-  const { page = 1, limit = 20 } = req.query;
+  const { page = 1, limit = 20, q } = req.query;
   const result = await affiliateService.listMyReferrals(user, {
     page: parseInt(page, 10),
     limit: Math.min(parseInt(limit, 10), 100),
+    q,
   });
   res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * GET /user/affiliate/referrals/:id
+ * Détail d'un filleul + ses subscriptions + ses commissions.
+ */
+exports.getReferralDetail = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const detail = await affiliateService.getReferralDetail(user, req.params.id);
+  res.status(200).json({ success: true, data: detail });
 });
 
 /**

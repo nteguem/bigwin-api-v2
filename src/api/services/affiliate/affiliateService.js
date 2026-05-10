@@ -454,11 +454,13 @@ class AffiliateService {
   }
 
   /**
-   * Liste paginée des filleuls d'un affilié, anonymisés.
+   * Liste paginée des filleuls d'un affilié.
+   * Recherche optionnelle par pseudo / email / phoneNumber via `q`.
+   *
    * @param {Object} user - parrain
-   * @param {Object} opts - { page, limit }
+   * @param {Object} opts - { page, limit, q }
    */
-  async listMyReferrals(user, { page = 1, limit = 20 } = {}) {
+  async listMyReferrals(user, { page = 1, limit = 20, q } = {}) {
     if (!user.affiliate?.isActive) {
       throw new AppError(
         "Vous n'êtes pas affilié.",
@@ -467,15 +469,42 @@ class AffiliateService {
       );
     }
 
+    const baseFilter = { appId: user.appId, referrer: user._id };
+
+    // Recherche : on cherche d'abord les Users qui matchent (pseudo / email
+    // / phoneNumber), puis on filtre les Referrals par ces userIds.
+    if (q && q.trim()) {
+      const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rgx = new RegExp(escaped, 'i');
+      const matchingUsers = await User.find({
+        appId: user.appId,
+        $or: [
+          { pseudo: rgx },
+          { email: rgx },
+          { phoneNumber: rgx },
+        ],
+      })
+        .select('_id')
+        .lean();
+      const ids = matchingUsers.map((u) => u._id);
+      if (ids.length === 0) {
+        return {
+          items: [],
+          pagination: { page, limit, total: 0, totalPages: 0 },
+        };
+      }
+      baseFilter.referee = { $in: ids };
+    }
+
     const skip = (Math.max(1, page) - 1) * limit;
     const [items, total] = await Promise.all([
-      Referral.find({ appId: user.appId, referrer: user._id })
+      Referral.find(baseFilter)
         .populate('referee', 'pseudo countryCode createdAt')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Referral.countDocuments({ appId: user.appId, referrer: user._id }),
+      Referral.countDocuments(baseFilter),
     ]);
 
     return {
@@ -499,6 +528,112 @@ class AffiliateService {
         total,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+
+  /**
+   * Détail d'un filleul. Inclut les commissions générées (si converti)
+   * + les subscriptions du filleul (achats, même hors commission).
+   *
+   * Sécurité : vérifie que le `referrer` du Referral est bien le user
+   * courant (pas de fuite de données entre affiliés).
+   */
+  async getReferralDetail(user, referralId) {
+    if (!user.affiliate?.isActive) {
+      throw new AppError(
+        "Vous n'êtes pas affilié.",
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const referral = await Referral.findOne({
+      _id: referralId,
+      appId: user.appId,
+      referrer: user._id,
+    })
+      .populate(
+        'referee',
+        'pseudo email phoneNumber dialCode countryCode createdAt'
+      )
+      .lean();
+
+    if (!referral) {
+      throw new AppError('Filleul introuvable.', 404, ErrorCodes.NOT_FOUND);
+    }
+
+    // Subscriptions du filleul (tous les achats, même non-commissionnés)
+    const Subscription = require('../../models/common/Subscription');
+    const subs = await Subscription.find({
+      appId: user.appId,
+      user: referral.referee?._id,
+    })
+      .populate('package', 'name displayName')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Commissions liées à ce referral (toutes statuts)
+    const commissions = await Commission.find({
+      appId: user.appId,
+      referral: referral._id,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Email partiellement masqué (RGPD light) : `j***@gmail.com`
+    const maskedEmail = (e) => {
+      if (!e || typeof e !== 'string' || !e.includes('@')) return null;
+      const [local, domain] = e.split('@');
+      const head = local.slice(0, 1);
+      return `${head}${'*'.repeat(Math.max(2, local.length - 1))}@${domain}`;
+    };
+
+    // Téléphone partiellement masqué : `+237 6XX XX 78 90` → `+237 6XX XX ** 90`
+    const maskedPhone = (dial, phone) => {
+      if (!phone) return null;
+      const tail = phone.slice(-2);
+      const masked = '*'.repeat(Math.max(0, phone.length - 2)) + tail;
+      return dial ? `${dial} ${masked}` : masked;
+    };
+
+    return {
+      _id: referral._id,
+      status: referral.status,
+      createdAt: referral.createdAt,
+      convertedAt: referral.convertedAt,
+      referee: referral.referee
+        ? {
+            pseudo: referral.referee.pseudo,
+            country: referral.referee.countryCode,
+            email: maskedEmail(referral.referee.email),
+            phoneNumber: maskedPhone(
+              referral.referee.dialCode,
+              referral.referee.phoneNumber
+            ),
+            joinedAt: referral.referee.createdAt,
+          }
+        : null,
+      subscriptions: subs.map((s) => ({
+        _id: s._id,
+        packageName:
+          s.package?.displayName?.fr ||
+          s.package?.displayName?.en ||
+          s.package?.name ||
+          null,
+        amount: s.pricing?.amount || 0,
+        currency: s.pricing?.currency || null,
+        startedAt: s.startsAt || s.createdAt,
+        expiresAt: s.expiresAt || null,
+        status: s.status || null,
+      })),
+      commissions: commissions.map((c) => ({
+        _id: c._id,
+        amount: c.amount,
+        currency: c.currency,
+        rate: c.commissionRate,
+        status: c.status,
+        createdAt: c.createdAt,
+      })),
     };
   }
 
