@@ -153,6 +153,15 @@ const userSchema = new mongoose.Schema({
       operator: String,    // 'orange' | 'mtn' | 'wave' | 'moov' | ...
       phoneNumber: String  // sans dial code
     },
+    // Lock atomique anti double-retrait (race condition multi-device).
+    // Set par requestPayout, unset par l'admin quand paid/failed/cancelled.
+    // Tant que ce champ est set, le user ne peut pas demander un autre
+    // retrait — quel que soit l'appareil ou la concurrence des requêtes.
+    activePayoutId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PayoutRequest',
+      default: null
+    },
     activatedAt: Date,
     suspended: {
       type: Boolean,

@@ -107,6 +107,39 @@ exports.updateConfig = catchAsync(async (req, res) => {
   });
 });
 
+// Marque une PayoutRequest comme payée (validation manuelle admin)
+exports.markPayoutPaid = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { payoutId } = req.params;
+  const { transferReference, note } = req.body || {};
+  const result = await affiliateAdminService.markPayoutPaid(appId, payoutId, {
+    adminId: req.admin?._id,
+    transferReference,
+    note,
+  });
+  res.status(200).json({
+    success: true,
+    message: 'Retrait marqué comme payé',
+    data: result,
+  });
+});
+
+// Rejette une PayoutRequest (numéro invalide, fraude, etc.)
+exports.rejectPayout = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { payoutId } = req.params;
+  const { reason } = req.body || {};
+  const result = await affiliateAdminService.rejectPayout(appId, payoutId, {
+    adminId: req.admin?._id,
+    reason,
+  });
+  res.status(200).json({
+    success: true,
+    message: 'Retrait rejeté — solde retourné dans le wallet de l\'affilié',
+    data: result,
+  });
+});
+
 // Liste des pays activables pour l'affiliation = AppConfig globale, filtrée
 // sur paymentProvider=afribapay (puisque AfribaPay est notre processor de
 // payouts). Permet à l'admin UI de proposer un dropdown des pays au lieu

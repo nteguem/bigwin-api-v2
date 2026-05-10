@@ -10,12 +10,15 @@
 //
 // L'admin a son propre service (admin/affiliateAdminService.js).
 
+const mongoose = require('mongoose');
+
 const User = require('../../models/user/User');
 const Referral = require('../../models/affiliate/Referral');
 const Commission = require('../../models/affiliate/Commission');
 const PayoutRequest = require('../../models/affiliate/PayoutRequest');
 const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
 const App = require('../../models/common/App');
+const mailService = require('../common/mailService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 class AffiliateService {
@@ -859,13 +862,24 @@ class AffiliateService {
       );
     }
 
-    // Plafonnement concurrentiel
-    const inFlight = await PayoutRequest.countDocuments({
-      appId: user.appId,
-      user: user._id,
-      status: { $in: ['queued', 'processing', 'awaiting_funds'] },
-    });
-    if (inFlight >= (config.maxConcurrentPayoutsPerUser || 1)) {
+    // === LOCK ATOMIQUE ANTI-DOUBLE RETRAIT ===
+    // Empêche les race conditions multi-device : si 2 requêtes arrivent
+    // simultanément, seule la première peut set activePayoutId. La 2e
+    // se voit refuser. C'est plus robuste que countDocuments qui n'est
+    // pas atomique.
+    const newPayoutId = new mongoose.Types.ObjectId();
+    const locked = await User.findOneAndUpdate(
+      {
+        _id: user._id,
+        $or: [
+          { 'affiliate.activePayoutId': null },
+          { 'affiliate.activePayoutId': { $exists: false } },
+        ],
+      },
+      { $set: { 'affiliate.activePayoutId': newPayoutId } },
+      { new: false }
+    );
+    if (!locked) {
       throw new AppError(
         'Vous avez déjà une demande de retrait en cours.',
         409,
@@ -873,95 +887,161 @@ class AffiliateService {
       );
     }
 
-    // Plafonnement mensuel
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-    const monthCount = await PayoutRequest.countDocuments({
-      appId: user.appId,
-      user: user._id,
-      requestedAt: { $gte: startOfMonth },
-      status: { $ne: 'cancelled' },
-    });
-    if (monthCount >= (config.maxPayoutsPerMonthPerUser || 2)) {
-      throw new AppError(
-        'Plafond mensuel de retraits atteint.',
-        429,
-        ErrorCodes.RATE_LIMIT_EXCEEDED
+    // À partir d'ici, en cas d'erreur on doit unset le lock pour ne pas
+    // bloquer l'user à vie.
+    try {
+      // Plafonnement mensuel
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const monthCount = await PayoutRequest.countDocuments({
+        appId: user.appId,
+        user: user._id,
+        requestedAt: { $gte: startOfMonth },
+        status: { $ne: 'cancelled' },
+      });
+      if (monthCount >= (config.maxPayoutsPerMonthPerUser || 2)) {
+        throw new AppError(
+          'Plafond mensuel de retraits atteint.',
+          429,
+          ErrorCodes.RATE_LIMIT_EXCEEDED
+        );
+      }
+
+      // Récupère toutes les commissions available dans la devise du pays
+      const currency = countryCfg.currency;
+      const commissions = await Commission.find({
+        appId: user.appId,
+        referrer: user._id,
+        currency,
+        status: 'available',
+      })
+        .sort({ createdAt: 1 })
+        .lean();
+
+      if (commissions.length === 0) {
+        throw new AppError(
+          'Aucune commission disponible au retrait.',
+          400,
+          ErrorCodes.VALIDATION_ERROR
+        );
+      }
+
+      const totalAmount = commissions.reduce((s, c) => s + c.amount, 0);
+
+      if (totalAmount < (countryCfg.minAmountForPayout || 0)) {
+        throw new AppError(
+          `Montant minimum de retrait : ${countryCfg.minAmountForPayout} ${currency}.`,
+          400,
+          ErrorCodes.VALIDATION_ERROR
+        );
+      }
+      if (totalAmount > (countryCfg.maxAmountForPayout || Infinity)) {
+        throw new AppError(
+          `Montant maximum de retrait : ${countryCfg.maxAmountForPayout} ${currency}.`,
+          400,
+          ErrorCodes.VALIDATION_ERROR
+        );
+      }
+
+      // Crée la PayoutRequest puis lock les commissions atomiquement
+      const commissionIds = commissions.map((c) => c._id);
+
+      const pr = await PayoutRequest.create({
+        _id: newPayoutId,
+        appId: user.appId,
+        user: user._id,
+        amount: totalAmount,
+        currency,
+        country,
+        operator,
+        phoneNumber,
+        status: 'queued',
+        commissionsIncluded: commissionIds,
+        requestedAt: new Date(),
+        attempts: [
+          {
+            type: 'request',
+            status: 'queued',
+            actor: String(user._id),
+            payload: { amount: totalAmount, currency, operator, phoneNumber },
+          },
+        ],
+      });
+
+      // afribaPayOrderId = `payout-${pr._id}` (idempotency key)
+      pr.afribaPayOrderId = `payout-${pr._id}`;
+      await pr.save();
+
+      // Lock les commissions
+      await Commission.updateMany(
+        { _id: { $in: commissionIds }, status: 'available' },
+        { $set: { status: 'locked', payoutRequest: pr._id } }
       );
+
+      // Email admin (fire-and-forget — ne casse pas la requête en cas d'échec)
+      this._notifyAdminNewPayout(pr, user).catch((err) => {
+        console.error(
+          '[affiliateService] notify admin failed:',
+          err?.message || err
+        );
+      });
+
+      return pr;
+    } catch (err) {
+      // Si quoi que ce soit échoue après le lock, on libère le User pour
+      // qu'il puisse re-essayer. Sinon il serait coincé à vie.
+      await User.findOneAndUpdate(
+        { _id: user._id, 'affiliate.activePayoutId': newPayoutId },
+        { $unset: { 'affiliate.activePayoutId': '' } }
+      ).catch(() => {});
+      throw err;
+    }
+  }
+
+  /**
+   * Envoie un email à l'admin pour notifier d'une nouvelle demande de
+   * retrait. L'email destinataire est `process.env.AFFILIATE_NOTIFY_EMAIL`
+   * (avec fallback sur SMTP_FROM ou un email codé à part). En cas
+   * d'échec, on log silencieusement — le retrait n'est pas annulé.
+   */
+  async _notifyAdminNewPayout(pr, user) {
+    const to =
+      process.env.AFFILIATE_NOTIFY_EMAIL ||
+      process.env.ADMIN_EMAIL ||
+      process.env.SUPPORT_EMAIL ||
+      process.env.SMTP_FROM;
+    if (!to) {
+      console.warn(
+        '[affiliateService] AFFILIATE_NOTIFY_EMAIL non configuré — email admin skip'
+      );
+      return;
     }
 
-    // Récupère toutes les commissions available dans la devise du pays
-    const currency = countryCfg.currency;
-    const commissions = await Commission.find({
-      appId: user.appId,
-      referrer: user._id,
-      currency,
-      status: 'available',
-    })
-      .sort({ createdAt: 1 })
-      .lean();
+    const fmtAmount = `${pr.amount} ${pr.currency}`;
+    const subject = `[${pr.appId.toUpperCase()}] Nouvelle demande de retrait — ${fmtAmount}`;
 
-    if (commissions.length === 0) {
-      throw new AppError(
-        'Aucune commission disponible au retrait.',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
+    const html = `
+      <h2 style="margin:0 0 16px">Nouvelle demande de retrait affilié</h2>
+      <table cellpadding="6" cellspacing="0" border="0" style="font-family:system-ui,sans-serif;border-collapse:collapse">
+        <tr><td><strong>App</strong></td><td>${pr.appId}</td></tr>
+        <tr><td><strong>Affilié</strong></td><td>${user.pseudo || '—'} (${user.email || user.phoneNumber || '—'})</td></tr>
+        <tr><td><strong>Identité affilié</strong></td><td>${user.affiliate?.firstName || ''} ${user.affiliate?.lastName || ''}</td></tr>
+        <tr><td><strong>Code</strong></td><td><code>${user.affiliate?.code || '—'}</code></td></tr>
+        <tr><td><strong>Pays</strong></td><td>${pr.country}</td></tr>
+        <tr><td><strong>Montant</strong></td><td><strong style="font-size:1.2em">${fmtAmount}</strong></td></tr>
+        <tr><td><strong>Mobile money</strong></td><td>${pr.operator} · ${pr.phoneNumber}</td></tr>
+        <tr><td><strong>PayoutRequest ID</strong></td><td><code>${pr._id}</code></td></tr>
+        <tr><td><strong>Demandé le</strong></td><td>${new Date(pr.requestedAt).toISOString()}</td></tr>
+      </table>
+      <p style="margin-top:24px">
+        <strong>Action requise :</strong> Effectue le virement manuel via AfribaPay
+        sur le numéro indiqué, puis valide ou rejette la demande dans le backoffice
+        admin → Affiliations → Retraits.
+      </p>
+    `;
 
-    const totalAmount = commissions.reduce((s, c) => s + c.amount, 0);
-
-    if (totalAmount < (countryCfg.minAmountForPayout || 0)) {
-      throw new AppError(
-        `Montant minimum de retrait : ${countryCfg.minAmountForPayout} ${currency}.`,
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
-    if (totalAmount > (countryCfg.maxAmountForPayout || Infinity)) {
-      throw new AppError(
-        `Montant maximum de retrait : ${countryCfg.maxAmountForPayout} ${currency}.`,
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
-
-    // Crée la PayoutRequest puis lock les commissions atomiquement
-    const commissionIds = commissions.map((c) => c._id);
-
-    const pr = await PayoutRequest.create({
-      appId: user.appId,
-      user: user._id,
-      amount: totalAmount,
-      currency,
-      country,
-      operator,
-      phoneNumber,
-      status: 'queued',
-      commissionsIncluded: commissionIds,
-      requestedAt: new Date(),
-      attempts: [
-        {
-          type: 'request',
-          status: 'queued',
-          actor: String(user._id),
-          payload: { amount: totalAmount, currency, operator, phoneNumber },
-        },
-      ],
-    });
-
-    // afribaPayOrderId = `payout-${pr._id}` (idempotency key)
-    pr.afribaPayOrderId = `payout-${pr._id}`;
-    await pr.save();
-
-    // Lock les commissions
-    await Commission.updateMany(
-      { _id: { $in: commissionIds }, status: 'available' },
-      { $set: { status: 'locked', payoutRequest: pr._id } }
-    );
-
-    return pr;
+    await mailService.sendAlert({ to, subject, html });
   }
 
   /**
