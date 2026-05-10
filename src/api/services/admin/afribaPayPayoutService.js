@@ -31,6 +31,23 @@ class AfribaPayPayoutError extends Error {
   }
 }
 
+/**
+ * AfribaPay met parfois le message d'erreur dans `data.message`, parfois
+ * dans `data.error.message` (ex : 403 "No PAYOUT or ALL IPs configured.").
+ * Cherche dans l'ordre de spécificité pour remonter quelque chose
+ * d'actionnable au toast admin plutôt que "Request failed with status
+ * code 403".
+ */
+function _extractAfribaMessage(err) {
+  const data = err?.response?.data;
+  if (data) {
+    if (data.error?.message) return data.error.message;
+    if (data.message) return data.message;
+    if (typeof data === 'string' && data.length < 300) return data;
+  }
+  return err.message;
+}
+
 // Cache tokens par app (multi-tenant). Clé = appId. Chaque app a ses
 // propres credentials donc son propre token.
 const tokenCache = new Map(); // appId → { token, expiresAt }
@@ -101,9 +118,8 @@ async function _fetchAccessToken({ appId, apiUrl, apiUser, apiKey }) {
     return token;
   } catch (err) {
     if (err instanceof AfribaPayPayoutError) throw err;
-    const msg = err?.response?.data?.message || err.message;
     throw new AfribaPayPayoutError(
-      `Échec authentification AfribaPay : ${msg}`,
+      `Échec authentification AfribaPay : ${_extractAfribaMessage(err)}`,
       err?.response?.status || 502,
       err?.response?.data
     );
@@ -186,14 +202,14 @@ async function triggerPayout(app, {
         );
       } catch (err2) {
         throw new AfribaPayPayoutError(
-          `AfribaPay payout échec après refresh token : ${err2?.response?.data?.message || err2.message}`,
+          `AfribaPay payout échec après refresh token : ${_extractAfribaMessage(err2)}`,
           err2?.response?.status || 502,
           err2?.response?.data
         );
       }
     } else {
       throw new AfribaPayPayoutError(
-        `AfribaPay payout échec : ${err?.response?.data?.message || err.message}`,
+        `AfribaPay payout échec : ${_extractAfribaMessage(err)}`,
         err?.response?.status || 502,
         err?.response?.data
       );
@@ -262,7 +278,7 @@ async function checkTransactionStatus(app, orderId) {
         });
       } catch (err2) {
         throw new AfribaPayPayoutError(
-          `AfribaPay /status échec : ${err2?.response?.data?.message || err2.message}`,
+          `AfribaPay /status échec : ${_extractAfribaMessage(err2)}`,
           err2?.response?.status || 502,
           err2?.response?.data
         );
@@ -275,7 +291,7 @@ async function checkTransactionStatus(app, orderId) {
       );
     } else {
       throw new AfribaPayPayoutError(
-        `AfribaPay /status échec : ${err?.response?.data?.message || err.message}`,
+        `AfribaPay /status échec : ${_extractAfribaMessage(err)}`,
         err?.response?.status || 502,
         err?.response?.data
       );
