@@ -10,17 +10,17 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 /**
  * POST /user/affiliate/activate
- * Body: { operator, phoneNumber }
+ * Body: { country?: string }   (pays choisi par l'user, défaut user.countryCode)
  * Active le rôle affilié pour le user authentifié.
  */
 exports.activate = catchAsync(async (req, res, next) => {
-  const { operator, phoneNumber } = req.body || {};
+  const { country } = req.body || {};
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
   }
 
-  await affiliateService.activate(user, { operator, phoneNumber });
+  await affiliateService.activate(user, { country });
 
   const state = await affiliateService.getMyState(user);
   res.status(200).json({
@@ -28,6 +28,20 @@ exports.activate = catchAsync(async (req, res, next) => {
     message: 'Compte affilié activé avec succès',
     data: state,
   });
+});
+
+/**
+ * GET /user/affiliate/eligible-countries
+ * Liste des pays disponibles pour activer un compte affilié, enrichie
+ * du nom du pays et flag isUserCountry pour pré-sélection UI.
+ */
+exports.listEligibleCountries = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const countries = await affiliateService.listEligibleCountries(user);
+  res.status(200).json({ success: true, data: countries });
 });
 
 /**
@@ -44,20 +58,23 @@ exports.getMe = catchAsync(async (req, res, next) => {
 });
 
 /**
- * PATCH /user/affiliate/payout-method
+ * POST /user/affiliate/payout-method
  * Body: { operator, phoneNumber }
+ *
+ * Définit les coordonnées mobile money UNE SEULE FOIS. Si déjà définies,
+ * renvoie 409 (conflict). Pour modifier, l'admin doit reset.
  */
-exports.updatePayoutMethod = catchAsync(async (req, res, next) => {
+exports.setPayoutMethod = catchAsync(async (req, res, next) => {
   const { operator, phoneNumber } = req.body || {};
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
   }
-  await affiliateService.updatePayoutMethod(user, { operator, phoneNumber });
+  await affiliateService.setPayoutMethod(user, { operator, phoneNumber });
   const state = await affiliateService.getMyState(user);
   res.status(200).json({
     success: true,
-    message: 'Coordonnées mobile money mises à jour',
+    message: 'Coordonnées mobile money enregistrées',
     data: state,
   });
 });
@@ -111,15 +128,23 @@ exports.listCommissions = catchAsync(async (req, res, next) => {
 
 /**
  * POST /user/affiliate/payout
+ * Body: { operator?, phoneNumber? } — requis UNIQUEMENT au 1er retrait
+ *                                     (set la méthode immuable). Ignorés
+ *                                     ensuite si méthode déjà définie.
+ *
  * Crée une demande de retrait pour la totalité du solde available
  * dans la devise du pays affilié.
  */
 exports.requestPayout = catchAsync(async (req, res, next) => {
+  const { operator, phoneNumber } = req.body || {};
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
   }
-  const payout = await affiliateService.requestPayout(user);
+  const payout = await affiliateService.requestPayout(user, {
+    operator,
+    phoneNumber,
+  });
   res.status(201).json({
     success: true,
     message: 'Demande de retrait enregistrée',

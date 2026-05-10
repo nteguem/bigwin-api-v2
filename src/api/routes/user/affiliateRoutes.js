@@ -13,7 +13,8 @@ router.use(userAuth.protect);
 
 router.post('/activate', affiliateController.activate);
 router.get('/me', affiliateController.getMe);
-router.post('/payout-method', affiliateController.updatePayoutMethod);
+router.get('/eligible-countries', affiliateController.listEligibleCountries);
+router.post('/payout-method', affiliateController.setPayoutMethod);
 router.get('/link', affiliateController.getShareLink);
 router.get('/referrals', affiliateController.listReferrals);
 router.get('/commissions', affiliateController.listCommissions);

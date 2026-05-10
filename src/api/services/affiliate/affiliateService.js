@@ -39,14 +39,17 @@ class AffiliateService {
 
   /**
    * Active le rôle affilié pour un User existant.
-   * - Le pays est figé (copié de User.countryCode).
-   * - Le code est généré aléatoirement (8 chars [A-Z0-9], unique par app).
-   * - Pas de re-activation possible (idempotent : si déjà actif, retourne tel quel).
+   *
+   * V1 minimaliste : on demande uniquement le pays (avec défaut =
+   * user.countryCode). PAS d'opérateur ni de numéro mobile money à
+   * l'activation — ces infos sont saisies UNE SEULE FOIS au moment du
+   * premier retrait, puis figées à vie.
    *
    * @param {Object} user - User document Mongoose
-   * @param {Object} payoutMethod - { operator, phoneNumber }
+   * @param {Object} [opts] - { country?: string } — pays choisi par l'user
+   *                          (si omis, on prend user.countryCode)
    */
-  async activate(user, payoutMethod) {
+  async activate(user, opts = {}) {
     if (!user || !user._id) {
       throw new AppError('User invalide', 400, ErrorCodes.VALIDATION_ERROR);
     }
@@ -54,22 +57,6 @@ class AffiliateService {
     if (user.affiliate?.isActive) {
       // Idempotent : déjà activé, on retourne l'état courant
       return user;
-    }
-
-    if (!user.countryCode) {
-      throw new AppError(
-        'Pays utilisateur introuvable. Le pays est nécessaire pour activer le rôle affilié.',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
-
-    if (!payoutMethod?.operator || !payoutMethod?.phoneNumber) {
-      throw new AppError(
-        'Coordonnées mobile money requises (operator + phoneNumber)',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
     }
 
     const config = await this.getOrCreateConfig(user.appId);
@@ -81,16 +68,28 @@ class AffiliateService {
       );
     }
 
-    // Le pays de l'user doit être dans la liste des pays activés
-    // (sinon il ne pourrait jamais retirer ses commissions, vu que
-    // les payouts AfribaPay sont scopés par pays).
-    const userCountry = user.countryCode.toUpperCase();
-    const countryEnabled = (config.payoutCountries || []).some(
-      (c) => c.code === userCountry && c.enabled !== false
-    );
-    if (!countryEnabled) {
+    // Pays choisi par l'user > pays détecté du User. Doit être dans
+    // payoutCountries enabled (sinon les retraits seraient impossibles).
+    const requestedCountry = (
+      opts.country ||
+      user.countryCode ||
+      ''
+    ).toUpperCase();
+
+    if (!requestedCountry) {
       throw new AppError(
-        `Le programme d'affiliation n'est pas encore disponible dans ton pays (${userCountry}).`,
+        'Pays requis pour activer le compte affilié.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const countryCfg = (config.payoutCountries || []).find(
+      (c) => c.code === requestedCountry && c.enabled !== false
+    );
+    if (!countryCfg) {
+      throw new AppError(
+        `Le programme d'affiliation n'est pas disponible dans le pays ${requestedCountry}.`,
         400,
         ErrorCodes.VALIDATION_ERROR
       );
@@ -102,11 +101,8 @@ class AffiliateService {
       isActive: true,
       code,
       tier: config.defaultTier,
-      country: user.countryCode.toUpperCase(),
-      payoutMethod: {
-        operator: payoutMethod.operator.toLowerCase(),
-        phoneNumber: payoutMethod.phoneNumber.trim(),
-      },
+      country: requestedCountry,
+      // payoutMethod omis : sera défini au premier retrait
       activatedAt: new Date(),
       suspended: false,
     };
@@ -116,27 +112,35 @@ class AffiliateService {
   }
 
   /**
-   * Met à jour les coordonnées mobile money de l'affilié.
-   * Pas de modification du pays ou du code (figés à vie).
+   * Définit la méthode de retrait (operator + phoneNumber) UNE SEULE FOIS.
+   * Une fois définie, plus modifiable côté user (immuable, anti-fraude).
+   * Pour modifier, l'admin doit reset via le backoffice.
    */
-  async updatePayoutMethod(user, payoutMethod) {
+  async setPayoutMethod(user, { operator, phoneNumber }) {
     if (!user.affiliate?.isActive) {
       throw new AppError(
-        "Vous n'êtes pas affilié. Activez votre compte d'abord.",
+        "Vous n'êtes pas affilié.",
         400,
         ErrorCodes.VALIDATION_ERROR
       );
     }
-    if (!payoutMethod?.operator || !payoutMethod?.phoneNumber) {
+    if (user.affiliate.payoutMethod?.operator) {
       throw new AppError(
-        'operator et phoneNumber requis',
+        'Vos coordonnées mobile money sont déjà définies. Contactez le support pour les modifier.',
+        409,
+        ErrorCodes.DUPLICATE_OPERATION
+      );
+    }
+    if (!operator || !phoneNumber) {
+      throw new AppError(
+        'Opérateur et numéro mobile money requis.',
         400,
         ErrorCodes.VALIDATION_ERROR
       );
     }
     user.affiliate.payoutMethod = {
-      operator: payoutMethod.operator.toLowerCase(),
-      phoneNumber: payoutMethod.phoneNumber.trim(),
+      operator: operator.toLowerCase().trim(),
+      phoneNumber: phoneNumber.trim(),
     };
     await user.save();
     return user;
@@ -156,23 +160,24 @@ class AffiliateService {
     const isAffiliate = !!user.affiliate?.isActive;
 
     if (!isAffiliate) {
-      // Vérifie si le pays user est éligible à devenir affilié + expose la
-      // devise pour que l'UI mobile puisse afficher "Pays : CM (XAF)" en
-      // read-only au moment de l'activation, sans hardcoder un mapping.
+      // canActivate est true si AU MOINS un pays est activé dans la config
+      // (l'user pourra choisir parmi ces pays au moment de l'activation,
+      // avec son countryCode comme défaut).
       let canActivate = false;
-      let eligibleCountry = null;
+      let defaultCountry = null;
       if (user.countryCode) {
         const config = await this.getOrCreateConfig(appId);
         if (config.isEnabled) {
           const userCountry = user.countryCode.toUpperCase();
-          const cfg = (config.payoutCountries || []).find(
-            (c) => c.code === userCountry && c.enabled !== false
+          const enabledCountries = (config.payoutCountries || []).filter(
+            (c) => c.enabled !== false
           );
-          if (cfg) {
-            canActivate = true;
-            eligibleCountry = {
-              code: cfg.code,
-              currency: cfg.currency,
+          canActivate = enabledCountries.length > 0;
+          const userCfg = enabledCountries.find((c) => c.code === userCountry);
+          if (userCfg) {
+            defaultCountry = {
+              code: userCfg.code,
+              currency: userCfg.currency,
             };
           }
         }
@@ -180,7 +185,7 @@ class AffiliateService {
       return {
         isAffiliate: false,
         canActivate,
-        eligibleCountry,
+        defaultCountry, // pré-sélection du select pays côté UI
       };
     }
 
@@ -221,19 +226,30 @@ class AffiliateService {
     };
 
     // Lookup de la devise du pays affilié depuis la config (single source
-    // of truth). Évite que le mobile hardcode un mapping country→currency.
+    // of truth) + nom du pays depuis AppConfig. Évite que le mobile
+    // hardcode un mapping country→currency/name.
     const config = await this.getOrCreateConfig(appId);
     const countryCfg = (config.payoutCountries || []).find(
       (c) => c.code === (user.affiliate.country || '').toUpperCase()
     );
+    const AppConfigModel = require('../../models/common/AppConfig');
+    const countryDoc = user.affiliate.country
+      ? await AppConfigModel.findOne({
+          countryCode: user.affiliate.country.toUpperCase(),
+        })
+          .select('countryName')
+          .lean()
+      : null;
 
     return {
       isAffiliate: true,
       code: user.affiliate.code,
       tier: user.affiliate.tier,
       country: user.affiliate.country,
+      countryName: countryDoc?.countryName || null,
       currency: countryCfg?.currency || null,
-      payoutMethod: user.affiliate.payoutMethod,
+      payoutMethod: user.affiliate.payoutMethod || null,
+      hasPayoutMethod: !!user.affiliate.payoutMethod?.operator,
       activatedAt: user.affiliate.activatedAt,
       suspended: !!user.affiliate.suspended,
       balance: {
@@ -247,6 +263,42 @@ class AffiliateService {
         pendingPayouts,
       },
     };
+  }
+
+  /**
+   * Liste des pays disponibles pour activer un compte affilié, enrichie
+   * avec le nom du pays (depuis AppConfig) et un flag isUserCountry pour
+   * que l'UI mobile puisse pré-sélectionner le pays détecté.
+   */
+  async listEligibleCountries(user) {
+    const config = await this.getOrCreateConfig(user.appId);
+    const enabled = (config.payoutCountries || [])
+      .filter((c) => c.enabled !== false)
+      .map((c) => c.toObject ? c.toObject() : c);
+
+    if (enabled.length === 0) return [];
+
+    const codes = enabled.map((c) => c.code);
+    const AppConfigModel = require('../../models/common/AppConfig');
+    const countryDocs = await AppConfigModel.find({
+      countryCode: { $in: codes },
+    })
+      .select('countryCode countryName')
+      .lean();
+
+    const nameByCode = countryDocs.reduce((acc, d) => {
+      acc[d.countryCode] = d.countryName;
+      return acc;
+    }, {});
+
+    const userCountry = (user.countryCode || '').toUpperCase();
+
+    return enabled.map((c) => ({
+      code: c.code,
+      name: nameByCode[c.code] || c.code,
+      currency: c.currency,
+      isUserCountry: c.code === userCountry,
+    }));
   }
 
   /**
@@ -585,7 +637,7 @@ class AffiliateService {
    * Le worker (Phase 5) prend la PayoutRequest, appelle AfribaPay, et
    * passe en `paid` ou `awaiting_funds` selon le retour.
    */
-  async requestPayout(user) {
+  async requestPayout(user, opts = {}) {
     if (!user.affiliate?.isActive) {
       throw new AppError(
         "Vous n'êtes pas affilié.",
@@ -601,14 +653,25 @@ class AffiliateService {
       );
     }
 
-    const { operator, phoneNumber } = user.affiliate.payoutMethod || {};
-    if (!operator || !phoneNumber) {
-      throw new AppError(
-        'Coordonnées mobile money manquantes — configurez votre méthode de retrait.',
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
+    // Si pas encore de payoutMethod, on accepte les params {operator,
+    // phoneNumber} dans le body et on les fixe à vie. Sinon on utilise
+    // ceux déjà enregistrés (immuables).
+    if (!user.affiliate.payoutMethod?.operator) {
+      if (!opts.operator || !opts.phoneNumber) {
+        throw new AppError(
+          'Premier retrait : opérateur et numéro mobile money requis.',
+          400,
+          ErrorCodes.VALIDATION_ERROR
+        );
+      }
+      user.affiliate.payoutMethod = {
+        operator: opts.operator.toLowerCase().trim(),
+        phoneNumber: opts.phoneNumber.trim(),
+      };
+      await user.save();
     }
+
+    const { operator, phoneNumber } = user.affiliate.payoutMethod;
 
     const country = (user.affiliate.country || '').toUpperCase();
     if (!country) {
