@@ -572,7 +572,7 @@ class AffiliateService {
       appId: user.appId,
       user: referral.referee?._id,
     })
-      .populate('package', 'name displayName')
+      .populate('package', 'name')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -617,19 +617,24 @@ class AffiliateService {
             joinedAt: referral.referee.createdAt,
           }
         : null,
-      subscriptions: subs.map((s) => ({
-        _id: s._id,
-        packageName:
-          s.package?.displayName?.fr ||
-          s.package?.displayName?.en ||
-          s.package?.name ||
-          null,
-        amount: s.pricing?.amount || 0,
-        currency: s.pricing?.currency || null,
-        startedAt: s.startsAt || s.createdAt,
-        expiresAt: s.expiresAt || null,
-        status: s.status || null,
-      })),
+      subscriptions: subs.map((s) => {
+        // Package.name est un objet bilingue { fr, en } — on extrait
+        // une string pour ne pas envoyer un Map au client.
+        const pkgName = s.package?.name;
+        const packageNameStr =
+          (pkgName && typeof pkgName === 'object'
+            ? pkgName.fr || pkgName.en
+            : pkgName) || null;
+        return {
+          _id: s._id,
+          packageName: packageNameStr,
+          amount: s.pricing?.amount || 0,
+          currency: s.pricing?.currency || null,
+          startedAt: s.startDate || s.createdAt,
+          expiresAt: s.endDate || null,
+          status: s.status || null,
+        };
+      }),
       commissions: commissions.map((c) => ({
         _id: c._id,
         amount: c.amount,
