@@ -16,6 +16,7 @@ router.get('/payout-requests/:payoutId', ctrl.getPayoutRequest);
 router.get('/funding-requests', ctrl.listFundingRequests);
 router.get('/config', ctrl.getConfig);
 router.patch('/config', ctrl.updateConfig);
+router.get('/available-countries', ctrl.listAvailableCountries);
 
 // Routes avec :userId — placées APRÈS les routes statiques pour éviter
 // que /payout-requests soit matché comme un userId.

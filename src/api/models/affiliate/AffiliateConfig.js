@@ -25,20 +25,18 @@ const tierSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Le `code` (ISO-2) doit exister dans AppConfig (collection globale des
+// pays plateforme). La devise est snapshotée ici depuis AppConfig au
+// moment de l'enregistrement pour l'audit historique.
 const payoutCountrySchema = new mongoose.Schema(
   {
-    code: { type: String, required: true, uppercase: true }, // ISO-2
-    currency: { type: String, required: true, uppercase: true },
-    operators: [String],            // ['orange', 'mtn', 'wave', ...]
+    code: { type: String, required: true, uppercase: true }, // ISO-2 (référence AppConfig.countryCode)
+    currency: { type: String, required: true, uppercase: true }, // snapshot AppConfig.currency
     minAmountForPayout: { type: Number, default: 100 },     // min AfribaPay
     maxAmountForPayout: { type: Number, default: 2500000 }, // max AfribaPay
     payoutThreshold: { type: Number, default: 0 },          // seuil mini retrait (0 = pas de seuil)
     enabled: { type: Boolean, default: true },
     afribaPayAccountId: String, // ex: 'CMXAF-OUTAPM31923613' (info seulement)
-
-    // Surveillance balance
-    criticalBalanceThreshold: { type: Number, default: 50000 },  // alerte admin
-    blockingBalanceThreshold: { type: Number, default: 10000 },  // bloque nouveaux retraits
 
     _id: false,
   }
@@ -82,9 +80,6 @@ const affiliateConfigSchema = new mongoose.Schema(
     tiers: [tierSchema],
     payoutCountries: [payoutCountrySchema],
     bonuses: [bonusSchema],
-
-    // Window d'attribution (jours entre install et 1er achat pour valider la commission)
-    attributionWindowDays: { type: Number, default: 30 },
 
     // Limites anti-abus globales
     maxConcurrentPayoutsPerUser: { type: Number, default: 1 },

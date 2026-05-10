@@ -32,7 +32,6 @@ class AffiliateService {
         isEnabled: true,
         defaultTier: 'rookie',
         defaultCommissionRate: 15,
-        attributionWindowDays: 30,
       });
     }
     return config;
@@ -456,8 +455,9 @@ class AffiliateService {
     if (!referrer || !referrer.affiliate?.isActive) return null;
     if (referrer.affiliate.suspended) return null;
 
-    // Calcul commission selon config
+    // Récupère la config (sert pour le taux de commission)
     const config = await this.getOrCreateConfig(sub.appId);
+
     const subAmount = sub.pricing?.amount || 0;
     if (subAmount <= 0) return null;
 

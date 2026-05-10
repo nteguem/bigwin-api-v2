@@ -106,3 +106,28 @@ exports.updateConfig = catchAsync(async (req, res) => {
     data: config,
   });
 });
+
+// Liste des pays activables pour l'affiliation = AppConfig globale, filtrée
+// sur paymentProvider=afribapay (puisque AfribaPay est notre processor de
+// payouts). Permet à l'admin UI de proposer un dropdown des pays au lieu
+// de saisir le code/devise à la main.
+exports.listAvailableCountries = catchAsync(async (req, res) => {
+  const AppConfig = require('../../models/common/AppConfig');
+  const countries = await AppConfig.find({
+    isActive: true,
+    paymentProvider: 'afribapay',
+    countryCode: { $ne: 'DEFAULT' },
+  })
+    .select('countryCode countryName currency phonePrefix')
+    .sort({ countryName: 1 })
+    .lean();
+  res.status(200).json({
+    success: true,
+    data: countries.map((c) => ({
+      code: c.countryCode,
+      name: c.countryName,
+      currency: c.currency,
+      phonePrefix: c.phonePrefix,
+    })),
+  });
+});
