@@ -672,16 +672,6 @@ class AffiliateService {
         ErrorCodes.VALIDATION_ERROR
       );
     }
-    if (
-      countryCfg.payoutThreshold &&
-      totalAmount < countryCfg.payoutThreshold
-    ) {
-      throw new AppError(
-        `Seuil de retrait : ${countryCfg.payoutThreshold} ${currency}.`,
-        400,
-        ErrorCodes.VALIDATION_ERROR
-      );
-    }
     if (totalAmount > (countryCfg.maxAmountForPayout || Infinity)) {
       throw new AppError(
         `Montant maximum de retrait : ${countryCfg.maxAmountForPayout} ${currency}.`,

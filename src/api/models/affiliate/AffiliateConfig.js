@@ -32,9 +32,8 @@ const payoutCountrySchema = new mongoose.Schema(
   {
     code: { type: String, required: true, uppercase: true }, // ISO-2 (référence AppConfig.countryCode)
     currency: { type: String, required: true, uppercase: true }, // snapshot AppConfig.currency
-    minAmountForPayout: { type: Number, default: 100 },     // min AfribaPay
-    maxAmountForPayout: { type: Number, default: 2500000 }, // max AfribaPay
-    payoutThreshold: { type: Number, default: 0 },          // seuil mini retrait (0 = pas de seuil)
+    minAmountForPayout: { type: Number, default: 100 },     // min de retrait demandé
+    maxAmountForPayout: { type: Number, default: 2500000 }, // max de retrait demandé
     enabled: { type: Boolean, default: true },
     afribaPayAccountId: String, // ex: 'CMXAF-OUTAPM31923613' (info seulement)
 
