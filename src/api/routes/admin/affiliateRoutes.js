@@ -15,6 +15,10 @@ router.get('/payout-requests', ctrl.listPayoutRequests);
 router.get('/payout-requests/:payoutId', ctrl.getPayoutRequest);
 router.post('/payout-requests/:payoutId/mark-paid', ctrl.markPayoutPaid);
 router.post('/payout-requests/:payoutId/reject', ctrl.rejectPayout);
+router.post(
+  '/payout-requests/:payoutId/sync-status',
+  ctrl.syncPayoutStatusFromAfribaPay
+);
 router.get('/funding-requests', ctrl.listFundingRequests);
 router.get('/config', ctrl.getConfig);
 router.patch('/config', ctrl.updateConfig);

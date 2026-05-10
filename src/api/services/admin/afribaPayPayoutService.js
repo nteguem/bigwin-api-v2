@@ -231,7 +231,69 @@ async function triggerPayout(app, {
   return { status, transactionId, providerId, raw: data };
 }
 
+/**
+ * Récupère le status courant d'une transaction depuis AfribaPay via
+ * GET /v1/status?order_id=... (sur l'API_URL classique, pas payout).
+ *
+ * @param {Object} app - doc App pour la config + token
+ * @param {string} orderId - ex: `payout-${pr._id}`
+ * @returns {Promise<{ status, transactionId, providerId, raw }>}
+ */
+async function checkTransactionStatus(app, orderId) {
+  const cfg = _getConfigFromApp(app);
+  const token = await _fetchAccessToken(cfg);
+
+  let response;
+  try {
+    response = await axios.get(`${cfg.apiUrl}/v1/status`, {
+      params: { order_id: orderId },
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000,
+    });
+  } catch (err) {
+    if (err?.response?.status === 401) {
+      _invalidateToken(cfg.appId);
+      const freshToken = await _fetchAccessToken(cfg);
+      try {
+        response = await axios.get(`${cfg.apiUrl}/v1/status`, {
+          params: { order_id: orderId },
+          headers: { Authorization: `Bearer ${freshToken}` },
+          timeout: 15000,
+        });
+      } catch (err2) {
+        throw new AfribaPayPayoutError(
+          `AfribaPay /status échec : ${err2?.response?.data?.message || err2.message}`,
+          err2?.response?.status || 502,
+          err2?.response?.data
+        );
+      }
+    } else if (err?.response?.status === 404) {
+      throw new AfribaPayPayoutError(
+        `Aucune transaction AfribaPay trouvée pour order_id=${orderId}.`,
+        404,
+        err?.response?.data
+      );
+    } else {
+      throw new AfribaPayPayoutError(
+        `AfribaPay /status échec : ${err?.response?.data?.message || err.message}`,
+        err?.response?.status || 502,
+        err?.response?.data
+      );
+    }
+  }
+
+  const data = response.data?.data || {};
+  const status = String(data.status || '').toUpperCase();
+  return {
+    status,
+    transactionId: data.transaction_id || null,
+    providerId: data.provider_id || null,
+    raw: data,
+  };
+}
+
 module.exports = {
   triggerPayout,
+  checkTransactionStatus,
   AfribaPayPayoutError,
 };

@@ -556,6 +556,103 @@ class AffiliateAdminService {
   }
 
   /**
+   * Réconcilie manuellement le statut d'une PayoutRequest avec AfribaPay.
+   * Appelé par l'admin via un bouton "Vérifier statut" sur les payouts
+   * en `processing` (ou `queued` si on veut s'assurer qu'AfribaPay n'a
+   * pas reçu plus tôt). Utile si le webhook ne vient pas.
+   *
+   * Réutilise la logique de handlePayoutWebhook : si AfribaPay dit
+   * SUCCESS ou FAILED, on update la PayoutRequest exactement comme si
+   * un webhook était arrivé (idempotent).
+   */
+  async syncPayoutStatusFromAfribaPay(appId, payoutId, adminId) {
+    const pr = await PayoutRequest.findOne({ _id: payoutId, appId });
+    if (!pr) {
+      throw new AppError(
+        'Demande de retrait introuvable.',
+        404,
+        ErrorCodes.NOT_FOUND
+      );
+    }
+    if (pr.status === 'paid' || pr.status === 'failed' || pr.status === 'cancelled') {
+      throw new AppError(
+        `Cette demande est déjà finalisée (statut "${pr.status}"). Pas besoin de re-vérifier.`,
+        400,
+        ErrorCodes.OPERATION_NOT_ALLOWED
+      );
+    }
+    if (!pr.afribaPayOrderId) {
+      throw new AppError(
+        'Cette demande n\'a pas encore été envoyée à AfribaPay. Clique sur "Valider" d\'abord.',
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
+    const app = await App.findOne({ appId });
+    if (!app) {
+      throw new AppError(`App "${appId}" introuvable.`, 404, ErrorCodes.NOT_FOUND);
+    }
+
+    let result;
+    try {
+      result = await afribaPayPayoutService.checkTransactionStatus(
+        app,
+        pr.afribaPayOrderId
+      );
+    } catch (err) {
+      pr.attempts.push({
+        at: new Date(),
+        type: 'reconciliation',
+        status: pr.status,
+        actor: adminId ? String(adminId) : 'admin',
+        error: err.message,
+        payload: { action: 'sync_status', afribaResponse: err.responseData || null },
+      });
+      await pr.save();
+      throw new AppError(
+        err.message || 'Échec récupération statut AfribaPay',
+        err.statusCode || 502,
+        ErrorCodes.OPERATION_FAILED
+      );
+    }
+
+    // Si toujours PENDING, on log juste l'attempt et on retourne tel quel.
+    if (result.status === 'PENDING') {
+      pr.attempts.push({
+        at: new Date(),
+        type: 'reconciliation',
+        status: pr.status,
+        actor: adminId ? String(adminId) : 'admin',
+        payload: {
+          action: 'sync_status',
+          afribaStatus: 'PENDING',
+          message: 'AfribaPay confirme que la transaction est encore en cours.',
+        },
+        response: result.raw,
+      });
+      await pr.save();
+      return { payoutRequest: pr, finalStatus: pr.status, transient: true };
+    }
+
+    // Sinon (SUCCESS ou FAILED) on délègue au handler webhook qui fait
+    // toute la machinerie (commissions, lock User, notifs).
+    return await this.handlePayoutWebhook(
+      {
+        order_id: pr.afribaPayOrderId,
+        status: result.status,
+        transaction_id: result.transactionId,
+        provider_id: result.providerId,
+        // Marquer que c'est une réconciliation manuelle, pas un vrai webhook
+        _source: 'admin_reconciliation',
+        _adminId: adminId,
+        ...result.raw,
+      },
+      {}
+    );
+  }
+
+  /**
    * Traite un webhook AfribaPay payout. Appelé par le controller
    * webhook après vérification HMAC. Le payload contient au moins
    * order_id et status. Met à jour la PayoutRequest correspondante :

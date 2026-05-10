@@ -170,6 +170,26 @@ exports.listAffiliatePayouts = catchAsync(async (req, res) => {
   res.status(200).json({ success: true, data: result });
 });
 
+// Vérifie le status d'une PayoutRequest auprès d'AfribaPay et réconcilie
+// la BDD si AfribaPay confirme SUCCESS ou FAILED. Utile si le webhook
+// AfribaPay ne vient pas (network glitch, NOTIFY_URL mal configuré, etc.).
+exports.syncPayoutStatusFromAfribaPay = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const { payoutId } = req.params;
+  const result = await affiliateAdminService.syncPayoutStatusFromAfribaPay(
+    appId,
+    payoutId,
+    req.admin?._id
+  );
+  res.status(200).json({
+    success: true,
+    message: result.transient
+      ? 'AfribaPay confirme que le virement est encore en cours.'
+      : `Statut synchronisé : ${result.finalStatus}`,
+    data: result,
+  });
+});
+
 // Marque une PayoutRequest comme payée (validation manuelle admin)
 exports.markPayoutPaid = catchAsync(async (req, res) => {
   const appId = req.appId;
