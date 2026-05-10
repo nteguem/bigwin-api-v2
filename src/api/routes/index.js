@@ -40,6 +40,7 @@ const adminTicketRoutes = require('./admin/ticketRoutes');
 const adminPredictionRoutes = require('./admin/predictionRoutes');
 const adminSportsRoutes = require('./admin/sportsRoutes');
 const adminEventRoutes = require('./admin/eventRoutes');
+const adminAffiliateRoutes = require('./admin/affiliateRoutes');
 const adminFormationRoutes = require('./admin/formationRoutes');
 const adminUserRoutes = require('./admin/userRoutes');
 const adminDayOffRoutes = require('./admin/dayOffRoutes');
@@ -78,6 +79,7 @@ router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin')
 router.use('/admin/gifts',           identifyApp, ...ADMIN_SUPER,  adminGiftRoutes);
 
 router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
+router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliateRoutes);
 // Users: stats accessible aux investisseurs (read-only, scoped à leurs apps); le reste reste super_admin only
 const adminUserController = require('../controllers/admin/userController');
 router.get('/admin/users/stats',     identifyAppOptional, adminAuth.protect, authorize('super_admin', 'investisseur'), enforceAppScope, readOnly, adminUserController.getUserStats);
@@ -121,6 +123,7 @@ const packageRoutes = require('./user/packageRoutes');
 const korapayRoutes = require('./user/korapayRoutes');
 const fedapayRoutes = require('./user/fedapayRoutes');
 const userGiftRoutes = require('./user/giftRoutes');
+const userAffiliateRoutes = require('./user/affiliateRoutes');
 
 
 // ===== ROUTES DE PAIEMENT =====
@@ -137,6 +140,7 @@ router.use('/user/formations', identifyApp, userFormationRoutes);
 router.use('/user/google-play', identifyApp, googlePlayRoutes);
 router.use('/user/packages', identifyApp, packageRoutes);
 router.use('/user/gifts', identifyApp, userGiftRoutes);
+router.use('/user/affiliate', identifyApp, userAffiliateRoutes);
 
 // Route générique /user EN DERNIER (sinon elle capture toutes les requêtes /user/*)
 router.use('/user', identifyApp, userSubscriptionRoutes);

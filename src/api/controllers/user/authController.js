@@ -5,6 +5,7 @@ const authService = require('../../services/common/authService');
 const googleAuthService = require('../../services/common/googleAuthService');
 const subscriptionService = require('../../services/user/subscriptionService');
 const deviceService = require('../../services/common/deviceService');
+const affiliateService = require('../../services/affiliate/affiliateService');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const logger = require('../../../core/logger');
@@ -15,7 +16,7 @@ const SERVICE = 'auth';
  * Inscription utilisateur avec génération automatique d'email
  */
 exports.register = catchAsync(async (req, res, next) => {
-  const { phoneNumber, countryCode, dialCode, password, pseudo, city, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
+  const { phoneNumber, countryCode, dialCode, password, pseudo, city, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid, affiliateCode } = req.body;
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -59,6 +60,22 @@ exports.register = catchAsync(async (req, res, next) => {
     firebaseAppInstanceId: firebaseAppInstanceId || null,
     ...(acquisition && { acquisition })
   });
+
+  // Capture du code de parrainage si fourni — ne casse jamais le signup,
+  // crée silencieusement un Referral en self_ref / country_mismatch /
+  // signed_up selon les règles métier.
+  if (affiliateCode) {
+    try {
+      await affiliateService.createReferralAtSignup(user, affiliateCode);
+    } catch (err) {
+      logger.warn('affiliate referral failed at signup', {
+        service: SERVICE,
+        category: 'affiliateReferral',
+        userId: user._id,
+        error: err.message,
+      });
+    }
+  }
   
   // Générer les tokens
   const tokens = authService.generateTokens(user._id, 'user');
@@ -197,7 +214,7 @@ exports.login = catchAsync(async (req, res, next) => {
  * Authentification avec Google (login + register combiné)
  */
 exports.googleAuth = catchAsync(async (req, res, next) => {
-  const { idToken, city, countryCode, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid } = req.body;
+  const { idToken, city, countryCode, deviceId, firebaseAppInstanceId, acquisitionSource, acquisitionGclid, affiliateCode } = req.body;
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
@@ -223,6 +240,19 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
       acquisitionSource,
       acquisitionGclid
     });
+
+    // Si nouvel user + code affilié fourni → créer le Referral
+    if (isNewUser && affiliateCode) {
+      try {
+        await affiliateService.createReferralAtSignup(user, affiliateCode);
+      } catch (err) {
+        req.log?.warn?.('affiliate referral failed at google signup', {
+          service: SERVICE,
+          userId: user._id,
+          error: err.message,
+        });
+      }
+    }
     
     // 3. Vérifier si le compte est actif
     if (!user.isActive) {

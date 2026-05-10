@@ -114,6 +114,49 @@ const userSchema = new mongoose.Schema({
     }
   },
 
+  // Rôle d'affilié — sous-doc embed (pas de modèle Affiliate séparé).
+  // Activable à la demande via POST /auth/affiliate/activate.
+  // Le `country` est figé à l'activation (copié de User.countryCode existant).
+  // Mismatch filleul.countryCode ≠ parrain.affiliate.country → pas de commission.
+  //
+  // Si `affiliate` est absent ou `affiliate.isActive=false`, le User est un
+  // user normal (pas d'affilié). Le code n'est généré qu'à l'activation.
+  affiliate: {
+    isActive: {
+      type: Boolean,
+      default: false
+    },
+    code: {
+      type: String,
+      uppercase: true,
+      trim: true
+      // Pattern validé à l'activation : ^[A-Z0-9]{8}$
+      // Index unique scopé (appId, code) défini en bas via partialFilterExpression.
+    },
+    tier: {
+      type: String,
+      default: 'rookie'
+      // V1 : tier unique. Évolutif via AffiliateConfig (pro/elite/legend).
+    },
+    country: {
+      type: String,
+      uppercase: true,
+      trim: true
+      // ISO-2, copié de User.countryCode au moment de l'activation. Figé.
+    },
+    payoutMethod: {
+      operator: String,    // 'orange' | 'mtn' | 'wave' | 'moov' | ...
+      phoneNumber: String  // sans dial code
+    },
+    activatedAt: Date,
+    suspended: {
+      type: Boolean,
+      default: false
+    },
+    suspendedReason: String,
+    suspendedAt: Date
+  },
+
   createdAt: {
     type: Date,
     default: Date.now
@@ -129,6 +172,21 @@ userSchema.index({ appId: 1, isActive: 1 });
 userSchema.index({ isActive: 1 });
 userSchema.index({ authProvider: 1 });
 
+// Affiliate — index unique scopé par app pour le code de parrainage.
+// `partialFilterExpression` (et NON `sparse`) car certains users existants
+// ont `affiliate.code = null` explicit (pas absent), ce que `sparse` ne
+// gère pas correctement → conflit unique sur null. Le partial index
+// n'inclut que les docs avec code défini comme string.
+userSchema.index(
+  { appId: 1, 'affiliate.code': 1 },
+  {
+    unique: true,
+    partialFilterExpression: { 'affiliate.code': { $type: 'string' } }
+  }
+);
+// Pour les listings admin : trouver les affiliés actifs d'une app
+userSchema.index({ appId: 1, 'affiliate.isActive': 1, 'affiliate.country': 1 });
+
 // Methods
 userSchema.methods.comparePassword = async function(candidatePassword) {
   if (!this.password) return false;
@@ -141,6 +199,44 @@ userSchema.methods.toJSON = function() {
   delete user.refreshTokens;
   delete user.__v;
   return user;
+};
+
+// ===== AFFILIATE HELPERS =====
+
+/**
+ * Génère un code affilié unique (8 chars [A-Z0-9]) scopé par appId.
+ * Retry max 5 fois en cas de collision (statistiquement quasi impossible :
+ * 36^8 ≈ 2.8 trillions de combinaisons). Au-delà, throw.
+ *
+ * Caractères ambigus volontairement INCLUS (0/O, 1/I/L) — les codes étant
+ * partagés via lien Play Store (pas tapés à la main 99% du temps), on
+ * privilégie l'entropie au lieu de réduire l'alphabet.
+ *
+ * @param {String} appId
+ * @returns {Promise<String>} code unique
+ */
+userSchema.statics.generateAffiliateCode = async function(appId) {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const LENGTH = 8;
+  const MAX_ATTEMPTS = 5;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let code = '';
+    for (let i = 0; i < LENGTH; i++) {
+      code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    }
+
+    const existing = await this.findOne({
+      appId,
+      'affiliate.code': code
+    }).select('_id').lean();
+
+    if (!existing) return code;
+  }
+
+  throw new Error(
+    `Impossible de générer un code affilié unique pour app=${appId} après ${MAX_ATTEMPTS} tentatives`
+  );
 };
 
 // Hooks

@@ -3,6 +3,7 @@
 const subscriptionService = require('../../services/user/subscriptionService');
 const notificationService = require('../../services/common/notificationService');
 const ga4mp = require('../../services/common/googleAnalyticsMpService');
+const affiliateService = require('../../services/affiliate/affiliateService');
 const App = require('../../models/common/App');
 const User = require('../../models/user/User');
 const Device = require('../../models/common/Device');
@@ -113,6 +114,25 @@ async function handleSuccessfulTransaction(appId, transaction) {
       ...ctx,
       subscriptionId: String(subscription._id),
     });
+
+    // Création automatique de la Commission affilié si le filleul a un
+    // Referral éligible (status='signed_up'). Silencieux, pas bloquant.
+    try {
+      const commission = await affiliateService.tryCreateCommissionForSubscription(subscription);
+      if (commission) {
+        logger.info('affiliate commission created', {
+          ...ctx,
+          commissionId: String(commission._id),
+          referrerId: String(commission.referrer),
+          amount: commission.amount,
+        });
+      }
+    } catch (err) {
+      logger.warn('affiliate commission creation failed (non-blocking)', {
+        ...ctx,
+        error: err.message,
+      });
+    }
 
     // GA4 MP : fire l'event `purchase` pour Google Ads Smart Bidding.
     // Fire-and-forget — les erreurs ne bloquent pas le flow.
