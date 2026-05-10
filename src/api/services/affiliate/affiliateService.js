@@ -82,6 +82,21 @@ class AffiliateService {
       );
     }
 
+    // Le pays de l'user doit être dans la liste des pays activés
+    // (sinon il ne pourrait jamais retirer ses commissions, vu que
+    // les payouts AfribaPay sont scopés par pays).
+    const userCountry = user.countryCode.toUpperCase();
+    const countryEnabled = (config.payoutCountries || []).some(
+      (c) => c.code === userCountry && c.enabled !== false
+    );
+    if (!countryEnabled) {
+      throw new AppError(
+        `Le programme d'affiliation n'est pas encore disponible dans ton pays (${userCountry}).`,
+        400,
+        ErrorCodes.VALIDATION_ERROR
+      );
+    }
+
     const code = await User.generateAffiliateCode(user.appId);
 
     user.affiliate = {
@@ -131,15 +146,31 @@ class AffiliateService {
   /**
    * État affilié + stats agrégées (balance, filleuls, commissions).
    * Source unique pour le dashboard mobile et le portail web.
+   *
+   * `canActivate` est `true` uniquement si le pays de l'user est dans
+   * la liste des pays activés dans AffiliateConfig.payoutCountries
+   * (avec enabled=true). Permet au mobile de cacher le bouton "Devenir
+   * affilié" pour les users hors zone.
    */
   async getMyState(user) {
     const appId = user.appId;
     const isAffiliate = !!user.affiliate?.isActive;
 
     if (!isAffiliate) {
+      // Vérifie si le pays user est éligible à devenir affilié
+      let canActivate = false;
+      if (user.countryCode) {
+        const config = await this.getOrCreateConfig(appId);
+        if (config.isEnabled) {
+          const userCountry = user.countryCode.toUpperCase();
+          canActivate = (config.payoutCountries || []).some(
+            (c) => c.code === userCountry && c.enabled !== false
+          );
+        }
+      }
       return {
         isAffiliate: false,
-        canActivate: !!user.countryCode,
+        canActivate,
       };
     }
 
