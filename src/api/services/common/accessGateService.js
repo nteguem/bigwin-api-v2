@@ -1,16 +1,17 @@
 // src/api/services/common/accessGateService.js
 //
-// Logique métier du déblocage de tickets free par visionnage de pubs
-// récompensées (AdMob rewarded + Server-Side Verification).
+// Logique métier du déblocage de CATÉGORIES de coupons free par visionnage de
+// pubs récompensées (AdMob rewarded + Server-Side Verification).
 //
 // Concepts :
-//  - Un ticket peut porter un sous-document `accessGate` ({ type:'ad_reward',
-//    options:[{ durationMinutes, adsRequired }] }). Absent ⇒ ticket public.
-//  - Pour un ticket gaté, l'utilisateur choisit une offre puis regarde
+//  - Une catégorie peut porter un sous-document `accessGate` ({ type:'ad_reward',
+//    options:[{ durationMinutes, adsRequired }] }). Absent ⇒ catégorie en accès
+//    libre. TOUS les coupons de la catégorie en héritent.
+//  - Pour une catégorie gatée, l'utilisateur choisit une offre puis regarde
 //    `adsRequired` pubs récompensées. Chaque pub validée par le SSV incrémente
 //    un compteur côté serveur (UserAccessUnlock.verifiedCount).
-//  - Une fois le seuil atteint : accès débloqué jusqu'à `unlockedAt + durée`
-//    (ou à vie si `durationMinutes` est null).
+//  - Une fois le seuil atteint : accès à TOUS les coupons de la catégorie
+//    jusqu'à `unlockedAt + durée` (ou à vie si `durationMinutes` est null).
 //  - La progression partielle est conservée et reportée si l'utilisateur
 //    change d'offre. Une fois l'accès actif, l'offre est figée jusqu'à
 //    l'expiration (comme un abonnement).
@@ -20,7 +21,7 @@ const mongoose = require('mongoose');
 const UserAccessUnlock = require('../../models/common/UserAccessUnlock');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
-const RESOURCE_TYPE_TICKET = 'ticket';
+const RESOURCE_TYPE_CATEGORY = 'category';
 
 /** Forme d'une offre telle qu'exposée par l'API. */
 function publicOption(opt) {
@@ -30,9 +31,9 @@ function publicOption(opt) {
   };
 }
 
-/** Le ticket a-t-il une porte de déblocage active et bien formée ? */
-function ticketIsGated(ticket) {
-  const gate = ticket && ticket.accessGate;
+/** La catégorie a-t-elle une porte de déblocage active et bien formée ? */
+function categoryIsGated(category) {
+  const gate = category && category.accessGate;
   return !!(
     gate &&
     gate.type === 'ad_reward' &&
@@ -49,7 +50,7 @@ function ticketIsGated(ticket) {
 function buildState(doc) {
   if (!doc) return null;
   const active = doc.isAccessActive();
-  const expired = doc.status === 'unlocked' && !active; // unlocked mais dépassé
+  const expired = doc.status === 'unlocked' && !active;
   return {
     status: active ? 'unlocked' : 'in_progress',
     verifiedCount: expired ? 0 : (doc.verifiedCount || 0),
@@ -61,81 +62,81 @@ function buildState(doc) {
 }
 
 /**
- * État de la porte d'un ticket pour un utilisateur.
+ * État de la porte d'une catégorie pour un utilisateur.
  * @param {string} appId
  * @param {string|null} userId  null si requête anonyme
- * @param {object} ticket  document/objet Ticket (doit contenir `accessGate`)
+ * @param {object} category  document/objet Category (doit contenir `accessGate`)
  * @returns {Promise<{ gated:boolean, locked:boolean, offers:Array, state:object|null }>}
- *   - gated  : le ticket a une porte
+ *   - gated  : la catégorie a une porte
  *   - locked : porte active ET l'utilisateur n'a pas (ou plus) l'accès
  *   - offers : offres proposées (toujours présentes si gated)
  *   - state  : progression de l'utilisateur (null si non gaté ou pas d'user)
  */
-async function getTicketGateState(appId, userId, ticket) {
-  if (!ticketIsGated(ticket)) {
+async function getCategoryGateState(appId, userId, category) {
+  if (!categoryIsGated(category)) {
     return { gated: false, locked: false, offers: [], state: null };
   }
-  const offers = ticket.accessGate.options.map(publicOption);
+  const offers = category.accessGate.options.map(publicOption);
   if (!userId) {
     return { gated: true, locked: true, offers, state: null };
   }
   const doc = await UserAccessUnlock.findOne({
     appId,
     user: userId,
-    resourceType: RESOURCE_TYPE_TICKET,
-    resource: ticket._id
+    resourceType: RESOURCE_TYPE_CATEGORY,
+    resource: category._id
   });
   const locked = !(doc && doc.isAccessActive());
   return { gated: true, locked, offers, state: buildState(doc) };
 }
 
 /**
- * Le ticket est-il actuellement débloqué pour cet utilisateur ?
+ * La catégorie est-elle actuellement débloquée pour cet utilisateur ?
  * (Utilisé par le contrôleur coupons pour décider d'inclure ou non les pronos.)
  */
-async function isTicketUnlockedFor(appId, userId, ticketId) {
+async function isCategoryUnlockedFor(appId, userId, categoryId) {
   if (!userId) return false;
   const doc = await UserAccessUnlock.findOne({
     appId,
     user: userId,
-    resourceType: RESOURCE_TYPE_TICKET,
-    resource: ticketId
+    resourceType: RESOURCE_TYPE_CATEGORY,
+    resource: categoryId
   });
   return !!(doc && doc.isAccessActive());
 }
 
 /**
- * Démarre (ou re-choisit) une tentative de déblocage pour un ticket gaté.
+ * Démarre (ou re-choisit) une tentative de déblocage pour une catégorie gatée.
  *  - accès déjà actif → 409 (changement possible seulement après expiration)
  *  - tentative en cours → on change l'offre en CONSERVANT verifiedCount ;
  *    si verifiedCount couvre déjà la nouvelle offre → déblocage immédiat
  *  - unlock expiré → réinitialisation (verifiedCount = 0, rewards purgés)
  *
- * @param {object} ticket  document Ticket déjà chargé et accessible (avec accessGate)
+ * @param {object} category  document Category déjà chargé et accessible (avec accessGate)
  * @param {number|null} durationMinutes  null = "à vie" ; doit correspondre à
- *        une offre déclarée sur le ticket
+ *        une offre déclarée sur la catégorie
  */
-async function startOrSwitchUnlock(appId, userId, ticket, durationMinutes) {
-  if (!ticketIsGated(ticket)) {
-    throw new AppError('Ce ticket ne nécessite pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
+async function startOrSwitchUnlock(appId, userId, category, durationMinutes) {
+  if (!categoryIsGated(category)) {
+    throw new AppError('Cette catégorie ne nécessite pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
   const wanted = (durationMinutes === undefined || durationMinutes === null) ? null : Number(durationMinutes);
   if (wanted !== null && (!Number.isFinite(wanted) || wanted < 1)) {
     throw new AppError('Durée de déblocage invalide.', 400, ErrorCodes.VALIDATION_ERROR);
   }
-  const option = ticket.accessGate.options.find(o => ((o.durationMinutes ?? null) === wanted));
+  const option = category.accessGate.options.find(o => ((o.durationMinutes ?? null) === wanted));
   if (!option) {
-    throw new AppError('Offre de déblocage invalide pour ce ticket.', 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError('Offre de déblocage invalide pour cette catégorie.', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
   let doc = await UserAccessUnlock.findOne({
-    appId, user: userId, resourceType: RESOURCE_TYPE_TICKET, resource: ticket._id
+    appId, user: userId, resourceType: RESOURCE_TYPE_CATEGORY, resource: category._id
   });
 
   if (doc && doc.isAccessActive()) {
     throw new AppError(
-      "Ce ticket est déjà débloqué. Tu pourras choisir une autre offre après l'expiration.",
+      "Cette catégorie est déjà débloquée. Tu pourras choisir une autre offre après l'expiration.",
       409,
       ErrorCodes.OPERATION_NOT_ALLOWED
     );
@@ -145,7 +146,7 @@ async function startOrSwitchUnlock(appId, userId, ticket, durationMinutes) {
 
   if (!doc) {
     doc = new UserAccessUnlock({
-      appId, user: userId, resourceType: RESOURCE_TYPE_TICKET, resource: ticket._id
+      appId, user: userId, resourceType: RESOURCE_TYPE_CATEGORY, resource: category._id
     });
   }
 
@@ -184,8 +185,8 @@ async function startOrSwitchUnlock(appId, userId, ticket, durationMinutes) {
 /**
  * Enregistre une récompense vérifiée (depuis le handler du callback SSV AdMob).
  * Atomique + idempotent : la dédup se fait sur `transactionId`, donc les
- * retries d'AdMob (jusqu'à 5×) sont sans effet. Renvoie toujours `ok: true`
- * (le handler répond 200) ; `found:false` si le nonce est inconnu.
+ * retries d'AdMob (jusqu'à 5×) sont sans effet. Travaille via le `nonce`.
+ * Renvoie toujours `ok: true` ; `found:false` si le nonce est inconnu.
  *
  * @returns {Promise<{ ok:boolean, found:boolean, alreadyProcessed?:boolean, unlocked?:boolean }>}
  */
@@ -263,8 +264,6 @@ async function recordVerifiedReward({ nonce, userId, transactionId, adUnitId, ad
     return { ok: true, found: true, unlocked: updated.status === 'unlocked' };
   }
 
-  // Pas de match : nonce inconnu, ou récompense déjà comptée, ou doc plus
-  // `in_progress`. On lève l'ambiguïté.
   const doc = await UserAccessUnlock.findOne({ nonce });
   if (!doc) return { ok: true, found: false };
   if (userObjId && !doc.user.equals(userObjId)) return { ok: true, found: false }; // pas notre callback
@@ -286,12 +285,12 @@ async function recordVerifiedReward({ nonce, userId, transactionId, adUnitId, ad
 }
 
 module.exports = {
-  RESOURCE_TYPE_TICKET,
-  ticketIsGated,
+  RESOURCE_TYPE_CATEGORY,
+  categoryIsGated,
   publicOption,
   buildState,
-  getTicketGateState,
-  isTicketUnlockedFor,
+  getCategoryGateState,
+  isCategoryUnlockedFor,
   startOrSwitchUnlock,
   recordVerifiedReward
 };

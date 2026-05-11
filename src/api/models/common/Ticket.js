@@ -17,44 +17,6 @@ const mongoose = require("mongoose");
  * - Si la CATÉGORIE est spécifique → Notification envoyée uniquement à l'app du ticket
  */
 
-/**
- * Une offre de déblocage : visionner `adsRequired` pubs récompensées donne
- * accès au ticket pendant `durationMinutes` minutes (null = à vie).
- */
-const AccessGateOptionSchema = new mongoose.Schema({
-  durationMinutes: {
-    type: Number,
-    default: null, // null ⇒ accès "à vie"
-    min: 1
-  },
-  adsRequired: {
-    type: Number,
-    required: true,
-    min: 1
-  }
-}, { _id: false });
-
-/**
- * Porte de déblocage par visionnage de pubs récompensées (AdMob rewarded + SSV).
- * Sous-document optionnel : si absent ⇒ ticket public (comportement historique).
- * Ne concerne que les tickets free — la logique côté API n'évalue la porte
- * que dans la branche non-VIP des coupons.
- */
-const AccessGateSchema = new mongoose.Schema({
-  type: {
-    type: String,
-    enum: ['ad_reward'],
-    required: true
-  },
-  options: {
-    type: [AccessGateOptionSchema],
-    validate: {
-      validator: (v) => Array.isArray(v) && v.length > 0,
-      message: 'accessGate.options doit contenir au moins une offre'
-    }
-  }
-}, { _id: false });
-
 const TicketSchema = new mongoose.Schema({
   appId: {
     type: String,
@@ -115,13 +77,6 @@ const TicketSchema = new mongoose.Schema({
   resultUpdatedAt: {
     type: Date,
     default: null
-  },
-
-  // Porte de déblocage par pubs récompensées. Absent ⇒ ticket public.
-  // Pour retirer la porte sur un ticket, envoyer `accessGate: null`.
-  accessGate: {
-    type: AccessGateSchema,
-    default: undefined
   }
 }, {
   timestamps: true

@@ -1,6 +1,6 @@
 // src/api/routes/user/accessRoutes.js
 //
-// Déblocage de tickets free par visionnage de pubs récompensées.
+// Déblocage de catégories free de coupons par visionnage de pubs récompensées.
 // Monté sous /user/access avec identifyApp (au niveau de routes/index.js).
 
 const express = require('express');
@@ -12,10 +12,10 @@ const router = express.Router();
 // Toutes ces routes exigent un utilisateur authentifié.
 router.use(userAuth.protect);
 
-// POST /user/access/ticket/:ticketId/unlock  { durationMinutes: number|null }
-router.post('/ticket/:ticketId/unlock', accessController.unlockTicket);
+// POST /user/access/category/:categoryId/unlock  { durationMinutes: number|null }
+router.post('/category/:categoryId/unlock', accessController.unlockCategory);
 
-// GET /user/access/ticket/:ticketId  → état courant (polling après chaque pub)
-router.get('/ticket/:ticketId', accessController.getTicketAccessState);
+// GET /user/access/category/:categoryId  → état courant (polling après chaque pub)
+router.get('/category/:categoryId', accessController.getCategoryAccessState);
 
 module.exports = router;

@@ -54,18 +54,23 @@ class CouponController {
       }
       // Si isVip === null, on garde tous les tickets (comportement par défaut)
 
-      // Pré-charger l'état de déblocage des tickets free gatés (1 requête au
-      // lieu d'une par ticket). Anonyme ⇒ aucun déblocage possible.
-      const gatedTicketIds = filteredData
-        .filter(t => accessGateService.ticketIsGated(t) && !(t.category && t.category.isVip))
-        .map(t => t._id);
-      const unlockMap = new Map();
-      if (gatedTicketIds.length > 0 && req.user) {
+      // Pré-charger l'état de déblocage des CATÉGORIES free gatées (1 requête
+      // au lieu d'une par catégorie). Anonyme ⇒ aucun déblocage possible.
+      const gatedCategoryIds = [];
+      const seenGatedCat = new Set();
+      for (const t of filteredData) {
+        const cat = t.category;
+        if (!cat || cat.isVip || !accessGateService.categoryIsGated(cat)) continue;
+        const id = cat._id.toString();
+        if (!seenGatedCat.has(id)) { seenGatedCat.add(id); gatedCategoryIds.push(cat._id); }
+      }
+      const unlockMap = new Map(); // categoryId(string) -> UserAccessUnlock doc
+      if (gatedCategoryIds.length > 0 && req.user) {
         const unlocks = await UserAccessUnlock.find({
           appId,
           user: req.user._id,
-          resourceType: accessGateService.RESOURCE_TYPE_TICKET,
-          resource: { $in: gatedTicketIds }
+          resourceType: accessGateService.RESOURCE_TYPE_CATEGORY,
+          resource: { $in: gatedCategoryIds }
         });
         unlocks.forEach(u => unlockMap.set(u.resource.toString(), u));
       }
@@ -93,13 +98,14 @@ class CouponController {
         const category = categoriesMap.get(categoryId);
         category.totalCoupons++;
         
-        // Porte de déblocage par pub — uniquement sur les tickets free.
-        const gated = accessGateService.ticketIsGated(ticket) && !(ticket.category && ticket.category.isVip);
-        const unlockDoc = gated ? (unlockMap.get(ticket._id.toString()) || null) : null;
+        // Porte de déblocage par pub — portée par la CATÉGORIE (free uniquement).
+        const gated = !(ticket.category && ticket.category.isVip) && accessGateService.categoryIsGated(ticket.category);
+        const unlockDoc = gated ? (unlockMap.get(categoryId) || null) : null;
         const isUnlocked = !!(unlockDoc && unlockDoc.isAccessActive());
 
         if (gated && !isUnlocked) {
-          // Ticket masqué : métadonnées + état de la porte, pas les prédictions.
+          // Coupon masqué : métadonnées + état de la porte (de la catégorie),
+          // pas les prédictions.
           category.coupons.push({
             id: ticket._id,
             title: ticket.title,
@@ -111,7 +117,8 @@ class CouponController {
             locked: true,
             gate: {
               type: 'ad_reward',
-              offers: ticket.accessGate.options.map(o => ({
+              categoryId: ticket.category._id,
+              offers: ticket.category.accessGate.options.map(o => ({
                 durationMinutes: o.durationMinutes != null ? o.durationMinutes : null,
                 adsRequired: o.adsRequired
               })),
@@ -121,7 +128,7 @@ class CouponController {
             createdAt: ticket.createdAt,
             updatedAt: ticket.updatedAt
           });
-          return; // ticket suivant
+          return; // coupon suivant
         }
 
         // Formater le coupon (accès libre, ou ticket gaté déjà débloqué)

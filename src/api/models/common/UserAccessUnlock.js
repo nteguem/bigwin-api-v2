@@ -1,7 +1,8 @@
 // src/api/models/common/UserAccessUnlock.js
 //
-// Suivi du déblocage d'une ressource (aujourd'hui : un Ticket free) par
-// visionnage de pubs récompensées AdMob, vérifiées via SSV.
+// Suivi du déblocage d'une ressource (aujourd'hui : une Category free de
+// coupons) par visionnage de pubs récompensées AdMob, vérifiées via SSV.
+// Débloquer la catégorie ⇒ tous ses coupons sont accessibles pendant la durée.
 //
 // Un seul document par couple (appId, user, resourceType, resource). Le cycle
 // de vie d'une tentative :
@@ -53,15 +54,15 @@ const UserAccessUnlockSchema = new mongoose.Schema({
     required: true
   },
 
-  // Type de ressource déblocable. Aujourd'hui uniquement 'ticket' ; gardé
+  // Type de ressource déblocable. Aujourd'hui uniquement 'category' ; gardé
   // comme discriminant pour une éventuelle extension future.
   resourceType: {
     type: String,
-    enum: ['ticket'],
-    default: 'ticket'
+    enum: ['category'],
+    default: 'category'
   },
 
-  // ObjectId de la ressource (un Ticket). Volontairement sans `ref` figée
+  // ObjectId de la ressource (une Category). Volontairement sans `ref` figée
   // pour rester générique.
   resource: {
     type: mongoose.Schema.Types.ObjectId,
