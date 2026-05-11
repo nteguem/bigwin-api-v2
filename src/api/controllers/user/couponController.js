@@ -3,6 +3,8 @@
 const TicketService = require('../../services/common/ticketService');
 const subscriptionService = require('../../services/user/subscriptionService');
 const DayOff = require('../../models/common/DayOff');
+const accessGateService = require('../../services/common/accessGateService');
+const UserAccessUnlock = require('../../models/common/UserAccessUnlock');
 
 class CouponController {
   
@@ -52,6 +54,22 @@ class CouponController {
       }
       // Si isVip === null, on garde tous les tickets (comportement par défaut)
 
+      // Pré-charger l'état de déblocage des tickets free gatés (1 requête au
+      // lieu d'une par ticket). Anonyme ⇒ aucun déblocage possible.
+      const gatedTicketIds = filteredData
+        .filter(t => accessGateService.ticketIsGated(t) && !(t.category && t.category.isVip))
+        .map(t => t._id);
+      const unlockMap = new Map();
+      if (gatedTicketIds.length > 0 && req.user) {
+        const unlocks = await UserAccessUnlock.find({
+          appId,
+          user: req.user._id,
+          resourceType: accessGateService.RESOURCE_TYPE_TICKET,
+          resource: { $in: gatedTicketIds }
+        });
+        unlocks.forEach(u => unlockMap.set(u.resource.toString(), u));
+      }
+
       // Grouper les tickets par catégorie
       const categoriesMap = new Map();
       
@@ -75,7 +93,38 @@ class CouponController {
         const category = categoriesMap.get(categoryId);
         category.totalCoupons++;
         
-        // Formater le coupon
+        // Porte de déblocage par pub — uniquement sur les tickets free.
+        const gated = accessGateService.ticketIsGated(ticket) && !(ticket.category && ticket.category.isVip);
+        const unlockDoc = gated ? (unlockMap.get(ticket._id.toString()) || null) : null;
+        const isUnlocked = !!(unlockDoc && unlockDoc.isAccessActive());
+
+        if (gated && !isUnlocked) {
+          // Ticket masqué : métadonnées + état de la porte, pas les prédictions.
+          category.coupons.push({
+            id: ticket._id,
+            title: ticket.title,
+            date: ticket.date,
+            closingAt: ticket.closingAt,
+            status: ticket.status,
+            totalPredictions: ticket.predictions.length,
+            totalOdds: ticket.predictions.reduce((total, pred) => total * pred.odds, 1).toFixed(2),
+            locked: true,
+            gate: {
+              type: 'ad_reward',
+              offers: ticket.accessGate.options.map(o => ({
+                durationMinutes: o.durationMinutes != null ? o.durationMinutes : null,
+                adsRequired: o.adsRequired
+              })),
+              requiresAuth: !req.user,
+              state: accessGateService.buildState(unlockDoc)
+            },
+            createdAt: ticket.createdAt,
+            updatedAt: ticket.updatedAt
+          });
+          return; // ticket suivant
+        }
+
+        // Formater le coupon (accès libre, ou ticket gaté déjà débloqué)
         const coupon = {
           id: ticket._id,
           title: ticket.title,
@@ -147,7 +196,13 @@ class CouponController {
           createdAt: ticket.createdAt,
           updatedAt: ticket.updatedAt
         };
-        
+
+        if (isUnlocked) {
+          // Ticket gaté déjà débloqué : indiquer jusqu'à quand l'accès est valide.
+          coupon.unlocked = true;
+          coupon.unlockedUntil = unlockDoc.expiresAt || null; // null = à vie
+        }
+
         category.coupons.push(coupon);
       });
 

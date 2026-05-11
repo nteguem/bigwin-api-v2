@@ -124,6 +124,7 @@ const korapayRoutes = require('./user/korapayRoutes');
 const fedapayRoutes = require('./user/fedapayRoutes');
 const userGiftRoutes = require('./user/giftRoutes');
 const userAffiliateRoutes = require('./user/affiliateRoutes');
+const userAccessRoutes = require('./user/accessRoutes');
 
 
 // ===== ROUTES DE PAIEMENT =====
@@ -141,6 +142,7 @@ router.use('/user/google-play', identifyApp, googlePlayRoutes);
 router.use('/user/packages', identifyApp, packageRoutes);
 router.use('/user/gifts', identifyApp, userGiftRoutes);
 router.use('/user/affiliate', identifyApp, userAffiliateRoutes);
+router.use('/user/access', identifyApp, userAccessRoutes);
 
 // Route générique /user EN DERNIER (sinon elle capture toutes les requêtes /user/*)
 router.use('/user', identifyApp, userSubscriptionRoutes);
@@ -155,6 +157,13 @@ router.post(
   '/webhooks/afribapay/payout',
   afribaPayPayoutWebhookCtrl.handlePayoutWebhook
 );
+
+// Callback SSV AdMob (pubs récompensées) — GET, pas de X-App-Id (l'app est
+// résolue via le custom_data / nonce) et pas d'auth (signé ECDSA par AdMob,
+// vérifié dans admobSsvService). URL à renseigner dans la console AdMob :
+//   https://<host>/api/ads/admob/ssv
+const admobSsvController = require('../controllers/common/admobSsvController');
+router.get('/ads/admob/ssv', admobSsvController.handleRewardedSsv);
 
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');

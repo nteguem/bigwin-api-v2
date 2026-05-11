@@ -31,6 +31,16 @@ async function initLogsConnection() {
   if (initialized) return logsConnection;
   initialized = true;
 
+  // Coupe complètement le transport Mongo (et email) des logs — utile en dev
+  // où on ne veut que la sortie console. Activer avec DISABLE_MONGO_LOG_TRANSPORT=true.
+  if (process.env.DISABLE_MONGO_LOG_TRANSPORT === 'true') {
+    logger.warn(
+      'Transport Mongo des logs désactivé (DISABLE_MONGO_LOG_TRANSPORT=true) — logs console uniquement.'
+    );
+    logsConnection = mongoose.connection;
+    return logsConnection;
+  }
+
   const logsUri = process.env.MONGO_LOGS_URI;
 
   if (!logsUri) {

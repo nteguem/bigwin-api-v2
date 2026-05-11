@@ -159,6 +159,15 @@ const appSchema = new mongoose.Schema({
     trim: true
   },
 
+  // Blocs d'annonces "rewarded" (pubs récompensées) — utilisés pour le
+  // déblocage de tickets free par visionnage de pubs. Non sensibles (ces IDs
+  // sont de toute façon embarqués dans le binaire de l'app) → exposés via
+  // /app/info.
+  admobRewardedAdUnitId: {
+    android: { type: String, default: null, trim: true },
+    ios: { type: String, default: null, trim: true }
+  },
+
   // Tracking / Analytics per-app — utilisé par les webhooks paiement pour
   // envoyer des events de conversion à GA4 via Measurement Protocol, qui
   // sont ensuite importés comme conversions dans Google Ads.

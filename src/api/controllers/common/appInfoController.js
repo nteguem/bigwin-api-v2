@@ -20,6 +20,7 @@ const PUBLIC_FIELDS = [
   'playStoreUrl',
   'supportEmail',
   'googlePlay.packageName',
+  'admobRewardedAdUnitId',
 ];
 
 /**
@@ -78,6 +79,12 @@ exports.getAppInfo = catchAsync(async (req, res) => {
       supportEmail: app.supportEmail || null,
       googlePlay: {
         packageName: app.googlePlay?.packageName || null,
+      },
+      admob: {
+        rewardedAdUnitId: {
+          android: app.admobRewardedAdUnitId?.android || null,
+          ios: app.admobRewardedAdUnitId?.ios || null,
+        },
       },
       affiliate: {
         enabled: !!affiliateConfig?.isEnabled,

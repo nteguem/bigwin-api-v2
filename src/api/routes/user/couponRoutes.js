@@ -20,8 +20,10 @@ const conditionalVipMiddleware = (req, res, next) => {
       vipAccess.checkCouponsVipAccess(req, res, next);
     });
   } else {
-    // Pour les coupons gratuits : accès public
-    next();
+    // Coupons gratuits : accès public. On attache quand même l'utilisateur
+    // s'il est connecté — nécessaire pour évaluer les portes de déblocage
+    // par pub (`accessGate`) des tickets free gatés.
+    userAuth.optional(req, res, next);
   }
 };
 
