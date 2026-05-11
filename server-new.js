@@ -34,13 +34,19 @@ const startServer = async () => {
     // fallback fonctionne si MONGO_LOGS_URI est absent.
     await initLogsConnection();
 
-    // Service unifié de correction des prédictions (18h, 21h, 00h UTC)
-    correctionService = new PredictionCorrectionService();
-    await correctionService.start();
+    // Jobs CRON — désactivables (effets de bord prod via OneSignal / Google
+    // Play). En dev/staging sur une copie de la prod, mettre DISABLE_CRON_JOBS=true.
+    if (process.env.DISABLE_CRON_JOBS === 'true') {
+      logger.warn('Jobs CRON désactivés (DISABLE_CRON_JOBS=true).');
+    } else {
+      // Service unifié de correction des prédictions (18h, 21h, 00h UTC)
+      correctionService = new PredictionCorrectionService();
+      await correctionService.start();
 
-    await googlePlayJobs.start();
-    await retentionJobs.start();
-    await oneSignalTagReconciliationJob.start();
+      await googlePlayJobs.start();
+      await retentionJobs.start();
+      await oneSignalTagReconciliationJob.start();
+    }
 
     // Démarrer le serveur HTTP
     app.listen(PORT, '0.0.0.0', () => {

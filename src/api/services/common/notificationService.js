@@ -15,6 +15,17 @@ class NotificationService {
    * Récupérer la config OneSignal pour une app spécifique
    */
   async _getConfig(appId) {
+    // Garde-fou : en dev/staging (copie de la prod réutilisant les creds
+    // OneSignal de prod), on coupe tout envoi pour ne pas spammer les vrais
+    // users. Mettre DISABLE_PUSH_NOTIFICATIONS=true. Les appelants attrapent
+    // cette erreur (try/catch) et continuent sans push.
+    if (process.env.DISABLE_PUSH_NOTIFICATIONS === 'true') {
+      throw new AppError(
+        'Notifications push désactivées (DISABLE_PUSH_NOTIFICATIONS=true)',
+        503
+      );
+    }
+
     // Vérifier le cache
     if (this.configCache.has(appId)) {
       return this.configCache.get(appId);
