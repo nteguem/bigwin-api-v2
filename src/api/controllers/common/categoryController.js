@@ -52,7 +52,7 @@ class CategoryController {
   async createCategory(req, res) {
     try {
       const appId = req.appId; // ⭐ AJOUT
-      const { name, description, icon, successRate, isVip, isActive } = req.body;
+      const { name, description, icon, successRate, isVip, isActive, accessGate } = req.body;
 
       if (!name || !name.fr || !name.en) {
         return formatError(res, 'Name is required with both fr and en translations (e.g. { "fr": "...", "en": "..." })', 400);
@@ -70,6 +70,8 @@ class CategoryController {
         isActive,
         isVip
       };
+      // Porte de déblocage par pub (uniquement pertinente pour les catégories free).
+      if (accessGate && !isVip) categoryData.accessGate = accessGate;
 
       const category = await categoryService.createCategory(appId, categoryData); // ⭐ AJOUT appId
       
