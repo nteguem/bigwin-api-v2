@@ -21,17 +21,6 @@ exports.register = catchAsync(async (req, res, next) => {
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
 
-  // [DEBUG affiliation] trace ce que le mobile envoie au signup phone.
-  // À retirer une fois le flux d'affiliation validé en prod.
-  logger.info('debug register body', {
-    service: SERVICE,
-    category: 'affiliateReferral',
-    affiliateCode: affiliateCode ?? null,
-    acquisitionSource: acquisitionSource ?? null,
-    acquisitionGclid: acquisitionGclid ?? null,
-    countryCode: countryCode ?? null,
-  });
-
   // Validation des champs obligatoires
   if (!phoneNumber || !password) {
     return next(new AppError('Téléphone et mot de passe requis', 400, ErrorCodes.VALIDATION_ERROR));
@@ -229,19 +218,6 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
 
   // ⭐ RÉCUPÉRER APPID depuis req
   const appId = req.appId;
-
-  // [DEBUG affiliation] trace ce que le mobile envoie réellement à l'auth
-  // Google : surtout affiliateCode (null = capture Play Install Referrer KO).
-  // À retirer une fois le flux d'affiliation validé en prod.
-  req.log?.info?.('debug google auth body', {
-    service: SERVICE,
-    category: 'affiliateReferral',
-    affiliateCode: affiliateCode ?? null,
-    acquisitionSource: acquisitionSource ?? null,
-    acquisitionGclid: acquisitionGclid ?? null,
-    countryCode: countryCode ?? null,
-    hasDeviceId: !!deviceId,
-  });
 
   // Validation
   if (!idToken) {
