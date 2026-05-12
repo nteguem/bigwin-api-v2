@@ -90,16 +90,24 @@ async function verifyCallback(rawQuery) {
   const signedContent = rawQuery.substring(0, idx);   // tout AVANT &signature=
   const tail = rawQuery.substring(idx + 1);           // signature=...&key_id=...
 
-  const tailParams = new URLSearchParams(tail);
-  const signatureRaw = tailParams.get('signature');
-  const keyId = tailParams.get('key_id');
+  // ⚠️ NE PAS extraire `signature` via URLSearchParams : il transforme `+` en
+  // espace, ce qui corrompt une signature en base64 *standard* (AdMob peut
+  // envoyer des `+`/`/` littéraux, non %-échappés, dans la query). Extraction brute.
+  const sigM = /(?:^|&)signature=([^&]*)/.exec(tail);
+  const keyM = /(?:^|&)key_id=([^&]*)/.exec(tail);
+  const signatureRaw = sigM ? sigM[1] : null;
+  const keyId = keyM ? keyM[1] : null;
   if (!signatureRaw || !keyId) return { valid: false, reason: 'malformed_tail' };
 
   let signature;
   try {
-    // Accepte base64 standard ou URL-safe, avec ou sans padding.
-    const normalized = decodeURIComponent(signatureRaw).replace(/-/g, '+').replace(/_/g, '/');
-    signature = Buffer.from(normalized, 'base64');
+    // Accepte base64 standard (+/) ou URL-safe (-_), %-échappé ou non, avec ou
+    // sans padding. On ne fait decodeURIComponent QUE s'il y a du `%XX` (sinon
+    // un `+` littéral resterait un `+`, ce qu'on veut).
+    let b64 = signatureRaw;
+    if (/%[0-9A-Fa-f]{2}/.test(b64)) b64 = decodeURIComponent(b64);
+    b64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+    signature = Buffer.from(b64, 'base64');
     if (!signature || signature.length === 0) throw new Error('empty');
   } catch (_) {
     return { valid: false, reason: 'bad_signature_encoding' };
@@ -140,6 +148,7 @@ async function verifyCallback(rawQuery) {
     logger.warn('[ADMOB SSV] Signature invalide', {
       keyId,
       signatureBytes: signature.length,
+      signatureRaw,                       // valeur brute du param `signature` reçue
       queryLooksDecodedByProxy,
       signedContentLength: signedContent.length,
       paramOrder,
