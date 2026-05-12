@@ -72,8 +72,9 @@ function buildState(doc) {
  *   - offers : offres proposées (toujours présentes si gated)
  *   - state  : progression de l'utilisateur (null si non gaté ou pas d'user)
  */
-async function getCategoryGateState(appId, userId, category) {
-  if (!categoryIsGated(category)) {
+async function getCategoryGateState(appId, userId, category, { isSubscriber = false } = {}) {
+  // Un abonné (forfait actif) contourne la porte : on présente comme "non gaté".
+  if (!categoryIsGated(category) || isSubscriber) {
     return { gated: false, locked: false, offers: [], state: null, unlockCount: 0 };
   }
   const offers = category.accessGate.options.map(publicOption);

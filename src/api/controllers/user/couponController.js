@@ -148,6 +148,17 @@ class CouponController {
         ? await accessGateService.countCategoryUnlocks(appId, gatedCategoryIds)
         : new Map();
 
+      // Un abonné (forfait actif) n'a PAS à regarder de pub : le gate ne concerne
+      // que les utilisateurs free sans forfait. On contourne donc la porte pour
+      // lui (il voit les coupons free comme s'ils n'étaient pas gatés).
+      let userIsSubscriber = false;
+      if (req.user && gatedCategoryIds.length > 0) {
+        try {
+          const subs = await subscriptionService.getActiveSubscriptions(appId, req.user._id);
+          userIsSubscriber = Array.isArray(subs) && subs.length > 0;
+        } catch (_) { /* fail-open : traiter comme non-abonné */ }
+      }
+
       // Grouper les tickets par catégorie
       const categoriesMap = new Map();
       
@@ -172,11 +183,12 @@ class CouponController {
         category.totalCoupons++;
         
         // Porte de déblocage par pub — portée par la CATÉGORIE (free uniquement).
+        // Un abonné contourne la porte (cf. userIsSubscriber).
         const gated = !(ticket.category && ticket.category.isVip) && accessGateService.categoryIsGated(ticket.category);
         const unlockDoc = gated ? (unlockMap.get(categoryId) || null) : null;
         const isUnlocked = !!(unlockDoc && unlockDoc.isAccessActive());
 
-        if (gated && !isUnlocked) {
+        if (gated && !isUnlocked && !userIsSubscriber) {
           // Aperçu d'un coupon gaté NON débloqué : on renvoie les prédictions
           // AVEC le match (équipes, ligue, date, cote) mais le PRONOSTIC est
           // masqué (event vide) — le frontend floute juste cette partie.

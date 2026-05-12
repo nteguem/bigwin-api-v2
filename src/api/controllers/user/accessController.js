@@ -8,8 +8,19 @@
 const mongoose = require('mongoose');
 const Category = require('../../models/common/Category');
 const accessGateService = require('../../services/common/accessGateService');
+const subscriptionService = require('../../services/user/subscriptionService');
 const catchAsync = require('../../../utils/catchAsync');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+
+/** True si l'utilisateur a au moins un forfait actif (⇒ contourne le gate). */
+async function userHasActiveSubscription(appId, userId) {
+  try {
+    const subs = await subscriptionService.getActiveSubscriptions(appId, userId);
+    return Array.isArray(subs) && subs.length > 0;
+  } catch (_) {
+    return false; // fail-open : on traite comme non-abonné
+  }
+}
 
 async function loadAccessibleCategory(appId, categoryId) {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) {
@@ -51,6 +62,9 @@ exports.unlockCategory = catchAsync(async (req, res) => {
   if (!accessGateService.categoryIsGated(category)) {
     throw new AppError('Cette catégorie ne nécessite pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
   }
+  if (await userHasActiveSubscription(appId, req.user._id)) {
+    throw new AppError("Cette catégorie est déjà accessible avec ton abonnement.", 400, ErrorCodes.OPERATION_NOT_ALLOWED);
+  }
 
   const result = await accessGateService.startOrSwitchUnlock(appId, req.user._id, category, durationMinutes);
 
@@ -80,7 +94,8 @@ exports.getCategoryAccessState = catchAsync(async (req, res) => {
   const { categoryId } = req.params;
 
   const category = await loadAccessibleCategory(appId, categoryId);
-  const gateState = await accessGateService.getCategoryGateState(appId, req.user._id, category);
+  const isSubscriber = await userHasActiveSubscription(appId, req.user._id);
+  const gateState = await accessGateService.getCategoryGateState(appId, req.user._id, category, { isSubscriber });
 
   return res.status(200).json({
     success: true,
