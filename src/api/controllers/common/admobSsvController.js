@@ -76,9 +76,8 @@ exports.handleRewardedSsv = async (req, res) => {
 // DEV ONLY — simule un callback SSV. AdMob ne déclenche PAS la vraie SSV pour
 // les pubs de test / "Publisher Test" / les test devices ; impossible de tester
 // le déblocage de bout en bout en environnement de dev sans ça. Cette route
-// n'est montée que si NODE_ENV=development OU ENABLE_DEV_ACCESS_TOOLS=true
-// (cf. routes/index.js) → 404 en prod. Corps JSON :
-//   { nonce: string, userId?: string, transactionId?: string }
+// n'est montée que si NODE_ENV=development (cf. routes/index.js) → 404 en prod.
+// Corps JSON : { nonce: string, userId?: string, transactionId?: string }
 exports.simulateReward = async (req, res) => {
   const log = req.log || logger;
   try {
