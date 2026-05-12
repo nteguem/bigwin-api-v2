@@ -6,6 +6,75 @@ const DayOff = require('../../models/common/DayOff');
 const accessGateService = require('../../services/common/accessGateService');
 const UserAccessUnlock = require('../../models/common/UserAccessUnlock');
 
+/**
+ * Formate une prédiction d'un ticket pour l'API coupons. Si `maskEvent`, on
+ * masque le PRONOSTIC (event/pari) — le match (équipes, ligue, date), la cote
+ * et le statut restent visibles : aperçu d'un coupon gaté pas (encore)
+ * débloqué. Le frontend détecte un `event` vide ⇒ floute cette partie.
+ */
+function formatCouponPrediction(pred, lang, maskEvent) {
+  const isHorseRacing =
+    pred?.sport?.id === 'horse' ||
+    pred?.sport?.name?.toLowerCase() === 'courses hippiques';
+
+  return {
+    id: pred._id,
+    odds: pred.odds,
+    status: pred.status,
+    sport: pred?.sport,
+    locked: !!maskEvent,
+    event: maskEvent
+      ? { id: null, label: null, description: null, category: null }
+      : {
+          id: pred.event?.id,
+          label: pred.event?.label?.[lang] || pred.event?.label?.fr || pred.event?.label?.current || '',
+          description: pred.event?.description?.current || '',
+          category: pred.event?.category
+        },
+    match: {
+      id: pred.matchData.id,
+      date: pred.matchData.date,
+      status: pred.matchData.status,
+      league: {
+        name: pred.matchData.league.name,
+        country: pred.matchData.league.country,
+        logo: pred.matchData.league.logo,
+        countryFlag: pred.matchData.league.countryFlag,
+      },
+      ...(isHorseRacing ? {
+        raceInfo: {
+          raceNumber: pred.matchData.raceInfo?.raceNumber,
+          raceName: pred.matchData.raceInfo?.raceName,
+          discipline: pred.matchData.raceInfo?.discipline,
+          totalRunners: pred.matchData.raceInfo?.totalRunners
+        }
+      } : {
+        teams: {
+          home: {
+            id: pred.matchData?.teams?.home?.id,
+            name: pred.matchData?.teams?.home?.name,
+            logo: pred.matchData?.teams?.home?.logo
+          },
+          away: {
+            id: pred.matchData?.teams?.away?.id,
+            name: pred.matchData?.teams?.away?.name,
+            logo: pred.matchData?.teams?.away?.logo
+          }
+        },
+        score: pred.matchData.score ? {
+          home: pred.matchData.score.home,
+          away: pred.matchData.score.away,
+          status: pred.matchData.status
+        } : null
+      }),
+      venue: pred.matchData.venue ? {
+        name: pred.matchData.venue.name,
+        city: pred.matchData.venue.city
+      } : null
+    }
+  };
+}
+
 class CouponController {
   
   // Récupérer la liste des coupons (tickets visibles)
@@ -108,8 +177,9 @@ class CouponController {
         const isUnlocked = !!(unlockDoc && unlockDoc.isAccessActive());
 
         if (gated && !isUnlocked) {
-          // Coupon masqué : métadonnées + état de la porte (de la catégorie),
-          // pas les prédictions.
+          // Aperçu d'un coupon gaté NON débloqué : on renvoie les prédictions
+          // AVEC le match (équipes, ligue, date, cote) mais le PRONOSTIC est
+          // masqué (event vide) — le frontend floute juste cette partie.
           category.coupons.push({
             id: ticket._id,
             title: ticket.title,
@@ -130,6 +200,7 @@ class CouponController {
               unlockCount: unlockCountMap.get(categoryId) || 0,
               state: accessGateService.buildState(unlockDoc)
             },
+            predictions: ticket.predictions.map(pred => formatCouponPrediction(pred, lang, true)),
             createdAt: ticket.createdAt,
             updatedAt: ticket.updatedAt
           });
@@ -145,66 +216,7 @@ class CouponController {
           status: ticket.status,
           totalPredictions: ticket.predictions.length,
           totalOdds: ticket.predictions.reduce((total, pred) => total * pred.odds, 1).toFixed(2),
-          predictions: ticket.predictions.map(pred => {
-            const isHorseRacing = pred?.sport?.id === 'horse' || pred?.sport?.name?.toLowerCase() === 'courses hippiques';
-            
-            return {
-              id: pred._id,
-              odds: pred.odds,
-              status: pred.status,
-              sport: pred?.sport,
-              event: {
-                id: pred.event?.id,
-                label: pred.event?.label?.[lang] || pred.event?.label?.fr || pred.event?.label?.current || '',
-                description: pred.event?.description?.current || '',
-                category: pred.event?.category
-              },
-              match: {
-                id: pred.matchData.id,
-                date: pred.matchData.date,
-                status: pred.matchData.status,
-                league: {
-                  name: pred.matchData.league.name,
-                  country: pred.matchData.league.country,
-                  logo: pred.matchData.league.logo,
-                  countryFlag: pred.matchData.league.countryFlag,
-                },
-                // CONDITION AJOUTÉE pour éviter l'erreur sur les courses hippiques
-                ...(isHorseRacing ? {
-                  // Structure pour course hippique
-                  raceInfo: {
-                    raceNumber: pred.matchData.raceInfo?.raceNumber,
-                    raceName: pred.matchData.raceInfo?.raceName,
-                    discipline: pred.matchData.raceInfo?.discipline,
-                    totalRunners: pred.matchData.raceInfo?.totalRunners
-                  }
-                } : {
-                  // Structure existante pour sports d'équipe
-                  teams: {
-                    home: {
-                      id: pred.matchData?.teams?.home?.id,
-                      name: pred.matchData?.teams?.home?.name,
-                      logo: pred.matchData?.teams?.home?.logo
-                    },
-                    away: {
-                      id: pred.matchData?.teams?.away?.id,
-                      name: pred.matchData?.teams?.away?.name,
-                      logo: pred.matchData?.teams?.away?.logo
-                    }
-                  },
-                  score: pred.matchData.score ? {
-                    home: pred.matchData.score.home,
-                    away: pred.matchData.score.away,
-                    status: pred.matchData.status
-                  } : null
-                }),
-                venue: pred.matchData.venue ? {
-                  name: pred.matchData.venue.name,
-                  city: pred.matchData.venue.city
-                } : null
-              }
-            };
-          }),
+          predictions: ticket.predictions.map(pred => formatCouponPrediction(pred, lang, false)),
           createdAt: ticket.createdAt,
           updatedAt: ticket.updatedAt
         };
