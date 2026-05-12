@@ -178,8 +178,15 @@ const userSchema = new mongoose.Schema({
 });
 
 // Indexes
-// ✅ CHANGEMENT: Unicité sur appId + dialCode + phoneNumber au lieu de appId + phoneNumber
-userSchema.index({ appId: 1, dialCode: 1, phoneNumber: 1 }, { unique: true, sparse: true });
+// Unicité sur (appId, dialCode, phoneNumber). `partialFilterExpression` (et NON
+// `sparse`) car les users Google sont créés avec `dialCode:null, phoneNumber:null`
+// EXPLICITES — `sparse` n'exclut que les champs ABSENTS, pas les `null`, donc
+// deux users Google entreraient en collision unique sur `{...,null,null}`. Le
+// partial index ne contraint que les users ayant un vrai numéro (string).
+userSchema.index(
+  { appId: 1, dialCode: 1, phoneNumber: 1 },
+  { unique: true, partialFilterExpression: { phoneNumber: { $type: 'string' } } }
+);
 userSchema.index({ appId: 1, email: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, googleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, isActive: 1 });
