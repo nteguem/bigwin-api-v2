@@ -116,27 +116,35 @@ async function verifyCallback(rawQuery) {
   const pem = await getPublicKey(keyId);
   if (!pem) return { valid: false, reason: 'unknown_key_id' };
 
-  let ok = false;
+  // ECDSA-SHA256. AdMob signe normalement la query telle qu'elle apparaît
+  // (percent-escapée) avec une signature DER. Par robustesse on essaie aussi :
+  // la query DÉCODÉE (certains environnements la décodent), et la signature au
+  // format IEEE-P1363 (r||s brut). `matched` indique la combinaison qui a marché.
+  let decodedContent = null;
+  try { decodedContent = decodeURIComponent(signedContent); } catch (_) {}
+  const contentVariants = [['asis', signedContent]];
+  if (decodedContent && decodedContent !== signedContent) contentVariants.push(['decoded', decodedContent]);
+
+  let matched = null;
   try {
-    // Signature ECDSA. AdMob l'envoie normalement en DER (format par défaut pour
-    // les clés EC) ; par robustesse on retente en IEEE-P1363 (r||s brut, 64
-    // octets pour P-256) si le DER échoue.
-    ok = crypto.verify('sha256', Buffer.from(signedContent, 'utf8'), pem, signature);
-    if (!ok) {
+    for (const [label, content] of contentVariants) {
+      const data = Buffer.from(content, 'utf8');
+      if (crypto.verify('sha256', data, pem, signature)) { matched = `${label}/der`; break; }
       try {
-        ok = crypto.verify(
-          'sha256',
-          Buffer.from(signedContent, 'utf8'),
-          { key: pem, dsaEncoding: 'ieee-p1363' },
-          signature
-        );
-      } catch (_) { /* signature pas au format brut → on garde ok=false */ }
+        if (crypto.verify('sha256', data, { key: pem, dsaEncoding: 'ieee-p1363' }, signature)) {
+          matched = `${label}/p1363`;
+          break;
+        }
+      } catch (_) { /* signature pas au format brut → on continue */ }
     }
   } catch (err) {
     logger.warn('[ADMOB SSV] Erreur lors de la vérification de signature', { error: err.message, keyId });
     return { valid: false, reason: 'verify_error' };
   }
-  if (!ok) {
+  if (matched && matched !== 'asis/der') {
+    logger.info('[ADMOB SSV] Signature vérifiée via variante', { matched, keyId });
+  }
+  if (!matched) {
     // Diagnostic : si un proxy (Nginx/CDN) a décodé la query string, le
     // `custom_data` n'est plus percent-escaped → le contenu signé reconstruit
     // ici ne correspond plus à ce qu'AdMob a signé → échec garanti.
