@@ -149,7 +149,7 @@ async function isCategoryUnlockedFor(appId, userId, categoryId) {
  */
 async function startOrSwitchUnlock(appId, userId, category, durationMinutes) {
   if (!categoryIsGated(category)) {
-    throw new AppError('Cette catégorie ne nécessite pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError('Ces coupons ne nécessitent pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
   const wanted = (durationMinutes === undefined || durationMinutes === null) ? null : Number(durationMinutes);
@@ -158,7 +158,7 @@ async function startOrSwitchUnlock(appId, userId, category, durationMinutes) {
   }
   const option = category.accessGate.options.find(o => ((o.durationMinutes ?? null) === wanted));
   if (!option) {
-    throw new AppError('Offre de déblocage invalide pour cette catégorie.', 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError('Offre de déblocage invalide.', 400, ErrorCodes.VALIDATION_ERROR);
   }
 
   let doc = await UserAccessUnlock.findOne({
@@ -167,7 +167,7 @@ async function startOrSwitchUnlock(appId, userId, category, durationMinutes) {
 
   if (doc && doc.isAccessActive()) {
     throw new AppError(
-      "Cette catégorie est déjà débloquée. Tu pourras choisir une autre offre après l'expiration.",
+      "Ces coupons sont déjà débloqués. Tu pourras choisir une autre offre après l'expiration.",
       409,
       ErrorCodes.OPERATION_NOT_ALLOWED
     );

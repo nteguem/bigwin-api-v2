@@ -24,7 +24,7 @@ async function userHasActiveSubscription(appId, userId) {
 
 async function loadAccessibleCategory(appId, categoryId) {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) {
-    throw new AppError('Identifiant de catégorie invalide.', 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError('Identifiant invalide.', 400, ErrorCodes.VALIDATION_ERROR);
   }
   // Catégorie accessible = de cette app OU "shared", et active.
   const category = await Category.findOne({
@@ -33,7 +33,7 @@ async function loadAccessibleCategory(appId, categoryId) {
     isActive: true
   });
   if (!category) {
-    throw new AppError('Catégorie introuvable ou indisponible.', 404, ErrorCodes.NOT_FOUND);
+    throw new AppError('Coupons introuvables ou indisponibles.', 404, ErrorCodes.NOT_FOUND);
   }
   return category;
 }
@@ -57,20 +57,20 @@ exports.unlockCategory = catchAsync(async (req, res) => {
 
   const category = await loadAccessibleCategory(appId, categoryId);
   if (category.isVip) {
-    throw new AppError("Cette catégorie n'est pas concernée par le déblocage par pub.", 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError("Ces coupons ne sont pas concernés par le déblocage par pub.", 400, ErrorCodes.VALIDATION_ERROR);
   }
   if (!accessGateService.categoryIsGated(category)) {
-    throw new AppError('Cette catégorie ne nécessite pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
+    throw new AppError('Ces coupons ne nécessitent pas de déblocage.', 400, ErrorCodes.VALIDATION_ERROR);
   }
   if (await userHasActiveSubscription(appId, req.user._id)) {
-    throw new AppError("Cette catégorie est déjà accessible avec ton abonnement.", 400, ErrorCodes.OPERATION_NOT_ALLOWED);
+    throw new AppError("Ces coupons sont déjà accessibles avec ton abonnement.", 400, ErrorCodes.OPERATION_NOT_ALLOWED);
   }
 
   const result = await accessGateService.startOrSwitchUnlock(appId, req.user._id, category, durationMinutes);
 
   return res.status(200).json({
     success: true,
-    message: result.isAccessActive ? 'Catégorie débloquée.' : 'Tentative de déblocage démarrée.',
+    message: result.isAccessActive ? 'Coupons débloqués.' : 'Tentative de déblocage démarrée.',
     data: {
       categoryId: String(category._id),
       nonce: result.nonce,
