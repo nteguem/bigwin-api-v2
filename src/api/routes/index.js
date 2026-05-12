@@ -165,6 +165,13 @@ router.post(
 const admobSsvController = require('../controllers/common/admobSsvController');
 router.get('/ads/admob/ssv', admobSsvController.handleRewardedSsv);
 
+// DEV ONLY — simulateur de récompense (AdMob ne déclenche pas la vraie SSV pour
+// du trafic de test). Monté uniquement si ENABLE_DEV_ACCESS_TOOLS=true → absent
+// (404) en prod. POST /api/dev/access/simulate-reward  { nonce }
+if (process.env.ENABLE_DEV_ACCESS_TOOLS === 'true') {
+  router.post('/dev/access/simulate-reward', admobSsvController.simulateReward);
+}
+
 // ===== ROUTES COMMON =====
 const deviceRoutes = require('./common/deviceRoutes');
 const topicRoutes = require('./common/topicRoutes');

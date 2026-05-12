@@ -71,3 +71,35 @@ exports.handleRewardedSsv = async (req, res) => {
     return res.status(500).send('error');
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEV ONLY — simule un callback SSV. AdMob ne déclenche PAS la vraie SSV pour
+// les pubs de test / "Publisher Test" / les test devices ; impossible de tester
+// le déblocage de bout en bout en environnement de dev sans ça. Cette route
+// n'est montée que si ENABLE_DEV_ACCESS_TOOLS=true (cf. routes/index.js) → 404
+// en prod. Corps JSON : { nonce: string, userId?: string, transactionId?: string }
+exports.simulateReward = async (req, res) => {
+  const log = req.log || logger;
+  try {
+    const nonce = req.body && req.body.nonce ? String(req.body.nonce) : null;
+    if (!nonce) {
+      return res.status(400).json({ success: false, message: 'Champ "nonce" requis.' });
+    }
+    const r = await accessGateService.recordVerifiedReward({
+      nonce,
+      userId: (req.body && req.body.userId) || null,
+      transactionId: (req.body && req.body.transactionId) ||
+        `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      adUnitId: 'dev-simulate',
+      adNetwork: 'dev',
+      rewardAmount: '1',
+      rewardItem: 'Reward',
+      timestampMs: String(Date.now())
+    });
+    log.info('[DEV SSV] Récompense simulée', { nonce, result: r });
+    return res.status(200).json({ success: true, data: r });
+  } catch (err) {
+    log.error('[DEV SSV] Erreur', { error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
