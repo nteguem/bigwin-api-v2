@@ -74,6 +74,10 @@ class CouponController {
         });
         unlocks.forEach(u => unlockMap.set(u.resource.toString(), u));
       }
+      // Compteur "X personnes ont débloqué cette catégorie" (1 agrégation).
+      const unlockCountMap = gatedCategoryIds.length > 0
+        ? await accessGateService.countCategoryUnlocks(appId, gatedCategoryIds)
+        : new Map();
 
       // Grouper les tickets par catégorie
       const categoriesMap = new Map();
@@ -123,6 +127,7 @@ class CouponController {
                 adsRequired: o.adsRequired
               })),
               requiresAuth: !req.user,
+              unlockCount: unlockCountMap.get(categoryId) || 0,
               state: accessGateService.buildState(unlockDoc)
             },
             createdAt: ticket.createdAt,

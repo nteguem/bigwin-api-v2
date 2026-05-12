@@ -89,6 +89,7 @@ exports.getCategoryAccessState = catchAsync(async (req, res) => {
       gated: gateState.gated,
       locked: gateState.locked,
       offers: gateState.offers,
+      unlockCount: gateState.unlockCount || 0,
       state: gateState.state
     }
   });

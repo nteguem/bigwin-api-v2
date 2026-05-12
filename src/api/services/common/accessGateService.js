@@ -74,11 +74,17 @@ function buildState(doc) {
  */
 async function getCategoryGateState(appId, userId, category) {
   if (!categoryIsGated(category)) {
-    return { gated: false, locked: false, offers: [], state: null };
+    return { gated: false, locked: false, offers: [], state: null, unlockCount: 0 };
   }
   const offers = category.accessGate.options.map(publicOption);
+  const unlockCount = await UserAccessUnlock.countDocuments({
+    appId,
+    resourceType: RESOURCE_TYPE_CATEGORY,
+    resource: category._id,
+    unlockedAt: { $ne: null }
+  });
   if (!userId) {
-    return { gated: true, locked: true, offers, state: null };
+    return { gated: true, locked: true, offers, state: null, unlockCount };
   }
   const doc = await UserAccessUnlock.findOne({
     appId,
@@ -87,7 +93,31 @@ async function getCategoryGateState(appId, userId, category) {
     resource: category._id
   });
   const locked = !(doc && doc.isAccessActive());
-  return { gated: true, locked, offers, state: buildState(doc) };
+  return { gated: true, locked, offers, state: buildState(doc), unlockCount };
+}
+
+/**
+ * Compte, par catégorie, le nombre d'utilisateurs ayant déjà débloqué la
+ * catégorie au moins une fois (`unlockedAt` non nul) — une seule agrégation
+ * pour toute une liste de catégories.
+ * @returns {Promise<Map<string, number>>} categoryId(string) -> nombre
+ */
+async function countCategoryUnlocks(appId, categoryIds) {
+  if (!Array.isArray(categoryIds) || categoryIds.length === 0) return new Map();
+  const rows = await UserAccessUnlock.aggregate([
+    {
+      $match: {
+        appId,
+        resourceType: RESOURCE_TYPE_CATEGORY,
+        resource: { $in: categoryIds },
+        unlockedAt: { $ne: null }
+      }
+    },
+    { $group: { _id: '$resource', n: { $sum: 1 } } }
+  ]);
+  const map = new Map();
+  for (const r of rows) map.set(String(r._id), r.n);
+  return map;
 }
 
 /**
@@ -290,6 +320,7 @@ module.exports = {
   publicOption,
   buildState,
   getCategoryGateState,
+  countCategoryUnlocks,
   isCategoryUnlockedFor,
   startOrSwitchUnlock,
   recordVerifiedReward
