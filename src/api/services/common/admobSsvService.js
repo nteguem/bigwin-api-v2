@@ -135,10 +135,17 @@ async function verifyCallback(rawQuery) {
     // `signatureBytes` : 64 = format brut (P1363), ~70-72 = DER.
     const queryLooksDecodedByProxy =
       /custom_data=\{/.test(signedContent) || /"resourceType":/.test(signedContent);
+    let paramOrder = null;
+    try { paramOrder = [...new URLSearchParams(signedContent).keys()].join(','); } catch (_) {}
     logger.warn('[ADMOB SSV] Signature invalide', {
       keyId,
       signatureBytes: signature.length,
-      queryLooksDecodedByProxy
+      queryLooksDecodedByProxy,
+      signedContentLength: signedContent.length,
+      paramOrder,
+      // Contenu exact tenté (contient user_id + nonce transitoire) — sert à le
+      // comparer octet pour octet avec ce qu'AdMob a signé.
+      signedContent
     });
     return { valid: false, reason: 'bad_signature' };
   }
