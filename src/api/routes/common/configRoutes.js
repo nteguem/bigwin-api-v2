@@ -20,7 +20,10 @@ router.patch('/admin/:countryCode/toggle', adminAuth.protect, configController.t
 
 /**
  * Routes publiques (sans authentification, sans appId)
+ * IMPORTANT: /countries AVANT /:countryCode sinon Express capture "countries"
+ * comme un code pays de 9 lettres.
  */
+router.get('/countries', configController.getActiveCountriesPublic);
 router.post('/', configController.getConfigByIp);
 router.get('/:countryCode', configController.getConfigByCountryCode);
 

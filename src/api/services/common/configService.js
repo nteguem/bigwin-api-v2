@@ -219,6 +219,34 @@ class ConfigService {
     }
   }
 
+  /**
+   * Liste les pays ACTIFS uniquement, exposés côté mobile pour le sélecteur.
+   * Exclut DEFAULT (config fallback interne) et les pays désactivés.
+   * Retourne un sous-ensemble des champs (pas de metadata interne).
+   */
+  async getActiveCountriesForClient() {
+    try {
+      const configs = await AppConfig.find({
+        isActive: true,
+        countryCode: { $ne: 'DEFAULT' },
+      })
+        .select('countryCode countryName currency language phonePrefix paymentProvider')
+        .sort({ countryName: 1 })
+        .lean();
+      return configs.map((c) => ({
+        countryCode: c.countryCode,
+        countryName: c.countryName,
+        currency: c.currency,
+        language: c.language,
+        phonePrefix: c.phonePrefix,
+        paymentProvider: c.paymentProvider,
+      }));
+    } catch (error) {
+      logger.error(`[ConfigService] Erreur getActiveCountriesForClient: ${error.message}`);
+      throw error;
+    }
+  }
+
   async upsertConfig(countryCode, configData) {
     try {
       const config = await AppConfig.findOneAndUpdate(

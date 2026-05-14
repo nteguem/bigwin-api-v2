@@ -69,6 +69,25 @@ exports.getAllConfigs = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * @route GET /api/config/countries
+ * @desc Liste publique des pays ACTIFS pour le sélecteur côté mobile.
+ *       Retourne le sous-ensemble minimal (pas de metadata interne).
+ *       Le mobile cache cette liste localement et la rafraîchit régulièrement.
+ * @access Public (sans appId)
+ */
+exports.getActiveCountriesPublic = catchAsync(async (req, res, next) => {
+  const countries = await configService.getActiveCountriesForClient();
+
+  formatSuccess(res, {
+    message: 'Pays disponibles récupérés avec succès',
+    data: {
+      total: countries.length,
+      countries,
+    }
+  });
+});
+
+/**
  * @route POST /api/admin/config
  * @desc Créer une nouvelle configuration
  * @access Admin
