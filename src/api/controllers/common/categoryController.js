@@ -51,8 +51,8 @@ class CategoryController {
 
   async createCategory(req, res) {
     try {
-      const appId = req.appId; // ⭐ AJOUT
-      const { name, description, icon, successRate, isVip, isActive, accessGate } = req.body;
+      const appId = req.appId;
+      const { name, description, icon, successRate, isVip, isActive, accessGate, appIds } = req.body;
 
       if (!name || !name.fr || !name.en) {
         return formatError(res, 'Name is required with both fr and en translations (e.g. { "fr": "...", "en": "..." })', 400);
@@ -72,8 +72,12 @@ class CategoryController {
       };
       // Porte de déblocage par pub (uniquement pertinente pour les catégories free).
       if (accessGate && !isVip) categoryData.accessGate = accessGate;
+      // Multi-app : liste des apps de diffusion (default = [appId])
+      if (Array.isArray(appIds) && appIds.length > 0) {
+        categoryData.appIds = appIds;
+      }
 
-      const category = await categoryService.createCategory(appId, categoryData); // ⭐ AJOUT appId
+      const category = await categoryService.createCategory(appId, categoryData);
       
       res.status(201);
       formatSuccess(res, {

@@ -8,11 +8,16 @@ const predictionService = require('./predictionService');
 /**
  * TicketService
  * =============
- * 
- * GESTION DES TICKETS AVEC CATÉGORIES PARTAGÉES :
- * - Les tickets sont filtrés par CATÉGORIES accessibles (pas par appId du ticket)
- * - Si une catégorie est shared, TOUS les tickets de cette catégorie sont visibles (peu importe leur appId)
- * - Exemple : Ticket bigwin dans catégorie LIVE (shared) → Visible dans wisetips aussi
+ *
+ * Multi-app via Category.appIds (la categorie porte la liste de diffusion).
+ *
+ * Une categorie est accessible depuis l'app X si :
+ *   - X est dans `category.appIds`               (nouveau pattern)
+ *   - OU category.appId === X                    (mono-app legacy)
+ *   - OU category.appId === "shared"             (Live legacy retro-compat)
+ *
+ * Les tickets heritent de leur categorie : si la categorie est visible
+ * depuis l'app X, ses tickets le sont aussi (peu importe ticket.appId).
  */
 
 class TicketService {
@@ -31,12 +36,18 @@ class TicketService {
    * @param {String} appId - ID de l'application
    */
   async getTickets(appId, { offset = 0, limit = 10, category = null, date = null, isVisible = null }) {
-    // ⭐ ÉTAPE 1 : Récupérer les catégories accessibles (app + shared)
+    // ETAPE 1 : categories accessibles depuis cette app (nouveau pattern multi-app).
+    // Une categorie est visible depuis l'app X si X est dans `appIds`. Le fallback
+    // `appId === "shared"` couvre les cats qui n'auraient pas encore ete migrees
+    // (au cas ou). En pratique apres migration toutes les cats ont appIds peuple.
     const accessibleCategories = await Category.find({
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     }).select('_id');
-    
+
     const categoryIds = accessibleCategories.map(cat => cat._id);
     
     // ⭐ ÉTAPE 2 : Filtrer les tickets par ces catégories (peu importe leur appId)
@@ -106,38 +117,44 @@ class TicketService {
     // Catégorie supprimée en BD : ticket orphelin, on le considère inaccessible
     if (!ticket.category) return null;
 
-    // ⭐ ÉTAPE 2 : Vérifier que la catégorie est accessible
+    // ETAPE 2 : verifier que la categorie est accessible depuis cette app
+    // (appIds contient appId OU categorie shared retro-compat).
     const categoryAccessible = await Category.findOne({
       _id: ticket.category._id,
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     });
 
-    if (!categoryAccessible) return null; // Catégorie non accessible
-    
+    if (!categoryAccessible) return null;
+
     const predictions = await predictionService.getPredictionsByTicket(appId, id);
     return { ...ticket.toObject(), predictions };
   }
 
   /**
-   * Mettre à jour un ticket
-   * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut mettre à jour que les tickets de son app
+   * Mettre a jour un ticket
+   * @param {String} appId - ID de l'application demandeuse
+   *
+   * Acces autorise si :
+   *   - ticket.appId === appId (proprietaire historique)        OU
+   *   - categorie diffusee sur cette app (appIds contient appId) OU
+   *   - categorie shared (retro-compat)
    */
   async updateTicket(appId, id, data) {
-    // Un ticket dans une catégorie SHARED (ex: "Live Events") est accessible
-    // depuis n'importe quelle app de la galaxie : son `appId` ne correspond
-    // pas forcément à l'app de l'admin qui édite. On vérifie donc l'accès via
-    // la catégorie : autorisé si appId match OU si la catégorie est shared.
     const ticket = await Ticket.findById(id).populate('category');
     if (!ticket) return null;
 
-    const catAppId = ticket.category?.appId;
-    const isAccessible = ticket.appId === appId || catAppId === 'shared';
-    if (!isAccessible) return null;
+    const cat = ticket.category;
+    const isOwner = ticket.appId === appId;
+    const isCatAccessible = cat && (
+      (Array.isArray(cat.appIds) && cat.appIds.includes(appId)) ||
+      cat.appId === 'shared'
+    );
+    if (!isOwner && !isCatAccessible) return null;
 
-    // findOneAndUpdate (et pas .save()) pour déclencher le hook post('findOneAndUpdate')
-    // qui broadcast la notif OneSignal sur changement de visibility.
     return await Ticket.findOneAndUpdate(
       { _id: id },
       data,
@@ -146,19 +163,19 @@ class TicketService {
   }
 
   /**
-   * Supprimer un ticket
-   * @param {String} appId - ID de l'application
-   * ⚠️ NOTE : Ne peut supprimer que les tickets de son app
+   * Supprimer un ticket (memes regles d'acces que updateTicket).
    */
   async deleteTicket(appId, id) {
-    // Mêmes règles d'accès que updateTicket : autorisé si appId match
-    // OU si la catégorie est shared (ticket LIVE accessible inter-apps).
     const ticket = await Ticket.findById(id).populate('category');
     if (!ticket) return null;
 
-    const catAppId = ticket.category?.appId;
-    const isAccessible = ticket.appId === appId || catAppId === 'shared';
-    if (!isAccessible) return null;
+    const cat = ticket.category;
+    const isOwner = ticket.appId === appId;
+    const isCatAccessible = cat && (
+      (Array.isArray(cat.appIds) && cat.appIds.includes(appId)) ||
+      cat.appId === 'shared'
+    );
+    if (!isOwner && !isCatAccessible) return null;
 
     await Prediction.deleteMany({ ticket: id });
     await Ticket.findByIdAndDelete(id);
@@ -214,11 +231,14 @@ class TicketService {
   async ticketExists(appId, id) {
     const ticket = await Ticket.findOne({ _id: id });
     if (!ticket) return false;
-    
-    // Vérifier que la catégorie est accessible
+
+    // Categorie accessible depuis cette app (appIds OR shared retro-compat)
     const categoryAccessible = await Category.findOne({
       _id: ticket.category,
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     });
     

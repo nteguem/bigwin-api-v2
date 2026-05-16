@@ -10,6 +10,7 @@
 // Maintenant on corrige d'abord, puis on notifie SI ET SEULEMENT SI le résultat
 // est effectivement gagné (sécurité contre fausses notifs de victoire).
 
+const mongoose = require('mongoose');
 const Prediction = require('../../models/common/Prediction');
 const Ticket = require('../../models/common/Ticket');
 const Corrector = require('../../../core/events/Corrector');
@@ -233,8 +234,19 @@ async function correctAndNotifyTicket(ticketId, appId) {
   if (!ticket) {
     throw new AppError('Ticket introuvable', 404);
   }
-  if (ticket.appId !== appId) {
-    throw new AppError(`Ticket appartient à ${ticket.appId}, pas à ${appId}`, 403);
+  // RBAC multi-app : l'admin peut corriger si appId match owner (legacy)
+  // OU si la categorie est diffusee sur cette app (appIds OR shared retro-compat)
+  const cat = ticket.category;
+  const isOwner = ticket.appId === appId;
+  const isCatVisible = cat && (
+    (Array.isArray(cat.appIds) && cat.appIds.includes(appId)) ||
+    cat.appId === 'shared'
+  );
+  if (!isOwner && !isCatVisible) {
+    throw new AppError(
+      `Ticket non accessible depuis ${appId} (owner=${ticket.appId}, cat=${cat?.appId})`,
+      403
+    );
   }
 
   // Corriger les prédictions pending (les déjà corrigées restent inchangées)
@@ -294,9 +306,38 @@ async function correctAndNotifyTicket(ticketId, appId) {
     };
   }
 
-  // Ticket gagné OU pending (API pas à jour) → on notifie
+  // Ticket gagne OU pending (API pas a jour) -> on notifie.
+  // Multi-app : broadcast la notif "gagne" sur TOUTES les apps de la liste
+  // de diffusion de la categorie. Fallback :
+  //   - cat shared (legacy)  -> toutes apps actives
+  //   - cat appIds vide      -> [updatedTicket.appId] (defense)
   const payload = buildTicketSuccessNotification(updatedTicket, updatedPredictions);
-  const notif = await notificationService.sendToAll(appId, payload);
+  const catUpdated = updatedTicket.category;
+  let targetApps;
+  if (catUpdated && catUpdated.appId === 'shared') {
+    const App = mongoose.model('App');
+    const activeApps = await App.find({ isActive: true }).select('appId').lean();
+    targetApps = activeApps.map(a => a.appId);
+  } else if (Array.isArray(catUpdated?.appIds) && catUpdated.appIds.length > 0) {
+    targetApps = catUpdated.appIds;
+  } else {
+    targetApps = [updatedTicket.appId];
+  }
+
+  const notifResults = [];
+  let totalRecipients = 0;
+  for (const targetAppId of targetApps) {
+    try {
+      const r = await notificationService.sendToAll(targetAppId, payload);
+      notifResults.push({ appId: targetAppId, id: r.id, recipients: r.recipients });
+      totalRecipients += r.recipients || 0;
+    } catch (err) {
+      logger.error(`[correctAndNotifyTicket] Echec notif app=${targetAppId} : ${err.message}`);
+      notifResults.push({ appId: targetAppId, error: err.message });
+    }
+  }
+  // Shape retro-compat : on garde `notif` pour le code aval qui le lit
+  const notif = notifResults[0] || { id: null, recipients: 0 };
 
   const isPending = result === 'pending';
   logger.info(

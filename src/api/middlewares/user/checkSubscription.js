@@ -71,11 +71,20 @@ exports.checkTicketAccess = catchAsync(async (req, res, next) => {
     return next(new AppError('ID de ticket requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
 
-  // ⭐ Récupérer le ticket avec sa catégorie POUR CETTE APP
+  // Recuperer le ticket et verifier que sa categorie est diffusee sur cette app
+  // (multi-app via Category.appIds + retro-compat ticket.appId === appId + cat shared)
   const Ticket = require('../../models/common/Ticket');
-  const ticket = await Ticket.findOne({ _id: ticketId, appId }).populate('category');
-  
+  let ticket = await Ticket.findOne({ _id: ticketId }).populate('category');
   if (!ticket) {
+    return next(new AppError('Ticket non trouvé', 404, ErrorCodes.NOT_FOUND));
+  }
+  const cat = ticket.category;
+  const isCatVisible = cat && (
+    (Array.isArray(cat.appIds) && cat.appIds.includes(appId)) ||
+    cat.appId === 'shared'
+  );
+  const isOwner = ticket.appId === appId;
+  if (!isCatVisible && !isOwner) {
     return next(new AppError('Ticket non trouvé', 404, ErrorCodes.NOT_FOUND));
   }
 

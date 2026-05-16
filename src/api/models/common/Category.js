@@ -118,6 +118,33 @@ const CategorySchema = new mongoose.Schema({
     default: true
   },
 
+  // Liste de diffusion multi-app : toutes les apps ou cette categorie
+  // est visible. Permet de partager une categorie sur 2 a N apps sans
+  // utiliser la convention "shared" qui force ALL apps.
+  //
+  // Invariants :
+  //   - Tableau non vide (sauf si appId === "shared", auquel cas le legacy
+  //     mecanisme prime et appIds peut etre vide)
+  //   - Si appId est un appId standard, appIds doit le contenir
+  //
+  // Cas usage :
+  //   - appId="bigwin", appIds=["bigwin"]                       → mono-app legacy
+  //   - appId="bigwin", appIds=["bigwin","goatips","wisetips"]  → diffuse sur 3 apps
+  //   - appId="shared", appIds=[]                               → toutes les apps actives (Live legacy)
+  appIds: {
+    type: [{
+      type: String,
+      lowercase: true,
+      trim: true,
+    }],
+    default: function () {
+      // Au create : si pas fourni, on initialise avec [appId]
+      // (pour "shared" on laisse vide, le legacy filter prend la suite)
+      if (this.appId && this.appId !== 'shared') return [this.appId];
+      return [];
+    },
+  },
+
   // Porte de déblocage par pub appliquée à TOUS les coupons de cette catégorie.
   // Absent ⇒ catégorie en accès libre. Pour retirer la porte : `accessGate: null`.
   accessGate: {
@@ -135,6 +162,9 @@ CategorySchema.index({ appId: 1, isActive: 1 });
 CategorySchema.index({ appId: 1, isVip: 1 });
 CategorySchema.index({ isActive: 1 });
 CategorySchema.index({ isVip: 1 });
+
+// Multikey index sur appIds (categorie visible depuis l'app X).
+CategorySchema.index({ appIds: 1, isActive: 1 });
 
 /**
  * Méthode helper : Vérifier si la catégorie est partagée

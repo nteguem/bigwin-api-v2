@@ -35,9 +35,12 @@ class PredictionService {
    * @param {String} appId - ID de l'application
    */
   async getPredictions(appId, { offset = 0, limit = 10, ticket = null, sport = null, status = null }) {
-    // ⭐ ÉTAPE 1 : Récupérer les catégories accessibles
+    // ETAPE 1 : categories accessibles depuis cette app (multi-app via appIds + shared retro-compat)
     const accessibleCategories = await Category.find({
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     }).select('_id');
     
@@ -113,27 +116,31 @@ class PredictionService {
     
     const categoryAccessible = await Category.findOne({
       _id: ticket.category,
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     });
-    
+
     if (!categoryAccessible) return null;
-    
+
     return prediction;
   }
 
   /**
-   * Récupérer les prédictions d'un ticket (si le ticket est accessible)
-   * @param {String} appId - ID de l'application
+   * Recuperer les predictions d'un ticket (si la categorie est accessible)
    */
   async getPredictionsByTicket(appId, ticketId) {
-    // Vérifier que le ticket est accessible
     const ticket = await Ticket.findOne({ _id: ticketId });
     if (!ticket) return [];
-    
+
     const categoryAccessible = await Category.findOne({
       _id: ticket.category,
-      appId: { $in: [appId, "shared"] },
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       isActive: true
     });
     

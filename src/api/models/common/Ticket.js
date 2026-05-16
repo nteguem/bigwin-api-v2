@@ -194,50 +194,54 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
           };
         }
 
-        // ⭐ MODIFIÉ : Broadcaster si la CATÉGORIE est shared (pas le ticket)
+        // Strategie de broadcast (priorite ordre suivant) :
+        //   1. Categorie shared (retro-compat Live)        -> toutes apps actives
+        //   2. Categorie multi-app via category.appIds      -> liste de diffusion
+        //   3. Categorie mono-app (legacy)                  -> doc.appId only
+        const catAppIds = Array.isArray(category?.appIds) ? category.appIds : [];
+
         if (isCategoryShared) {
-          // Catégorie partagée → Broadcaster à toutes les apps actives
-          console.log(`📢 [SHARED CATEGORY] Catégorie "${categoryNameFr}" est partagée - Broadcasting à toutes les apps`);
-          
+          console.log(`📢 [SHARED] "${categoryNameFr}" - broadcast toutes apps actives`);
           const App = mongoose.model('App');
           const activeApps = await App.find({ isActive: true }).select('appId');
-          
-          console.log(`📊 [SHARED CATEGORY] ${activeApps.length} apps actives trouvées`);
-          
-          let successCount = 0;
-          let errorCount = 0;
-          
+          let ok = 0, fail = 0;
           for (const app of activeApps) {
             try {
-              const result = await notificationService.sendToAll(app.appId, notification);
-              successCount++;
-              
-              console.log(`✅ [${app.appId}] Notification envoyée`, {
-                notificationId: result.id,
-                recipients: result.recipients,
-                ticketAppId: doc.appId,
-                categoryAppId: category.appId
-              });
-            } catch (error) {
-              errorCount++;
-              console.error(`❌ [${app.appId}] Erreur envoi notification:`, error.message);
+              const r = await notificationService.sendToAll(app.appId, notification);
+              ok++;
+              console.log(`✅ [${app.appId}] notif envoyee`, { id: r.id, recipients: r.recipients });
+            } catch (err) {
+              fail++;
+              console.error(`❌ [${app.appId}] erreur:`, err.message);
             }
           }
-          
-          console.log(`📊 [SHARED CATEGORY] Résumé: ${successCount} succès, ${errorCount} erreurs`);
-          
+          console.log(`📊 [SHARED] ${ok}/${activeApps.length} OK (${fail} erreurs)`);
+
+        } else if (catAppIds.length > 1) {
+          // Multi-app via Category.appIds : broadcast a la liste de diffusion
+          console.log(`📢 [MULTI-APP CAT] "${categoryNameFr}" diffusee sur ${catAppIds.length} apps : ${catAppIds.join(', ')}`);
+          let ok = 0, fail = 0;
+          for (const targetAppId of catAppIds) {
+            try {
+              const r = await notificationService.sendToAll(targetAppId, notification);
+              ok++;
+              console.log(`✅ [${targetAppId}] notif envoyee`, { id: r.id, recipients: r.recipients });
+            } catch (err) {
+              fail++;
+              console.error(`❌ [${targetAppId}] erreur:`, err.message);
+            }
+          }
+          console.log(`📊 [MULTI-APP CAT] ${ok}/${catAppIds.length} OK (${fail} erreurs)`);
+
         } else {
-          // Catégorie spécifique → Envoi normal à l'app du ticket
-          const result = await notificationService.sendToAll(doc.appId, notification);
-          
-          console.log(`✅ [${doc.appId}] Notification envoyée avec succès (catégorie spécifique)`);
-          console.log("📊 Statistiques:", {
-            appId: doc.appId,
-            notificationId: result.id,
-            recipients: result.recipients,
+          // Mono-app : 1 seule app dans catAppIds (= la categorie est dediee a cette app)
+          // Fallback sur doc.appId si catAppIds vide (cat non migree, defense).
+          const targetAppId = catAppIds[0] || doc.appId;
+          const r = await notificationService.sendToAll(targetAppId, notification);
+          console.log(`✅ [${targetAppId}] notif envoyee (mono-app)`, {
+            id: r.id,
+            recipients: r.recipients,
             type: isDailyCoupon ? 'DAILY_COUPON' : (isLive ? 'LIVE' : 'NORMAL'),
-            category: categoryNameFr,
-            categoryAppId: category.appId
           });
         }
         
