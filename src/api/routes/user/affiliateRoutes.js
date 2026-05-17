@@ -14,6 +14,11 @@ router.use(userAuth.protect);
 router.post('/activate', affiliateController.activate);
 router.get('/me', affiliateController.getMe);
 router.get('/eligible-countries', affiliateController.listEligibleCountries);
+
+// Porte publicitaire avant activation (regarder N pubs récompensées).
+// Compteur cumulatif côté serveur : l'user peut quitter et reprendre.
+router.get('/ad-gate', affiliateController.getAdGateProgress);
+router.post('/ad-gate/start', affiliateController.startAdGate);
 router.post('/payout-method', affiliateController.setPayoutMethod);
 router.get('/link', affiliateController.getShareLink);
 router.get('/referrals', affiliateController.listReferrals);

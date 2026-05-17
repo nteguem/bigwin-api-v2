@@ -54,19 +54,24 @@ const UserAccessUnlockSchema = new mongoose.Schema({
     required: true
   },
 
-  // Type de ressource déblocable. Aujourd'hui uniquement 'category' ; gardé
-  // comme discriminant pour une éventuelle extension future.
+  // Type de ressource déblocable.
+  //   - 'category'  : déblocage d'une CATÉGORIE free de coupons (avec offre
+  //     `selectedOption` : durée + nb de pubs, expiration via `expiresAt`).
+  //   - 'affiliate' : déblocage de l'INSCRIPTION AFFILIÉ (compteur cumulatif,
+  //     pas de durée, `resource` absent — un seul doc par user).
   resourceType: {
     type: String,
-    enum: ['category'],
+    enum: ['category', 'affiliate'],
     default: 'category'
   },
 
-  // ObjectId de la ressource (une Category). Volontairement sans `ref` figée
-  // pour rester générique.
+  // ObjectId de la ressource (ex: Category). Absent pour les `resourceType`
+  // sans cible (ex: 'affiliate', qui se réfère à l'user lui-même). Volontairement
+  // sans `ref` figée pour rester générique.
   resource: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true
+    required: false,
+    default: null
   },
 
   status: {

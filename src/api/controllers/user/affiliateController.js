@@ -5,6 +5,7 @@
 
 const User = require('../../models/user/User');
 const affiliateService = require('../../services/affiliate/affiliateService');
+const affiliateAdGateService = require('../../services/affiliate/affiliateAdGateService');
 const catchAsync = require('../../../utils/catchAsync');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
@@ -13,12 +14,35 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
  * Body: { country?, firstName, lastName }
  * - country : pays choisi (défaut user.countryCode)
  * - firstName / lastName : identité réelle pour les payouts AfribaPay
+ *
+ * Si la porte ad-gate est active (config.adGate.enabled), l'utilisateur doit
+ * avoir regardé `adsRequired` pubs récompensées SSV-vérifiées avant que
+ * l'activation soit acceptée. Sinon → 403 AD_GATE_NOT_COMPLETED.
  */
 exports.activate = catchAsync(async (req, res, next) => {
   const { country, firstName, lastName } = req.body || {};
   const user = await User.findById(req.user._id);
   if (!user) {
     return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+
+  // Porte ad-gate (avant toute autre validation business) — sauf si l'user
+  // est déjà affilié (idempotent → on laisse passer pour éviter de bloquer
+  // un user qui retape activate par erreur).
+  if (!user.affiliate?.isActive) {
+    const eligible = await affiliateAdGateService.checkEligibility(
+      user.appId,
+      user._id
+    );
+    if (!eligible) {
+      return next(
+        new AppError(
+          'Tu dois d\'abord regarder les vidéos requises pour devenir affilié.',
+          403,
+          ErrorCodes.OPERATION_NOT_ALLOWED
+        )
+      );
+    }
   }
 
   await affiliateService.activate(user, { country, firstName, lastName });
@@ -29,6 +53,42 @@ exports.activate = catchAsync(async (req, res, next) => {
     message: 'Compte affilié activé avec succès',
     data: state,
   });
+});
+
+/**
+ * GET /user/affiliate/ad-gate
+ * Renvoie l'état courant de la porte publicitaire pour l'utilisateur :
+ *   { enabled, adsRequired, adsWatched, completed, eligible, percentage, nonce }
+ *
+ * `enabled=false` signifie que la porte est désactivée côté config —
+ * l'utilisateur peut activer directement sans passer par la porte.
+ * `nonce` est null tant que `POST /ad-gate/start` n'a pas été appelé.
+ */
+exports.getAdGateProgress = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const progress = await affiliateAdGateService.getProgress(user.appId, user._id);
+  res.status(200).json({ success: true, data: progress });
+});
+
+/**
+ * POST /user/affiliate/ad-gate/start
+ * Démarre (ou rafraîchit) la session ad-gate. Renvoie un `nonce` à passer
+ * dans le `customData` des pubs récompensées. Réutilisable plusieurs fois :
+ * tant que la porte n'est pas complétée, on régénère un nonce neuf.
+ *
+ * Idempotent si l'utilisateur a déjà complété : renvoie l'état tel quel sans
+ * régénérer le nonce.
+ */
+exports.startAdGate = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError('User introuvable', 404, ErrorCodes.NOT_FOUND));
+  }
+  const progress = await affiliateAdGateService.start(user.appId, user._id);
+  res.status(200).json({ success: true, data: progress });
 });
 
 /**

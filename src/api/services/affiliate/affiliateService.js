@@ -201,11 +201,19 @@ class AffiliateService {
       // commissionRate exposé même en pré-activation pour que l'écran
       // "Devenir affilié" puisse afficher clairement ce que l'user va gagner.
       const cfg = await this.getOrCreateConfig(appId);
+
+      // Snapshot ad-gate pour que le mobile sache d'un coup d'œil si la porte
+      // est active + où en est l'utilisateur. Le mobile rafraîchira via
+      // /user/affiliate/ad-gate quand il en aura besoin (polling pubs).
+      const affiliateAdGateService = require('./affiliateAdGateService');
+      const adGate = await affiliateAdGateService.getProgress(appId, user._id);
+
       return {
         isAffiliate: false,
         canActivate,
         defaultCountry, // pré-sélection du select pays côté UI
         commissionRate: cfg.defaultCommissionRate ?? 15,
+        adGate, // { enabled, adsRequired, adsWatched, completed, eligible, percentage, nonce }
         // Pré-remplissage du form d'activation côté mobile (modifiable
         // pour les users dont firstName/lastName sont des pseudos).
         prefill: {

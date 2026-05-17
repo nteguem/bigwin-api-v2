@@ -57,6 +57,28 @@ const bonusSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * Porte publicitaire en amont de l'activation affilié.
+ *
+ * Si `enabled`, l'utilisateur doit avoir regardé `adsRequired` pubs récompensées
+ * (SSV-vérifiées) AVANT que `POST /user/affiliate/activate` n'accepte sa
+ * demande. Le compteur est cumulatif et persistant côté serveur : l'user
+ * peut quitter à mi-chemin et reprendre plus tard. Une fois `adsRequired`
+ * atteint, l'éligibilité reste acquise à vie (pas d'expiration).
+ *
+ * Réutilise l'infra `UserAccessUnlock` (resourceType: 'affiliate', resource:
+ * null, durationMinutes: null = "à vie"). Le décompte est validé côté serveur
+ * par le SSV AdMob, pas par le client → anti-triche.
+ */
+const adGateSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: true },
+    // Nombre de pubs récompensées requises avant activation.
+    adsRequired: { type: Number, default: 25, min: 1 },
+  },
+  { _id: false }
+);
+
 const affiliateConfigSchema = new mongoose.Schema(
   {
     appId: {
@@ -86,6 +108,9 @@ const affiliateConfigSchema = new mongoose.Schema(
 
     // Visibilité parrainage côté filleul (affichage "Tu as été parrainé par X")
     showReferrerToReferee: { type: Boolean, default: true },
+
+    // Porte ad-gate avant activation (voir doc du schema ci-dessus).
+    adGate: { type: adGateSchema, default: () => ({}) },
   },
   { timestamps: true }
 );
