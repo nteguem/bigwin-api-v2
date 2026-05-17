@@ -707,7 +707,30 @@ async countAudience(appIdOrIds, { audience = 'all', countryCodes = [] } = {}) {
   const perApp = [];
   let totalUsers = 0;
   let totalDevices = 0;
+
+  // Fast path : 'all' sans filtre pays => countDocuments direct (pas de
+  // resolution de la liste userIds). Crucial sur grosses bases : evite
+  // de fabriquer un Array<ObjectId> de 10k+ entrees, puis un $in massif
+  // dans Device.find() qui timeoutait le reverse proxy en 502.
+  const isFastAll = audience === 'all' && (!countryCodes || countryCodes.length === 0);
+
+  const User = isFastAll ? require('../../models/user/User') : null;
+  const Device = isFastAll ? require('../../models/common/Device') : null;
+
   for (const appId of appIds) {
+    if (isFastAll) {
+      const userCount = await User.countDocuments({ appId });
+      const deviceCount = await Device.countDocuments({
+        appId,
+        isActive: true,
+        playerId: { $exists: true, $nin: [null, ''] },
+      });
+      perApp.push({ appId, users: userCount, devices: deviceCount });
+      totalUsers += userCount;
+      totalDevices += deviceCount;
+      continue;
+    }
+    // Sinon : resolution standard (VIP / Free / pays filtre)
     const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
     const playerIds = await this._resolvePlayerIds(appId, userIds);
     perApp.push({ appId, users: userIds.length, devices: playerIds.length });
