@@ -109,6 +109,12 @@ router.use('/admin/analytics', adminAuth.protect, authorize('super_admin'), admi
 const adminLogsRoutes = require('./admin/logsRoutes');
 router.use('/admin/logs', adminAuth.protect, authorize('super_admin'), adminLogsRoutes);
 
+// ===== ROUTES PUBLIQUES (sync sortante) =====
+// /public/catalog/categories : liste les categories bigwin (toutes apps)
+// pour alimenter le mapping cote backoffice wintips. Lecture seule. V1 sans auth.
+const publicCatalogRoutes = require('./common/publicCatalogRoutes');
+router.use('/public/catalog', publicCatalogRoutes);
+
 // ===== ROUTES USER =====
 const userSubscriptionRoutes = require('./user/subscriptionRoutes');
 const couponRoutes = require('./user/couponRoutes');

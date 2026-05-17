@@ -150,7 +150,7 @@ const CategorySchema = new mongoose.Schema({
   accessGate: {
     type: AccessGateSchema,
     default: undefined
-  }
+  },
 }, {
   timestamps: true
 });

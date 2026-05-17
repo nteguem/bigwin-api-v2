@@ -77,7 +77,20 @@ const TicketSchema = new mongoose.Schema({
   resultUpdatedAt: {
     type: Date,
     default: null
-  }
+  },
+
+  // Marqueur d'idempotence pour la sync sortante vers des systemes externes.
+  // Si on republie un ticket deja clone, on n'en cree pas un doublon : on
+  // met juste a jour le ticket cible identifie par cet id.
+  //
+  // Cle absente / null  => pas encore clone (1ere sync = create)
+  // Cle definie         => deja clone (sync = update si necessaire)
+  externalRefs: {
+    wintips: {
+      type: String, // ObjectId du ticket cible cote wintips
+      default: null,
+    },
+  },
 }, {
   timestamps: true
 });
@@ -253,6 +266,22 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
           categoryId: doc.category,
           error: error.stack
         });
+      }
+
+      // Sync sortante vers systemes externes (wintips, etc.) — fire-and-forget.
+      // Totalement isole : si la sync echoue, la notif push bigwin a deja
+      // ete envoyee et le ticket reste bien publie en bigwin. Le service
+      // gere lui-meme ses try-catch internes.
+      try {
+        const syncService = require('../../services/admin/syncToWintipsService');
+        setImmediate(() => {
+          syncService.maybeSyncTicket(doc).catch((err) => {
+            console.error(`[syncWintips] uncaught: ${err.message}`);
+          });
+        });
+      } catch (err) {
+        // Erreur de chargement du service : log mais on continue
+        console.error(`[syncWintips] init failed: ${err.message}`);
       }
     }
   }
