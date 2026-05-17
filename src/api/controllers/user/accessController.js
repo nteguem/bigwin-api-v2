@@ -26,10 +26,17 @@ async function loadAccessibleCategory(appId, categoryId) {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) {
     throw new AppError('Identifiant invalide.', 400, ErrorCodes.VALIDATION_ERROR);
   }
-  // Catégorie accessible = de cette app OU "shared", et active.
+  // Categorie accessible si :
+  //   - elle diffuse sur l'app demandeuse (appIds contient appId), OU
+  //   - elle est shared (rétro-compat Live Events)
+  // Le filtre legacy `appId === reqAppId` est remplace par `appIds` qui
+  // couvre le multi-app (categorie creee sur bigwin avec diffusion goatips).
   const category = await Category.findOne({
     _id: categoryId,
-    appId: { $in: [appId, 'shared'] },
+    $or: [
+      { appIds: appId },
+      { appId: 'shared' },
+    ],
     isActive: true
   });
   if (!category) {

@@ -141,7 +141,7 @@ exports.createPackage = catchAsync(async (req, res, next) => {
 
   // ⭐ Vérifier que les catégories existent DANS CETTE APP
   if (categories && categories.length > 0) {
-    const existingCategories = await Category.find({ _id: { $in: categories }, appId: { $in: [appId, 'shared'] } });
+    const existingCategories = await Category.find({ _id: { $in: categories }, $or: [{ appIds: appId }, { appId: 'shared' }] });
     if (existingCategories.length !== categories.length) {
       return next(new AppError('Une ou plusieurs catégories sont invalides', 400, ErrorCodes.VALIDATION_ERROR));
     }
@@ -200,7 +200,7 @@ exports.updatePackage = catchAsync(async (req, res, next) => {
 
   // ⭐ Vérifier les catégories DANS CETTE APP si fournies
   if (categories && categories.length > 0) {
-    const existingCategories = await Category.find({ _id: { $in: categories }, appId: { $in: [appId, 'shared'] } });
+    const existingCategories = await Category.find({ _id: { $in: categories }, $or: [{ appIds: appId }, { appId: 'shared' }] });
     if (existingCategories.length !== categories.length) {
       return next(new AppError('Une ou plusieurs catégories sont invalides', 400, ErrorCodes.VALIDATION_ERROR));
     }

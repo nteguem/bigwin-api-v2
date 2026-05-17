@@ -255,9 +255,12 @@ class SubscriptionService {
       return false;
     }
 
-    // ⭐ MODIFIÉ : Vérifier si au moins une catégorie est VIP (app OU shared)
+    // Multi-app : categorie VIP accessible si appIds contient l'app OU shared.
     const vipCategories = await Category.find({
-      appId: { $in: [appId, "shared"] }, // ← Inclure catégories VIP shared
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
@@ -301,9 +304,12 @@ class SubscriptionService {
       return [];
     }
 
-    // ⭐ MODIFIÉ : Récupérer toutes les catégories VIP (app OU shared)
+    // Multi-app : recuperer toutes les categories VIP accessibles depuis cette app.
     return await Category.find({
-      appId: { $in: [appId, "shared"] }, // ← Inclure catégories VIP shared
+      $or: [
+        { appIds: appId },
+        { appId: 'shared' },
+      ],
       _id: { $in: uniqueCategoryIds },
       isVip: true,
       isActive: true
