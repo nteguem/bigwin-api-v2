@@ -9,10 +9,10 @@ class TicketController {
 
   async getTickets(req, res) {
     try {
-      const appId = req.appId; // ⭐ AJOUT
+      const appId = req.appId;
       const { offset = 0, limit = 10, category, date, isVisible, lang = 'fr' } = req.query;
 
-      const result = await ticketService.getTickets(appId, { // ⭐ AJOUT appId
+      const result = await ticketService.getTickets(appId, {
         offset: parseInt(offset),
         limit: parseInt(limit),
         category,
@@ -20,11 +20,33 @@ class TicketController {
         isVisible: isVisible !== undefined ? isVisible === 'true' : null
       });
 
-      // Formater les catégories pour la langue demandée
+      // Enrichissement : unlockCount par categorie pour les tickets dont la
+      // categorie est gated (free + accessGate). Agregation MongoDB une seule
+      // fois pour toutes les cats concernees -> attache sur chaque ticket.
+      const accessGateService = require('../../services/common/accessGateService');
+      const gatedCatIds = [];
+      const seenCat = new Set();
+      for (const t of result.data) {
+        const cat = t.category;
+        if (!cat || cat.isVip) continue;
+        if (!accessGateService.categoryIsGated(cat)) continue;
+        const id = String(cat._id);
+        if (seenCat.has(id)) continue;
+        seenCat.add(id);
+        gatedCatIds.push(cat._id);
+      }
+      const unlockCountMap = gatedCatIds.length > 0
+        ? await accessGateService.countCategoryUnlocks(appId, gatedCatIds)
+        : new Map();
+
+      // Formater les catégories pour la langue demandée + injecter unlockCount
       const data = result.data.map(ticket => {
+        const catId = ticket.category?._id ? String(ticket.category._id) : null;
+        const unlockCount = catId && unlockCountMap.get(catId) || 0;
+        const base = { ...ticket, unlockCount };
         if (ticket.category && ticket.category.name && typeof ticket.category.name === 'object') {
           return {
-            ...ticket,
+            ...base,
             category: {
               ...ticket.category,
               name: ticket.category.name[lang] || ticket.category.name.fr || ticket.category.name,
@@ -32,7 +54,7 @@ class TicketController {
             }
           };
         }
-        return ticket;
+        return base;
       });
 
       formatSuccess(res, {
@@ -47,20 +69,28 @@ class TicketController {
 
   async getTicketById(req, res) {
     try {
-      const appId = req.appId; // ⭐ AJOUT
+      const appId = req.appId;
       const { id } = req.params;
       const { lang = 'fr' } = req.query;
-      const ticket = await ticketService.getTicketById(appId, id); // ⭐ AJOUT appId
+      const ticket = await ticketService.getTicketById(appId, id);
 
       if (!ticket) {
         return formatError(res, 'Ticket not found', 404);
       }
 
+      // unlockCount par categorie (idem getTickets, version 1 seul ticket)
+      const accessGateService = require('../../services/common/accessGateService');
+      let unlockCount = 0;
+      if (ticket.category && !ticket.category.isVip && accessGateService.categoryIsGated(ticket.category)) {
+        const map = await accessGateService.countCategoryUnlocks(appId, [ticket.category._id]);
+        unlockCount = map.get(String(ticket.category._id)) || 0;
+      }
+
       // Formater la catégorie pour la langue demandée
-      let data = ticket;
+      let data = { ...ticket, unlockCount };
       if (ticket.category && ticket.category.name && typeof ticket.category.name === 'object') {
         data = {
-          ...ticket,
+          ...data,
           category: {
             ...ticket.category,
             name: ticket.category.name[lang] || ticket.category.name.fr || ticket.category.name,
