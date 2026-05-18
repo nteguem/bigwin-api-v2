@@ -92,12 +92,18 @@ function detectCurrencyFromPhone(phoneNumber) {
 }
 
 /**
- * merchant_transaction_id <= 30 chars. Pattern : `CP_<base36(ts)>_<6hex>` ≈ 18 chars.
+ * merchant_transaction_id <= 30 chars.
+ * Pattern : `BW-<BASE36-UPPER>-<6HEX-UPPER>` ≈ 18 chars.
+ *
+ * CinetPay applique une regex non documentée sur ce champ : les
+ * underscores et les minuscules sont rejetés avec 1004 INVALID_PARAMS
+ * (« format du champ merchant transaction id est invalide »). Format
+ * sûr : uppercase + hyphens + alphanumérique uniquement.
  */
 function generateMerchantTransactionId() {
-  const ts = Date.now().toString(36);
-  const rand = uuidv4().replace(/-/g, '').substring(0, 6);
-  return `CP_${ts}_${rand}`;
+  const ts = Date.now().toString(36).toUpperCase();
+  const rand = uuidv4().replace(/-/g, '').substring(0, 6).toUpperCase();
+  return `BW-${ts}-${rand}`;
 }
 
 function generateUrls() {
