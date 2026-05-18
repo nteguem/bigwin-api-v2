@@ -3,6 +3,12 @@
  */
 const dotenv = require('dotenv');
 
+// Force Node à résoudre l'IPv4 en premier pour toute requête HTTP sortante.
+// Sans ça, sur les VPS dual-stack (Hostinger, OVH…), Node 17+ part en IPv6
+// par défaut (verbatim DNS order), ce qui fait que les PSP qui whitelistent
+// notre IPv4 nous voient arriver depuis une IPv6 → 2011 NOT_ALLOWED.
+require('dns').setDefaultResultOrder('ipv4first');
+
 // Charger .env AVANT tout require qui en dépend (logger lit LOG_LEVEL).
 dotenv.config();
 
