@@ -55,9 +55,12 @@ const cinetpayTransactionSchema = new mongoose.Schema({
     default: 'PENDING'
   },
 
+  // Optionnel : avec la nouvelle API en mode checkout hosté, le n° est
+  // saisi directement sur la page CinetPay → on ne demande plus au mobile
+  // de l'envoyer (UX moins friction). Conservé pour traçabilité quand il
+  // est disponible (ex: mode direct_pay futur).
   phoneNumber: {
-    type: String,
-    required: true
+    type: String
   },
 
   customerName: {

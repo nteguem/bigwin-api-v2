@@ -18,15 +18,19 @@ const catchAsync = require('../../../utils/catchAsync');
 const SERVICE = 'cinetpay';
 
 exports.initiatePayment = catchAsync(async (req, res, next) => {
-  const { packageId, phoneNumber } = req.body;
+  const { packageId, phoneNumber, currency } = req.body;
   const appId = req.appId;
   const currentApp = req.currentApp;
 
   if (!appId || !currentApp) {
     return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
-  if (!packageId || !phoneNumber) {
-    return next(new AppError('packageId et phoneNumber sont requis', 400, ErrorCodes.VALIDATION_ERROR));
+  // phoneNumber est optionnel : le client le saisira sur la page hostée
+  // CinetPay (évite la double saisie). currency est optionnel aussi : si
+  // fourni par le mobile (depuis geo_config), on l'utilise; sinon le
+  // service tombe sur un fallback (1ère devise dispo dans la config app).
+  if (!packageId) {
+    return next(new AppError('packageId est requis', 400, ErrorCodes.VALIDATION_ERROR));
   }
   if (!currentApp?.payments?.cinetpay?.enabled) {
     return next(new AppError("CinetPay n'est pas activé pour cette application", 400, ErrorCodes.VALIDATION_ERROR));
@@ -50,7 +54,8 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
     packageId,
     phoneNumber,
     customerName,
-    email
+    email,
+    currency
   );
 
   res.status(201).json({

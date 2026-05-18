@@ -197,7 +197,28 @@ function mapStatus(rawStatus) {
   }
 }
 
-async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email) {
+/**
+ * Choisit la devise à utiliser :
+ *   1. `requestedCurrency` explicite (passé par le mobile depuis geo_config)
+ *   2. sinon détection via préfixe `phoneNumber`
+ *   3. sinon première devise avec credentials dans la config app
+ */
+function resolveCurrency(config, requestedCurrency, phoneNumber) {
+  if (requestedCurrency) {
+    return String(requestedCurrency).toUpperCase();
+  }
+  if (phoneNumber) {
+    return detectCurrencyFromPhone(phoneNumber);
+  }
+  for (const ccy of ['xof', 'xaf', 'gnf', 'cdf']) {
+    if (config[ccy]?.apiKey && config[ccy]?.apiPassword) {
+      return ccy.toUpperCase();
+    }
+  }
+  return 'XOF';
+}
+
+async function initiatePayment(appId, app, userId, packageId, phoneNumber, customerName, email, requestedCurrency) {
   const ctx = { service: SERVICE, category: 'initiate', appId, userId: String(userId), packageId };
   logger.info('initiate: start', ctx);
 
@@ -208,7 +229,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     throw new AppError('Package non trouvé', 404, ErrorCodes.NOT_FOUND);
   }
 
-  const currency = detectCurrencyFromPhone(phoneNumber);
+  const currency = resolveCurrency(config, requestedCurrency, phoneNumber);
   validateConfig(config, currency);
 
   const amount = packageDoc.pricing.get(currency);
@@ -227,7 +248,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     package: packageId,
     amount,
     currency,
-    phoneNumber,
+    phoneNumber: phoneNumber || undefined,
     customerName,
     description: designation,
     notifyUrl: notify_url,
@@ -250,12 +271,17 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     client_first_name: firstName,
     client_last_name: lastName,
     client_email: email || 'no-reply@bigwinpronos.com',
-    client_phone_number: phoneNumber,
     success_url,
     failed_url,
     notify_url,
     direct_pay: false
   };
+  // client_phone_number est optionnel pour la nouvelle API CinetPay quand
+  // direct_pay=false. On l'omet → le client le saisit sur la page hostée
+  // (évite la double saisie côté mobile).
+  if (phoneNumber) {
+    payload.client_phone_number = phoneNumber;
+  }
 
   try {
     const response = await callWithToken(appId, app, currency, (token) =>
