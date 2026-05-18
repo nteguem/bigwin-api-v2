@@ -1,29 +1,22 @@
 // routes/user/cinetpayRoutes.js
+//
+// Routes CinetPay — nouvelle API (api.cinetpay.co/v1).
+// Mountées à /payments/cinetpay dans routes/index.js.
+
 const express = require('express');
 const cinetpayController = require('../../controllers/user/cinetpayController');
 const userAuth = require('../../middlewares/user/userAuth');
 
 const router = express.Router();
 
-/**
- * Routes publiques pour les callbacks
- */
-// Webhook pour les notifications CinetPay (non protégé)
-router.post('/webhook', cinetpayController.webhook);
+// Routes publiques (callbacks CinetPay)
+router.post('/notify', cinetpayController.notify);
+router.get('/return', cinetpayController.paymentReturn);
+router.post('/return', cinetpayController.paymentReturn);
 
-// Page de retour après paiement (non protégé car l'utilisateur vient de CinetPay)
-router.get('/success', cinetpayController.paymentSuccess);
-router.post('/success', cinetpayController.paymentSuccess);
-
-/**
- * Routes protégées (authentification requise)
- */
+// Routes protégées (auth utilisateur)
 router.use(userAuth.protect);
-
-// Initier un paiement CinetPay
 router.post('/initiate', cinetpayController.initiatePayment);
-
-// Vérifier le statut d'un paiement
 router.get('/status/:transactionId', cinetpayController.checkStatus);
 
 module.exports = router;

@@ -58,15 +58,28 @@ const appSchema = new mongoose.Schema({
         default: false
       }
     },
+    // Nouvelle API CinetPay (api.cinetpay.co/v1) — OAuth 2.0 par compte/pays.
+    // 1 compte = 1 devise. Les devises inutilisées peuvent rester vides.
     cinetpay: {
-      apiUrl: String,
+      apiUrl: {
+        type: String,
+        default: 'https://api.cinetpay.co'
+      },
       xof: {
-        siteId: String,
-        secretKey: String,
+        apiKey: String,
+        apiPassword: String
       },
       xaf: {
-        siteId: String,
-        secretKey: String,
+        apiKey: String,
+        apiPassword: String
+      },
+      gnf: {
+        apiKey: String,
+        apiPassword: String
+      },
+      cdf: {
+        apiKey: String,
+        apiPassword: String
       },
       enabled: {
         type: Boolean,
