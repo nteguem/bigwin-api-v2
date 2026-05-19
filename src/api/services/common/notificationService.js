@@ -96,6 +96,58 @@ class NotificationService {
   }
 
   /**
+   * Envoyer une notification ciblée par External User ID OneSignal.
+   *
+   * À utiliser quand le Flutter a appelé `OneSignal.login(userMongoId)`
+   * après authentification → OneSignal mappe userId → playerIds en interne.
+   * Évite de stocker les playerId côté backend (collection Device).
+   *
+   * @param {String} appId
+   * @param {Array<String>} externalUserIds - ex: les `User._id` mongo string
+   * @param {Object} notification - { headings, contents, data, options }
+   */
+  async sendToExternalUserIds(appId, externalUserIds, notification) {
+    try {
+      const config = await this._getConfig(appId);
+      const ids = Array.isArray(externalUserIds) ? externalUserIds : [externalUserIds];
+      if (ids.length === 0) {
+        throw new AppError('externalUserIds vide', 400);
+      }
+
+      const payload = {
+        app_id: config.appId,
+        include_external_user_ids: ids,
+        // channel_for_external_user_ids requis depuis l'évolution OneSignal v2 :
+        // "push" cible le device push. "email"/"sms" pour les autres channels.
+        channel_for_external_user_ids: 'push',
+        headings: notification.headings || { en: 'Notification', fr: 'Notification' },
+        contents: notification.contents,
+        data: notification.data || {},
+        ...notification.options
+      };
+
+      const response = await this._makeRequest(config, 'notifications', 'POST', payload);
+
+      logger.info(`[${appId}] Notification envoyée à ${ids.length} external user(s)`, {
+        notificationId: response.id,
+        recipients: response.recipients,
+        externalIdSample: ids.slice(0, 3)
+      });
+      return response;
+    } catch (error) {
+      logger.error(`[${appId}] Erreur envoi notification externalUserIds:`, {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      const errorMessage = error.response?.data?.errors
+        ? JSON.stringify(error.response.data.errors)
+        : error.message;
+      throw new AppError(`Échec envoi notification (externalUserIds): ${errorMessage}`, 500);
+    }
+  }
+
+  /**
    * Envoyer une notification à tous les utilisateurs d'une app
    * @param {String} appId - ID de l'application
    * @param {Object} notification - Contenu de la notification
