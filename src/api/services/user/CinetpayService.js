@@ -168,12 +168,30 @@ function invalidateToken(appId, currency) {
   tokenCache.delete(cacheKey(appId, currency));
 }
 
+function isInvalidTokenError(error) {
+  // CinetPay renvoie 401 ET aussi 422 avec status=INVALID_TOKEN dans le
+  // body. Si on traite seulement le 401, les requêtes /v1/payment qui
+  // renvoient 422+INVALID_TOKEN font échouer la transaction sans retry.
+  if (error.response?.status === 401) return true;
+  const data = error.response?.data;
+  if (data?.status === 'INVALID_TOKEN' || data?.code === 1002) return true;
+  // Cas où c'est dans details (renvoyé par /v1/payment quand le token
+  // est invalide au moment du init de transaction)
+  if (data?.details?.status === 'INVALID_TOKEN' || data?.details?.code === 1002) return true;
+  return false;
+}
+
 async function callWithToken(appId, app, currency, requestFn) {
   let token = await getAccessToken(appId, app, currency);
   try {
     return await requestFn(token);
   } catch (error) {
-    if (error.response?.status === 401) {
+    if (isInvalidTokenError(error)) {
+      logger.warn('callWithToken: invalid token detected, refreshing', {
+        service: SERVICE, category: 'oauth', appId, currency,
+        httpStatus: error.response?.status,
+        cinetpayStatus: error.response?.data?.status || error.response?.data?.details?.status
+      });
       invalidateToken(appId, currency);
       token = await getAccessToken(appId, app, currency);
       return await requestFn(token);
@@ -288,13 +306,13 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
   await transaction.save();
 
   // CinetPay impose client_first_name ET client_last_name requis,
-  // chacun min 2 chars. Mais on ne veut RIEN concaténer au pseudo du
-  // client dans le backoffice PSP.
-  //   - Si le pseudo a 2+ mots (ex: "Roland Nteguem") : split normal.
-  //   - Si le pseudo est en 1 mot (ex: "adekunle1") : pseudo entier
-  //     dans first_name, et "  " (2 espaces) dans last_name → satisfait
-  //     la validation API mais le backoffice affiche juste le pseudo
-  //     (les espaces de queue sont trimmés à l'affichage).
+  // chacun min 2 chars NON-blancs (espaces trimmés avant validation).
+  //   - Si le pseudo a 2+ mots (ex: "Roland Nteguem") : split classique
+  //     → display "Roland Nteguem".
+  //   - Si le pseudo est en 1 mot (ex: "adekunle1") : on duplique le
+  //     pseudo dans les 2 champs. Le backoffice affichera "adekunle1
+  //     adekunle1" — c'est UNIQUEMENT le nom du client, aucune marque
+  //     ou texte foreign concaténé.
   const fullName = String(customerName || 'Utilisateur').trim();
   const nameParts = fullName.split(/\s+/);
   let firstName, lastName;
@@ -303,10 +321,10 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     lastName = nameParts.slice(1).join(' ');
   } else {
     firstName = fullName;
-    lastName = '  ';
+    lastName = fullName;
   }
   firstName = firstName.length < 2 ? firstName.padEnd(2, '_') : firstName.slice(0, 255);
-  lastName = lastName.length < 2 ? lastName.padEnd(2, ' ') : lastName.slice(0, 255);
+  lastName = lastName.length < 2 ? lastName.padEnd(2, '_') : lastName.slice(0, 255);
 
   const payload = {
     currency,
