@@ -146,7 +146,18 @@ const packageSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  
+
+  // Alias commercial envoyé aux PSP comme libellé de la transaction
+  // (champ `designation`/`description`). Référence vers
+  // proxidream.books._id (stocké en string, pas ObjectId car la
+  // collection books utilise des _id string).
+  // Quand null, le service tombe sur le nom du package lui-même.
+  aliasBookId: {
+    type: String,
+    default: null,
+    trim: true
+  },
+
   createdAt: {
     type: Date,
     default: Date.now
@@ -286,15 +297,18 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
 packageSchema.methods.toJSON = function() {
   const packageObj = this.toObject();
   delete packageObj.__v;
-  
+  // Strict : ne JAMAIS exposer aliasBookId côté client (mobile/admin),
+  // c'est un détail d'implémentation backend pour les libellés PSP.
+  delete packageObj.aliasBookId;
+
   if (packageObj.pricing instanceof Map) {
     packageObj.pricing = Object.fromEntries(packageObj.pricing);
   }
-  
+
   if (packageObj.economy instanceof Map) {
     packageObj.economy = Object.fromEntries(packageObj.economy);
   }
-  
+
   return packageObj;
 };
 
