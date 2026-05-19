@@ -287,13 +287,26 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
   });
   await transaction.save();
 
-  // Le pseudo user est souvent en un seul mot (ex: "adekunle1"). On le
-  // met en firstName et on utilise un nom de famille neutre cohérent
-  // avec le cover story "vente de livres" (Lecteur). PAS de marque
-  // BigWin/Proxidream/etc. ici — ce champ apparait dans le backoffice PSP.
-  const nameParts = String(customerName || 'Utilisateur').trim().split(/\s+/);
-  const firstName = (nameParts[0] || 'Utilisateur').padEnd(2, '_').slice(0, 255);
-  const lastName = (nameParts.slice(1).join(' ') || 'Lecteur').padEnd(2, '_').slice(0, 255);
+  // CinetPay impose client_first_name ET client_last_name requis,
+  // chacun min 2 chars. Mais on ne veut RIEN concaténer au pseudo du
+  // client dans le backoffice PSP.
+  //   - Si le pseudo a 2+ mots (ex: "Roland Nteguem") : split normal.
+  //   - Si le pseudo est en 1 mot (ex: "adekunle1") : pseudo entier
+  //     dans first_name, et "  " (2 espaces) dans last_name → satisfait
+  //     la validation API mais le backoffice affiche juste le pseudo
+  //     (les espaces de queue sont trimmés à l'affichage).
+  const fullName = String(customerName || 'Utilisateur').trim();
+  const nameParts = fullName.split(/\s+/);
+  let firstName, lastName;
+  if (nameParts.length >= 2) {
+    firstName = nameParts[0];
+    lastName = nameParts.slice(1).join(' ');
+  } else {
+    firstName = fullName;
+    lastName = '  ';
+  }
+  firstName = firstName.length < 2 ? firstName.padEnd(2, '_') : firstName.slice(0, 255);
+  lastName = lastName.length < 2 ? lastName.padEnd(2, ' ') : lastName.slice(0, 255);
 
   const payload = {
     currency,
