@@ -340,12 +340,14 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     notify_url,
     direct_pay: false
   };
-  // client_phone_number est optionnel pour la nouvelle API CinetPay quand
-  // direct_pay=false. On l'omet → le client le saisit sur la page hostée
-  // (évite la double saisie côté mobile).
-  if (phoneNumber) {
-    payload.client_phone_number = phoneNumber;
-  }
+  // client_phone_number est OPTIONNEL pour CinetPay quand direct_pay=false.
+  // On NE LE TRANSMET JAMAIS au PSP : le client le saisit sur la page
+  // hostée. Pourquoi ne pas le passer même si on l'a ?
+  //   - Évite "client_phone_number doit contenir au moins 8 caractères"
+  //     (pseudos courts d'anciens APK)
+  //   - Évite "client_phone_number is not mobile" (numéros fixes)
+  // Le `phoneNumber` reste stocké côté nous (transaction.phoneNumber)
+  // pour reporting/support si fourni par le mobile.
 
   try {
     const response = await callWithToken(appId, app, currency, (token) =>
