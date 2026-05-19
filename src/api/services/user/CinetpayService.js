@@ -287,9 +287,13 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
   });
   await transaction.save();
 
-  const nameParts = String(customerName || 'User').trim().split(/\s+/);
-  const firstName = (nameParts[0] || 'User').padEnd(2, '_');
-  const lastName = (nameParts.slice(1).join(' ') || 'BigWin').padEnd(2, '_');
+  // Le pseudo user est souvent en un seul mot (ex: "adekunle1"). On le
+  // met en firstName et on utilise un nom de famille neutre cohérent
+  // avec le cover story "vente de livres" (Lecteur). PAS de marque
+  // BigWin/Proxidream/etc. ici — ce champ apparait dans le backoffice PSP.
+  const nameParts = String(customerName || 'Utilisateur').trim().split(/\s+/);
+  const firstName = (nameParts[0] || 'Utilisateur').padEnd(2, '_').slice(0, 255);
+  const lastName = (nameParts.slice(1).join(' ') || 'Lecteur').padEnd(2, '_').slice(0, 255);
 
   const payload = {
     currency,
