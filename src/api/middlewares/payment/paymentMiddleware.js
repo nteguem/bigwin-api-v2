@@ -102,13 +102,31 @@ async function handleSuccessfulTransaction(appId, transaction) {
       return null;
     }
 
-    const subscription = await subscriptionService.createSubscription(
-      appId,
-      transaction.user,
-      transaction.package,
-      transaction.currency,
-      transaction._id
-    );
+    let subscription;
+    try {
+      subscription = await subscriptionService.createSubscription(
+        appId,
+        transaction.user,
+        transaction.package,
+        transaction.currency,
+        transaction._id
+      );
+    } catch (subErr) {
+      // Rollback du claim : createSubscription a échoué → on remet
+      // processed=false pour qu'un retry (webhook ou checkStatus) puisse
+      // re-provisionner. Sans ce rollback, l'utilisateur a payé mais
+      // n'aura JAMAIS son abonnement (l'idempotency guard bloquerait
+      // tous les retries) — perte sèche, irrécupérable.
+      await transaction.constructor.updateOne(
+        { _id: transaction._id },
+        { $set: { processed: false } }
+      ).catch(() => {});
+      logger.error('createSubscription failed — claim rolled back (processed=false)', {
+        ...ctx,
+        message: subErr.message,
+      });
+      throw subErr;
+    }
 
     logger.info('subscription created', {
       ...ctx,
