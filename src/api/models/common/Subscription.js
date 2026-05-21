@@ -186,7 +186,10 @@ subscriptionSchema.post('save', async function (doc) {
               subscription: doc,
               package: pkg,
               app,
-              isGift: false, // achat réel, pas cadeau
+              // isGift=true ⇒ forfait OFFERT (ex: gagné à la roue de la chance)
+              // → mail "Forfait offert" au lieu du mail d'achat. Les achats
+              // réels gardent isGift=false (valeur par défaut du champ).
+              isGift: doc.isGift === true,
             });
           } catch (mailErr) {
             logger.error(`[Subscription mail] Erreur envoi mail user=${doc.user} : ${mailErr.message}`);

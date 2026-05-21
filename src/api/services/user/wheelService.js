@@ -228,6 +228,9 @@ async function spin(appId, userId, { currency = 'XAF', lang = 'fr', clientReques
           pricing: { amount: 0, currency: 'XAF' },
           status: 'active',
           paymentProvider: 'ADS',
+          // Gagné à la roue → c'est une OFFRE, pas un achat : isGift=true fait
+          // envoyer le mail "Forfait offert" (cf. hook post-save Subscription).
+          isGift: true,
           paymentReference: `wheel:${appId}:${userId}:${Date.now()}`
         });
         subId = sub._id;
