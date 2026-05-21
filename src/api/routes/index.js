@@ -209,7 +209,7 @@ router.get('/', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'proxidream API v2 - Multi-Tenant',
-    version: '2.0.0',
+    version: '2.1.0-wheel',
     multiTenant: true,
     info: {
       appId: req.appId || 'non spécifié',
