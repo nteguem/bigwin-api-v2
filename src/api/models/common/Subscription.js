@@ -72,7 +72,8 @@ const subscriptionSchema = new mongoose.Schema({
   
   paymentProvider: {
     type: String,
-    enum: ['MOBILE_MONEY', 'GOOGLE_PLAY', 'ADMIN'],
+    // 'ADS' : abonnement gagné via la roue de la chance (lot subscription).
+    enum: ['MOBILE_MONEY', 'GOOGLE_PLAY', 'ADMIN', 'ADS'],
     default: 'MOBILE_MONEY',
     required: true
   },
