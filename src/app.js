@@ -68,6 +68,11 @@ app.use(
       res.set('Cache-Control', 'public, max-age=604800, immutable');
       // Empêche le navigateur d'interpréter un fichier inattendu (sécurité).
       res.set('X-Content-Type-Options', 'nosniff');
+      // Helmet pose par défaut `Cross-Origin-Resource-Policy: same-origin`,
+      // ce qui empêche le back-office (autre origin) et tout client web
+      // d'afficher ces images/fichiers dans une balise <img>. On autorise
+      // explicitement le chargement cross-origin pour ces assets publics.
+      res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     },
   })
 );

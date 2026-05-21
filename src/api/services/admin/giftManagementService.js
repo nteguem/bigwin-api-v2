@@ -8,6 +8,7 @@ const GiftTier = require('../../models/common/GiftTier');
 const UserGiftUnlock = require('../../models/common/UserGiftUnlock');
 const Subscription = require('../../models/common/Subscription');
 const Package = require('../../models/common/Package');
+const App = require('../../models/common/App');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
 const TIER_POPULATE = { path: 'tier' };
@@ -62,12 +63,73 @@ async function ensureTierExists(tierId) {
   return tier;
 }
 
+/**
+ * Création d'un cadeau, éventuellement sur PLUSIEURS apps en une fois.
+ *
+ * `payload.appIds` (optionnel) : liste de codes app cibles. Si absent ou
+ * vide, on retombe sur l'app du contexte (`appId`).
+ *
+ * Le `tier` est une référence GLOBALE (GiftTier n'est pas scopé par app) :
+ * le même ObjectId est donc valide pour toutes les apps — pas de mapping.
+ *
+ * Retourne TOUJOURS un tableau de gifts créés (1 par app).
+ */
 async function createGift({ appId, payload }) {
   await ensureTierExists(payload.tier);
 
-  const gift = await Gift.create({ ...payload, appId });
-  await gift.populate(TIER_POPULATE);
-  return gift;
+  const { appIds, ...giftData } = payload;
+  const targetApps = Array.isArray(appIds) && appIds.length > 0
+    ? [...new Set(appIds.map((a) => String(a).toLowerCase().trim()).filter(Boolean))]
+    : [appId];
+
+  if (targetApps.length === 0) {
+    throw new AppError('Aucune app cible', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+
+  // Garde-fou : chaque app cible doit exister en BD — sinon on créerait
+  // un Gift orphelin (jamais listé, pollue la collection).
+  const knownApps = await App.find({ appId: { $in: targetApps } }).distinct('appId');
+  const unknownApps = targetApps.filter((a) => !knownApps.includes(a));
+  if (unknownApps.length > 0) {
+    throw new AppError(
+      `App(s) inconnue(s) : ${unknownApps.join(', ')}`,
+      400,
+      ErrorCodes.VALIDATION_ERROR
+    );
+  }
+
+  const created = [];
+  for (const targetApp of targetApps) {
+    const gift = await Gift.create({ ...giftData, appId: targetApp });
+    await gift.populate(TIER_POPULATE);
+    created.push(gift);
+  }
+  return created;
+}
+
+/**
+ * Réordonnancement en lot des cadeaux d'une app.
+ * @param {Array<{id:String, sortOrder:Number}>} items
+ * Toutes les écritures sont scopées sur `appId` → impossible de toucher
+ * les cadeaux d'une autre app même avec un id forgé.
+ */
+async function reorderGifts({ appId, items }) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new AppError('items (tableau) requis', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  const ops = items
+    .filter((it) => it && it.id)
+    .map((it) => ({
+      updateOne: {
+        filter: { _id: it.id, appId },
+        update: { $set: { sortOrder: Number(it.sortOrder) || 0 } },
+      },
+    }));
+  if (ops.length === 0) {
+    throw new AppError('Aucun item valide à réordonner', 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  await Gift.bulkWrite(ops);
+  return listGifts({ appId });
 }
 
 async function updateGift({ appId, giftId, payload }) {
@@ -231,6 +293,7 @@ module.exports = {
   listGifts,
   getGift,
   createGift,
+  reorderGifts,
   updateGift,
   deleteGift,
   toggleGift,

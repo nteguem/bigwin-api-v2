@@ -26,12 +26,31 @@ exports.getGift = catchAsync(async (req, res) => {
 
 exports.createGift = catchAsync(async (req, res) => {
   const appId = req.appId;
-  const gift = await giftService.createGift({ appId, payload: req.body });
+  // createGift retourne TOUJOURS un tableau (1 gift par app cible).
+  const gifts = await giftService.createGift({ appId, payload: req.body });
 
   res.status(201).json({
     success: true,
-    message: 'Cadeau créé avec succès',
-    data: { gift },
+    message: gifts.length > 1
+      ? `Cadeau créé sur ${gifts.length} apps`
+      : 'Cadeau créé avec succès',
+    data: {
+      gifts,
+      count: gifts.length,
+      // Rétrocompat : `gift` = le premier (app du contexte)
+      gift: gifts[0],
+    },
+  });
+});
+
+exports.reorderGifts = catchAsync(async (req, res) => {
+  const appId = req.appId;
+  const gifts = await giftService.reorderGifts({ appId, items: req.body.items });
+
+  res.status(200).json({
+    success: true,
+    message: 'Ordre mis à jour',
+    data: { gifts, count: gifts.length },
   });
 });
 

@@ -10,6 +10,9 @@ router
   .get(giftController.getAllGifts) // GET /api/admin/gifts
   .post(giftController.createGift); // POST /api/admin/gifts
 
+// Réordonnancement en lot — AVANT /:id pour ne pas être capté par /:id
+router.route('/reorder').patch(giftController.reorderGifts); // PATCH /api/admin/gifts/reorder
+
 router
   .route('/:id')
   .get(giftController.getGift) // GET /api/admin/gifts/:id
