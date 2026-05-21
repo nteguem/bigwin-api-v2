@@ -69,11 +69,6 @@ const cinetpayTransactionSchema = new mongoose.Schema({
   },
 
   description: String,
-  // Libellé alias envoyé au PSP (titre d'un livre proxidream). Si null,
-  // le `description` ci-dessus est ce qui a été envoyé.
-  aliasDesignation: { type: String, default: null },
-  // Référence vers proxidream.books._id (string) — pour traçabilité.
-  linkedBookId: { type: String, default: null },
   paymentMethod: String,
   paymentDate: Date,
 

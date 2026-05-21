@@ -14,7 +14,6 @@ const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const CinetpayTransaction = require('../../models/user/CinetpayTransaction');
 const Package = require('../../models/common/Package');
-const { getBookById } = require('../integrations/proxidreamBooks');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const logger = require('../../../core/logger');
 
@@ -265,26 +264,8 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
   const merchantTransactionId = generateMerchantTransactionId();
   const { notify_url, success_url, failed_url } = generateUrls();
 
-  // Libellé "vrai" — utilisé en interne (DB, logs, reporting).
-  const realDesignation = `${packageDoc.name?.fr || packageDoc.name?.en || 'Package'} - ${packageDoc.duration} jours`;
-
-  // Libellé envoyé au PSP. Si le package a un `aliasBookId`, on swap pour
-  // le titre du livre (alias commercial). Sinon fallback sur le vrai nom.
-  let designation = realDesignation;
-  let linkedBookId = null;
-  if (packageDoc.aliasBookId) {
-    const book = await getBookById(packageDoc.aliasBookId);
-    if (book?.title) {
-      designation = book.title;
-      // book._id est un ObjectId — cast en string pour matcher le type
-      // String du champ linkedBookId (et logger proprement).
-      linkedBookId = String(book._id);
-      logger.info('initiate: alias applied', {
-        service: SERVICE, category: 'initiate', appId,
-        realDesignation, aliasDesignation: designation, linkedBookId
-      });
-    }
-  }
+  // Libellé envoyé au PSP = nom du package + durée.
+  const designation = `${packageDoc.name?.fr || packageDoc.name?.en || 'Package'} - ${packageDoc.duration} jours`;
 
   const transaction = new CinetpayTransaction({
     appId,
@@ -295,9 +276,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, custo
     currency,
     phoneNumber: phoneNumber || undefined,
     customerName,
-    description: realDesignation,
-    aliasDesignation: linkedBookId ? designation : null,
-    linkedBookId: linkedBookId,
+    description: designation,
     notifyUrl: notify_url,
     successUrl: success_url,
     failedUrl: failed_url,
