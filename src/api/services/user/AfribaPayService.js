@@ -102,6 +102,34 @@ function _sanitizeAfribapayPhone(phone) {
 }
 
 /**
+ * Translittère un texte en ASCII propre pour le `reference_id` AfribaPay.
+ * L'API AfribaPay rejette les accents (é, è, à…), les apostrophes et la
+ * ponctuation non-ASCII. On nettoie :
+ *   - accents décomposés (NFD) puis diacritiques retirés  → é devient e
+ *   - apostrophes droites ET typographiques               → espace
+ *   - tout autre caractère hors [A-Za-z0-9 _-]            → espace
+ *   - espaces multiples compressés, trim, longueur bornée
+ * Ex : "L'Élan - 7 jours" → "L Elan - 7 jours"
+ */
+function sanitizeAfribapayText(raw) {
+  return String(raw || '')
+    .normalize('NFD')
+    .replace(/['’‘`´]/g, ' ')  // apostrophes → espace (AVANT le strip)
+    .replace(/[^A-Za-z0-9 _-]/g, '')  // accents décomposés + reste non-ASCII → supprimés
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100);
+}
+
+/**
+ * Construit le reference_id AfribaPay à partir d'un package, sanitizé.
+ */
+function buildAfribapayReference(packageDoc) {
+  const raw = `${packageDoc.name?.fr || packageDoc.name?.en || 'Package'} - ${packageDoc.duration} jours`;
+  return sanitizeAfribapayText(raw) || `Package ${packageDoc.duration}j`;
+}
+
+/**
  * Valide qu'un couple opérateur / pays / devise existe dans afribapayData.json.
  *
  * Pourquoi : le mobile peut envoyer un opérateur invalide pour le pays choisi
@@ -620,7 +648,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
       currency,
       order_id: orderId,
       merchant_key: config.merchantKey,
-      reference_id: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
+      reference_id: buildAfribapayReference(packageDoc),
       lang: 'fr',
       notify_url,
       return_url,
@@ -687,7 +715,7 @@ async function initiatePayment(appId, app, userId, packageId, phoneNumber, opera
       amount: responseData.amount || amount,
       currency,
       merchantKey: config.merchantKey,
-      referenceId: `${packageDoc.name.fr} - ${packageDoc.duration} jours`,
+      referenceId: buildAfribapayReference(packageDoc),
       notifyUrl: notify_url,
       returnUrl: return_url,
       cancelUrl: cancel_url,
