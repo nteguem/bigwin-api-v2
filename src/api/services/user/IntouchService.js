@@ -1,17 +1,17 @@
 // services/user/IntouchService.js
 //
 // Integration InTouch / TouchPay — Paiement Marchand (C2B) via API directe.
-//   - PUT /apidist/sec/touchpayapi/{Agence}/transaction  → init paiement (Digest auth)
+//   - PUT /apidist/sec/touchpayapi/{Agence}/transaction  → init paiement (Basic auth)
 //   - POST /apidist/sec/{Agence}/check_status            → verifier statut (Basic auth)
 //
 // Particularites :
-//   - 2 niveaux d'auth : HTTP (Basic/Digest avec basicUser+basicPassword)
-//     ET applicatif (partner_id + login_api + password_api dans le body).
+//   - 2 niveaux d'auth : HTTP Basic (basicUser+basicPassword, hex 64 chars fournis
+//     par InTouch dans l'espace marchand) ET applicatif (partner_id + login_api +
+//     password_api dans le body).
 //   - Le webhook InTouch n'est PAS signe — on rappelle systematiquement
 //     check_status pour confirmer (cf. controller).
 
 const axios = require('axios');
-const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const IntouchTransaction = require('../../models/user/IntouchTransaction');
 const Package = require('../../models/common/Package');
@@ -162,90 +162,6 @@ function mapApiStatus(raw) {
 }
 
 // ---------------------------------------------
-//  HTTP Digest auth — implementation manuelle (axios ne le gere pas)
-// ---------------------------------------------
-function parseDigestChallenge(header) {
-  const out = {};
-  const params = String(header).replace(/^Digest\s+/i, '');
-  const regex = /(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))/g;
-  let m;
-  while ((m = regex.exec(params)) !== null) {
-    out[m[1]] = m[2] !== undefined ? m[2] : m[3];
-  }
-  return out;
-}
-
-function buildDigestHeader({ method, uri, username, password, realm, nonce, qop, opaque, algorithm }) {
-  const md5 = (s) => crypto.createHash('md5').update(s).digest('hex');
-  const ha1 = md5(`${username}:${realm}:${password}`);
-  const ha2 = md5(`${method}:${uri}`);
-  const nc = '00000001';
-  const cnonce = crypto.randomBytes(8).toString('hex');
-  const response = qop
-    ? md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
-    : md5(`${ha1}:${nonce}:${ha2}`);
-
-  const parts = [
-    `Digest username="${username}"`,
-    `realm="${realm}"`,
-    `nonce="${nonce}"`,
-    `uri="${uri}"`,
-    `algorithm=${algorithm || 'MD5'}`,
-    `response="${response}"`
-  ];
-  if (qop)    parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce="${cnonce}"`);
-  if (opaque) parts.push(`opaque="${opaque}"`);
-  return parts.join(', ');
-}
-
-/**
- * Effectue une requete HTTP avec Digest auth (challenge-response).
- *   1. Premier appel sans auth → 401 + WWW-Authenticate: Digest ...
- *   2. Replay avec Authorization: Digest ... calcule.
- */
-async function digestRequest(method, url, payload, username, password) {
-  let challenge;
-  try {
-    const resp = await axios.request({
-      method, url, data: payload,
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    return resp;
-  } catch (err) {
-    if (err.response?.status !== 401) throw err;
-    const wwwAuth = err.response.headers['www-authenticate'];
-    if (!wwwAuth || !/^digest/i.test(wwwAuth)) {
-      throw new IntouchError('Pas de challenge Digest dans la 401', 401, err.response.data);
-    }
-    challenge = parseDigestChallenge(wwwAuth);
-  }
-
-  const u = new URL(url);
-  const uri = u.pathname + u.search;
-  const authHeader = buildDigestHeader({
-    method:    method.toUpperCase(),
-    uri,
-    username,
-    password,
-    realm:     challenge.realm,
-    nonce:     challenge.nonce,
-    qop:       challenge.qop,
-    opaque:    challenge.opaque,
-    algorithm: challenge.algorithm
-  });
-
-  return axios.request({
-    method, url, data: payload,
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': authHeader
-    },
-    timeout: 30000
-  });
-}
-
-// ---------------------------------------------
 //  Generer les URLs callback
 // ---------------------------------------------
 function generateUrls() {
@@ -257,7 +173,7 @@ function generateUrls() {
 
 // ---------------------------------------------
 //  INITIER UN PAIEMENT
-//  PUT /touchpayapi/{Agence}/transaction (Digest auth)
+//  PUT /touchpayapi/{Agence}/transaction (Basic auth)
 //  → push USSD au client, statut final via webhook + check_status
 // ---------------------------------------------
 async function initiatePayment(appId, app, user, packageId, phoneNumber, operator, requestedCountry) {
@@ -360,7 +276,11 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
       serviceCode
     };
 
-    const response = await digestRequest('PUT', url, payload, config.basicUser, config.basicPassword);
+    const response = await axios.put(url, payload, {
+      headers: { 'Content-Type': 'application/json' },
+      auth:    { username: config.basicUser, password: config.basicPassword },
+      timeout: 30000
+    });
     console.log('[InTouch] Reponse init:', response.data);
     const data = response.data || {};
 
