@@ -93,6 +93,25 @@ const appSchema = new mongoose.Schema({
       sandboxApiUrl: String,
       webhookSecret: String,
       enabled:       { type: Boolean, default: false }
+    },
+
+    // InTouch / TouchPay e-marchand — Paiement Marchand multi-pays.
+    // Cf. https://developers.intouchgroup.net/
+    // Chaque pays = 1 compte e-marchand InTouch distinct (agence/partnerId/credentials
+    // propres). On stocke la liste des configs par pays dans `configs[]`.
+    intouch: {
+      apiUrl:  { type: String, default: 'https://apidist.gutouch.net/apidist/sec' },
+      enabled: { type: Boolean, default: false },     // master switch (toggle global InTouch)
+      configs: [{
+        countryCode:   { type: String, trim: true, uppercase: true, required: true },
+        agence:        { type: String, trim: true, required: true },
+        partnerId:     { type: String, trim: true, required: true },
+        loginApi:      { type: String, trim: true, required: true },
+        passwordApi:   { type: String, trim: true, required: true },
+        basicUser:     { type: String, trim: true, required: true },
+        basicPassword: { type: String, trim: true, required: true },
+        enabled:       { type: Boolean, default: true }
+      }]
     }
   },
 
@@ -163,6 +182,29 @@ appSchema.methods.getCinetpayConfig = function () {
   };
 };
 
+// Retourne la config InTouch pour un pays donne (ou null si pas trouvee/disabled).
+// Le master switch `enabled` doit aussi etre actif. La config retournee merge
+// la racine (apiUrl) et l'entree de `configs[]` du pays demande.
+appSchema.methods.getIntouchConfig = function (countryCode) {
+  const root = this.payments?.intouch;
+  if (!root?.enabled) return { enabled: false };
+  const cc = String(countryCode || '').toUpperCase();
+  if (!cc) return { enabled: false };
+  const found = (root.configs || []).find(c => c.countryCode === cc && c.enabled);
+  if (!found) return { enabled: false };
+  return {
+    enabled:       true,
+    apiUrl:        root.apiUrl || 'https://apidist.gutouch.net/apidist/sec',
+    countryCode:   found.countryCode,
+    agence:        found.agence,
+    partnerId:     found.partnerId,
+    loginApi:      found.loginApi,
+    passwordApi:   found.passwordApi,
+    basicUser:     found.basicUser,
+    basicPassword: found.basicPassword
+  };
+};
+
 // toJSON - masquer les champs sensibles
 appSchema.methods.toJSON = function () {
   const app = this.toObject();
@@ -180,6 +222,15 @@ appSchema.methods.toJSON = function () {
         });
       }
     });
+
+    // Cas particulier InTouch : credentials a l'interieur de configs[].
+    if (Array.isArray(app.payments?.intouch?.configs)) {
+      app.payments.intouch.configs.forEach(cfg => {
+        ['loginApi', 'passwordApi', 'basicUser', 'basicPassword'].forEach(f => {
+          delete cfg[f];
+        });
+      });
+    }
   }
 
   delete app.__v;
