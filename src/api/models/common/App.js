@@ -11,13 +11,13 @@ const appSchema = new mongoose.Schema({
     trim: true,
     match: /^[a-z0-9-]+$/
   },
-  
+
   name: {
     type: String,
     required: true,
     trim: true
   },
-  
+
   displayName: {
     fr: {
       type: String,
@@ -28,12 +28,12 @@ const appSchema = new mongoose.Schema({
       required: true
     }
   },
-  
+
   description: {
     fr: String,
     en: String
   },
-  
+
   googlePlay: {
     packageName: {
       type: String,
@@ -42,12 +42,12 @@ const appSchema = new mongoose.Schema({
     },
     serviceAccountKeyPath: String
   },
-  
+
   oneSignal: {
     appId: String,
     restApiKey: String
   },
-  
+
   payments: {
     smobilpay: {
       apiUrl: String,
@@ -143,9 +143,28 @@ const appSchema = new mongoose.Schema({
         type: Boolean,
         default: false
       }
+    },
+
+    // InTouch / TouchPay e-marchand — Paiement Marchand multi-pays.
+    // Cf. https://developers.intouchgroup.net/
+    // Chaque pays = 1 compte e-marchand InTouch distinct (agence/partnerId/credentials
+    // propres). On stocke la liste des configs par pays dans `configs[]`.
+    intouch: {
+      apiUrl:  { type: String, default: 'https://apidist.gutouch.net/apidist/sec' },
+      enabled: { type: Boolean, default: false },     // master switch (toggle global InTouch)
+      configs: [{
+        countryCode:   { type: String, trim: true, uppercase: true, required: true },
+        agence:        { type: String, trim: true, required: true },
+        partnerId:     { type: String, trim: true, required: true },
+        loginApi:      { type: String, trim: true, required: true },
+        passwordApi:   { type: String, trim: true, required: true },
+        basicUser:     { type: String, trim: true, required: true },
+        basicPassword: { type: String, trim: true, required: true },
+        enabled:       { type: Boolean, default: true }
+      }]
     }
   },
-  
+
   googleAuth: {
     clientId: {
       type: String,
@@ -165,7 +184,7 @@ const appSchema = new mongoose.Schema({
       comment: 'Activer/désactiver Google Sign-In pour cette app'
     }
   },
-  
+
   admobAppId: {
     type: String,
     default: null,
@@ -227,17 +246,17 @@ const appSchema = new mongoose.Schema({
     trim: true,
     lowercase: true,
   },
-  
+
   isActive: {
     type: Boolean,
     default: true
   },
-  
+
   createdAt: {
     type: Date,
     default: Date.now
   },
-  
+
   updatedAt: {
     type: Date,
     default: Date.now
@@ -285,9 +304,32 @@ appSchema.methods.getKorapayConfig = function() {
   };
 };
 
+// Retourne la config InTouch pour un pays donne (ou { enabled:false } si manquant/disabled).
+// Le master switch `enabled` doit aussi etre actif. La config retournee merge
+// la racine (apiUrl) et l'entree de `configs[]` du pays demande.
+appSchema.methods.getIntouchConfig = function (countryCode) {
+  const root = this.payments?.intouch;
+  if (!root?.enabled) return { enabled: false };
+  const cc = String(countryCode || '').toUpperCase();
+  if (!cc) return { enabled: false };
+  const found = (root.configs || []).find(c => c.countryCode === cc && c.enabled);
+  if (!found) return { enabled: false };
+  return {
+    enabled:       true,
+    apiUrl:        root.apiUrl || 'https://apidist.gutouch.net/apidist/sec',
+    countryCode:   found.countryCode,
+    agence:        found.agence,
+    partnerId:     found.partnerId,
+    loginApi:      found.loginApi,
+    passwordApi:   found.passwordApi,
+    basicUser:     found.basicUser,
+    basicPassword: found.basicPassword
+  };
+};
+
 appSchema.methods.toJSON = function() {
   const app = this.toObject();
-  
+
   if (app.googlePlay) {
     delete app.googlePlay.serviceAccountKeyPath;
   }
@@ -309,11 +351,20 @@ appSchema.methods.toJSON = function() {
         }
       }
     });
+
+    // Cas particulier InTouch : credentials a l'interieur de configs[].
+    if (Array.isArray(app.payments?.intouch?.configs)) {
+      app.payments.intouch.configs.forEach(cfg => {
+        ['loginApi', 'passwordApi', 'basicUser', 'basicPassword'].forEach(f => {
+          delete cfg[f];
+        });
+      });
+    }
   }
-  
+
   // Les Client IDs Google ne sont pas sensibles (publics dans les apps)
   // Donc pas besoin de les masquer
-  
+
   delete app.__v;
   return app;
 };

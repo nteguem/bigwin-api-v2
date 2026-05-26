@@ -131,6 +131,7 @@ const fedapayRoutes = require('./user/fedapayRoutes');
 const userGiftRoutes = require('./user/giftRoutes');
 const userAffiliateRoutes = require('./user/affiliateRoutes');
 const userAccessRoutes = require('./user/accessRoutes');
+const intouchRoutes = require('./user/intouchRoutes');
 
 
 // ===== ROUTES DE PAIEMENT =====
@@ -141,6 +142,7 @@ router.use('/payments/afribapay', identifyAppOptional, afribaPayRoutes);
 router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
 router.use('/payments/korapay', korapayRoutes);
 router.use('/payments/fedapay', identifyAppOptional, fedapayRoutes);
+router.use('/payments/intouch', identifyAppOptional, intouchRoutes);
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);
@@ -232,7 +234,8 @@ router.get('/', (req, res) => {
         cinetpay: 'POST /payments/cinetpay/initiate - Paiement CinetPay',
         afribapay: 'POST /payments/afribapay/initiate - Paiement AfribaPay',
         flutterwave: 'POST /payments/flutterwave/initiate - Paiement Flutterwave Mobile Money',
-        korapay: 'POST /payments/korapay/initiate - Paiement KoraPay' 
+        korapay: 'POST /payments/korapay/initiate - Paiement KoraPay',
+        intouch: 'POST /payments/intouch/initiate - Paiement InTouch / TouchPay (push USSD MTN/Orange CM)'
       }
     }
   });
