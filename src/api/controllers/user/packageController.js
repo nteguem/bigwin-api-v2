@@ -30,7 +30,7 @@ exports.getAvailablePackages = catchAsync(async (req, res, next) => {
     appId: { $in: [appId, "shared"] }, // ← Packages de l'app + packages shared
     isActive: true
   })
-    .populate('categories', 'name description isVip')
+    .populate('categories', 'name description isVip icon')
     .populate('formationId')
     .populate('giftTier', 'key label emoji color displayOrder');
 
@@ -83,7 +83,7 @@ exports.getPackage = catchAsync(async (req, res, next) => {
     _id: req.params.id,
     appId: { $in: [appId, "shared"] },
     isActive: true
-  }).populate('categories', 'name description isVip')
+  }).populate('categories', 'name description isVip icon')
     .populate('formationId')
     .populate('giftTier', 'key label emoji color displayOrder');
 
@@ -141,7 +141,7 @@ exports.getPackagesByCategory = catchAsync(async (req, res, next) => {
     appId: { $in: [appId, "shared"] },
     isActive: true,
     categories: categoryId
-  }).populate('categories', 'name description isVip')
+  }).populate('categories', 'name description isVip icon')
     .populate('formationId')
     .populate('giftTier', 'key label emoji color displayOrder');
 

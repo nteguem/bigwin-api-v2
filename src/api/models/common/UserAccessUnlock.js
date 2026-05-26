@@ -55,13 +55,15 @@ const UserAccessUnlockSchema = new mongoose.Schema({
   },
 
   // Type de ressource déblocable.
-  //   - 'category'  : déblocage d'une CATÉGORIE free de coupons (avec offre
+  //   - 'category'      : déblocage d'une CATÉGORIE free de coupons (avec offre
   //     `selectedOption` : durée + nb de pubs, expiration via `expiresAt`).
-  //   - 'affiliate' : déblocage de l'INSCRIPTION AFFILIÉ (compteur cumulatif,
+  //   - 'affiliate'     : déblocage de l'INSCRIPTION AFFILIÉ (compteur cumulatif,
   //     pas de durée, `resource` absent — un seul doc par user).
+  //   - 'wheel_tickets' : déblocage d'un PACK DE TOURS de la roue de la chance.
+  //     Crédit one-shot (pas de durée) ; `resource` = WheelConfig._id de l'app.
   resourceType: {
     type: String,
-    enum: ['category', 'affiliate'],
+    enum: ['category', 'affiliate', 'wheel_tickets'],
     default: 'category'
   },
 

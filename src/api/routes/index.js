@@ -49,6 +49,7 @@ const adminAdminRoutes = require('./admin/adminRoutes');
 const adminGiftRoutes = require('./admin/giftRoutes');
 const adminGiftTierRoutes = require('./admin/giftTierRoutes');
 const adminUploadRoutes = require('./admin/uploadRoutes');
+const adminWheelRoutes = require('./admin/wheelAdminRoutes');
 
 // RBAC management — super_admin only. Mounted first so it has priority.
 router.use('/admin/admins', adminAdminRoutes);
@@ -77,6 +78,9 @@ router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin')
 
 // Gifts admin — super_admin only, scoped à l'app
 router.use('/admin/gifts',           identifyApp, ...ADMIN_SUPER,  adminGiftRoutes);
+
+// Roue de la chance admin — super_admin only, scoped à l'app
+router.use('/admin/wheel',           identifyApp, ...ADMIN_SUPER,  adminWheelRoutes);
 
 router.use('/admin/formations',      identifyApp, ...ADMIN_SUPER,  adminFormationRoutes);
 router.use('/admin/affiliates',      identifyApp, ...ADMIN_SUPER,  adminAffiliateRoutes);
@@ -131,6 +135,7 @@ const fedapayRoutes = require('./user/fedapayRoutes');
 const userGiftRoutes = require('./user/giftRoutes');
 const userAffiliateRoutes = require('./user/affiliateRoutes');
 const userAccessRoutes = require('./user/accessRoutes');
+const userWheelRoutes = require('./user/wheelRoutes');
 const intouchRoutes = require('./user/intouchRoutes');
 
 
@@ -151,6 +156,8 @@ router.use('/user/packages', identifyApp, packageRoutes);
 router.use('/user/gifts', identifyApp, userGiftRoutes);
 router.use('/user/affiliate', identifyApp, userAffiliateRoutes);
 router.use('/user/access', identifyApp, userAccessRoutes);
+// Roue de la chance — config publique + spin / tickets / wallet (auth dans le sous-routeur)
+router.use('/user/wheel', identifyApp, userWheelRoutes);
 
 // Route générique /user EN DERNIER (sinon elle capture toutes les requêtes /user/*)
 router.use('/user', identifyApp, userSubscriptionRoutes);
@@ -204,7 +211,7 @@ router.get('/', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'proxidream API v2 - Multi-Tenant',
-    version: '2.0.0',
+    version: '2.1.0-wheel',
     multiTenant: true,
     info: {
       appId: req.appId || 'non spécifié',
