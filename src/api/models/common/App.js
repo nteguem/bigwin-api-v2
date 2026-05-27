@@ -185,6 +185,25 @@ const appSchema = new mongoose.Schema({
     }
   },
 
+  // Sign in with Apple — audience attendue dans l'identityToken JWT
+  // envoyé par le client iOS. Doit matcher exactement le bundle ID iOS
+  // déclaré dans l'app Apple Developer (ex: `com.bigwin.application`).
+  // Aucun secret nécessaire pour la validation server-side du token :
+  // on n'utilise que les JWK publiques d'Apple.
+  appleAuth: {
+    bundleId: {
+      type: String,
+      default: null,
+      trim: true,
+      comment: 'iOS bundle ID utilisé comme audience attendue du JWT Apple'
+    },
+    enabled: {
+      type: Boolean,
+      default: false,
+      comment: 'Activer/désactiver Sign in with Apple pour cette app'
+    }
+  },
+
   admobAppId: {
     type: String,
     default: null,
@@ -290,6 +309,13 @@ appSchema.methods.getGoogleAuthConfig = function() {
     clientId: this.googleAuth?.clientId,
     webClientId: this.googleAuth?.webClientId,
     enabled: this.googleAuth?.enabled || false
+  };
+};
+
+appSchema.methods.getAppleAuthConfig = function() {
+  return {
+    bundleId: this.appleAuth?.bundleId,
+    enabled: this.appleAuth?.enabled || false
   };
 };
 

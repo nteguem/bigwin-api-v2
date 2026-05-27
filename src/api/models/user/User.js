@@ -33,14 +33,21 @@ const userSchema = new mongoose.Schema({
     type: String,
     sparse: true
   },
-  
+
+  // Apple Sign-In: stable user identifier (= JWT `sub` from identityToken).
+  // Sparse because only Apple-authed users have it.
+  appleId: {
+    type: String,
+    sparse: true
+  },
+
   authProvider: {
     type: String,
-    enum: ['local', 'google'],
+    enum: ['local', 'google', 'apple'],
     required: true,
     default: 'local'
   },
-  
+
   email: {
     type: String,
     sparse: true,
@@ -189,6 +196,7 @@ userSchema.index(
 );
 userSchema.index({ appId: 1, email: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, googleId: 1 }, { unique: true, sparse: true });
+userSchema.index({ appId: 1, appleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ appId: 1, isActive: 1 });
 userSchema.index({ isActive: 1 });
 userSchema.index({ authProvider: 1 });

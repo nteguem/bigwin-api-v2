@@ -3,6 +3,7 @@
 const User = require('../../models/user/User');
 const authService = require('../../services/common/authService');
 const googleAuthService = require('../../services/common/googleAuthService');
+const appleAuthService = require('../../services/common/appleAuthService');
 const subscriptionService = require('../../services/user/subscriptionService');
 const deviceService = require('../../services/common/deviceService');
 const affiliateService = require('../../services/affiliate/affiliateService');
@@ -355,6 +356,195 @@ exports.googleAuth = catchAsync(async (req, res, next) => {
     }
     
     return next(new AppError('Erreur lors de l\'authentification Google', 500, ErrorCodes.INTERNAL_ERROR));
+  }
+});
+
+/**
+ * Authentification via Sign in with Apple (iOS only).
+ *
+ * Apple n'envoie `email` / `firstName` / `lastName` que lors du **PREMIER**
+ * sign-in pour une paire Apple ID + bundle ID. Le client iOS doit donc nous
+ * les passer dans le body à ce moment-là — on les persiste pour de bon, et
+ * sur les sign-ins suivants on retrouve l'user via `appleId` (= JWT `sub`).
+ */
+exports.appleAuth = catchAsync(async (req, res, next) => {
+  const {
+    identityToken,
+    authorizationCode, // eslint-disable-line no-unused-vars -- reservé pour refresh server-side futur
+    userIdentifier,
+    email,
+    givenName,
+    familyName,
+    city,
+    countryCode,
+    deviceId,
+    firebaseAppInstanceId,
+    acquisitionSource,
+    acquisitionGclid,
+    affiliateCode,
+  } = req.body;
+
+  const appId = req.appId;
+
+  if (!identityToken) {
+    return next(new AppError('identityToken Apple requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+  if (!userIdentifier) {
+    return next(new AppError('userIdentifier Apple requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  try {
+    // 1. Verify the Apple identityToken JWT
+    const appleData = await appleAuthService.verifyAppleToken(appId, identityToken);
+    req.log.info('apple auth: token verified', {
+      service: SERVICE,
+      category: 'appleAuth',
+      sub: appleData.appleId,
+    });
+
+    // Defense in depth: the client-provided userIdentifier must match the
+    // JWT `sub`. If a malicious client sends a token for user A but claims
+    // to be user B, we reject.
+    if (appleData.appleId !== userIdentifier) {
+      return next(new AppError(
+        'userIdentifier ne correspond pas au token',
+        401,
+        ErrorCodes.AUTH_INVALID_TOKEN
+      ));
+    }
+
+    // 2. Find or create the user
+    const { user, isNewUser } = await appleAuthService.findOrCreateAppleUser(
+      appId,
+      {
+        appleId: appleData.appleId,
+        email: appleData.email || email || null,
+        emailVerified: appleData.emailVerified,
+      },
+      {
+        firstName: givenName,
+        lastName: familyName,
+        city,
+        countryCode,
+        acquisitionSource,
+        acquisitionGclid,
+      }
+    );
+
+    // Affiliate referral capture on first signup
+    if (isNewUser && affiliateCode) {
+      try {
+        await affiliateService.createReferralAtSignup(user, affiliateCode);
+      } catch (err) {
+        req.log?.warn?.('affiliate referral failed at apple signup', {
+          service: SERVICE,
+          userId: user._id,
+          error: err.message,
+        });
+      }
+    }
+
+    // 3. Account active?
+    if (!user.isActive) {
+      return next(new AppError('Compte utilisateur désactivé', 401, ErrorCodes.AUTH_ACCOUNT_DISABLED));
+    }
+
+    // 4. Generate our app's JWT tokens
+    const tokens = authService.generateTokens(user._id, 'user');
+
+    // 5. Persist refresh token + firebaseAppInstanceId
+    if (!user.refreshTokens) {
+      user.refreshTokens = [];
+    }
+    user.refreshTokens.push(tokens.refreshToken);
+    if (firebaseAppInstanceId) {
+      user.firebaseAppInstanceId = firebaseAppInstanceId;
+    }
+    if (
+      !isNewUser &&
+      acquisitionSource &&
+      ['google_ads', 'organique'].includes(acquisitionSource) &&
+      (!user.acquisition || !user.acquisition.source)
+    ) {
+      user.acquisition = {
+        source: acquisitionSource,
+        gclid: acquisitionGclid || null,
+        capturedAt: new Date()
+      };
+    }
+    await user.save();
+
+    // 6. Link device
+    let device = null;
+    if (deviceId) {
+      try {
+        device = await deviceService.linkDeviceToUser(appId, deviceId, user._id);
+      } catch (error) {
+        req.log.error('device link failed', {
+          service: SERVICE,
+          category: 'deviceLink',
+          message: error.message,
+          stack: error.stack,
+        });
+      }
+    }
+
+    // 7. Subscription info
+    const subscriptionInfo = await subscriptionService.getUserSubscriptionInfo(
+      appId,
+      user._id,
+      req.query?.lang || 'fr'
+    );
+
+    // 8. Response
+    const displayName = user.firstName || user.pseudo;
+    const message = isNewUser
+      ? `Bienvenue ${displayName} ! Votre compte a été créé avec succès.`
+      : `Bon retour ${displayName} !`;
+
+    const response = {
+      success: true,
+      message,
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          pseudo: user.pseudo,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          profilePicture: user.profilePicture,
+          authProvider: user.authProvider,
+          emailVerified: user.emailVerified,
+          city: user.city,
+          countryCode: user.countryCode,
+          isNewUser
+        },
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        hasActiveSubscription: subscriptionInfo.hasActiveSubscription,
+        activePackages: subscriptionInfo.activePackages,
+        device
+      }
+    };
+
+    res.status(isNewUser ? 201 : 200).json(response);
+  } catch (error) {
+    req.log.error('apple auth: failed', {
+      service: SERVICE,
+      category: 'appleAuth',
+      message: error.message,
+      stack: error.stack,
+    });
+
+    if (error instanceof AppError) {
+      return next(error);
+    }
+
+    return next(new AppError(
+      'Erreur lors de l\'authentification Apple',
+      500,
+      ErrorCodes.INTERNAL_ERROR
+    ));
   }
 });
 

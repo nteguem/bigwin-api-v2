@@ -22,6 +22,7 @@
     "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/storage": "^7.19.0",
     "agenda": "^5.0.0",
+    "apple-signin-auth": "^1.7.6",
     "axios": "^1.9.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",

@@ -10,6 +10,7 @@ const router = express.Router();
 router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.post('/google', authController.googleAuth); // NOUVELLE ROUTE GOOGLE
+router.post('/apple', authController.appleAuth);    // Sign in with Apple (iOS)
 router.post('/refresh', userAuth.verifyRefreshToken, authController.refresh);
 router.post('/reset-password', authController.resetPassword);
 
