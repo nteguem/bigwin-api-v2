@@ -204,6 +204,40 @@ const appSchema = new mongoose.Schema({
     }
   },
 
+  // App Store IAP — config pour valider les transactions StoreKit 2 envoyées
+  // par le client iOS. Les transactions sont des JWS signés par Apple ; on
+  // valide la signature contre la chaîne de certificats `x5c` jusqu'à la
+  // racine Apple PKI. Les champs `issuerId/keyId/privateKey` ne sont
+  // nécessaires QUE si on veut appeler activement l'App Store Server API
+  // (statut subscription, refunds, etc.) — pour la simple validation de
+  // transaction reçue du client, le bundleId suffit.
+  appStore: {
+    bundleId: {
+      type: String,
+      default: null,
+      trim: true,
+      comment: 'iOS bundle ID — sert d\'audience attendue dans les transactions'
+    },
+    environment: {
+      type: String,
+      enum: ['sandbox', 'production'],
+      default: 'sandbox',
+      comment: 'Environnement App Store actif (sandbox pour TestFlight/dev, production sinon)'
+    },
+    enabled: {
+      type: Boolean,
+      default: false,
+      comment: 'Activer/désactiver App Store IAP pour cette app'
+    },
+    // Optionnel — uniquement si on appelle l'App Store Server API server-to-server
+    // (sync statut subscription, get transaction history). Pour le flow basique
+    // "client envoie transaction → backend valide", ces champs ne sont PAS requis.
+    issuerId: { type: String, default: null, trim: true },
+    keyId: { type: String, default: null, trim: true },
+    privateKeyPath: { type: String, default: null, trim: true,
+      comment: 'Chemin local du fichier .p8 téléchargé depuis App Store Connect' },
+  },
+
   admobAppId: {
     type: String,
     default: null,
@@ -316,6 +350,17 @@ appSchema.methods.getAppleAuthConfig = function() {
   return {
     bundleId: this.appleAuth?.bundleId,
     enabled: this.appleAuth?.enabled || false
+  };
+};
+
+appSchema.methods.getAppStoreConfig = function() {
+  return {
+    bundleId: this.appStore?.bundleId,
+    environment: this.appStore?.environment || 'sandbox',
+    enabled: this.appStore?.enabled || false,
+    issuerId: this.appStore?.issuerId,
+    keyId: this.appStore?.keyId,
+    privateKeyPath: this.appStore?.privateKeyPath,
   };
 };
 

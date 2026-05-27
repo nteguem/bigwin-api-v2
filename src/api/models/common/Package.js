@@ -125,6 +125,37 @@ const packageSchema = new mongoose.Schema({
     }
   },
 
+  // ─────────── App Store (iOS) ───────────
+  // Apple Product ID — déclaré dans App Store Connect (souvent un format
+  // reverse-DNS type `com.bigwin.application.coup_sur`). Distinct du Google
+  // Product ID parce qu'Apple et Google ne partagent pas les SKUs.
+  appleProductId: {
+    type: String,
+    trim: true,
+    sparse: true
+  },
+
+  availableOnAppStore: {
+    type: Boolean,
+    default: false
+  },
+
+  appleProductType: {
+    type: String,
+    // Apple distingue auto-renewable subscriptions, non-renewing subscriptions
+    // et consumables. On garde la même nomenclature simplifiée que Google
+    // (SUBSCRIPTION = auto-renewable, ONE_TIME_PRODUCT = consumable/non-renew).
+    enum: ['SUBSCRIPTION', 'ONE_TIME_PRODUCT'],
+    default: function() {
+      if (this.availableOnAppStore && this.appleProductId) {
+        return 'SUBSCRIPTION';
+      }
+      return null;
+    }
+  },
+  // ────────────────────────────────────────
+
+
   formationId: {
     type: mongoose.Schema.ObjectId,
     ref: 'Formation'
@@ -161,8 +192,16 @@ packageSchema.index(
     partialFilterExpression: { googleProductId: { $exists: true, $type: 'string', $ne: '' } }
   }
 );
+packageSchema.index(
+  { appId: 1, appleProductId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { appleProductId: { $exists: true, $type: 'string', $ne: '' } }
+  }
+);
 packageSchema.index({ appId: 1, isActive: 1 });
 packageSchema.index({ appId: 1, availableOnGooglePlay: 1 });
+packageSchema.index({ appId: 1, availableOnAppStore: 1 });
 packageSchema.index({ isActive: 1 });
 packageSchema.index({ pricing: 1 });
 packageSchema.index({ formationId: 1 });
@@ -181,12 +220,33 @@ packageSchema.methods.getGooglePlayInfo = function() {
   if (!this.availableOnGooglePlay) {
     return null;
   }
-  
+
   return {
     productId: this.googleProductId,
     plans: this.googlePlanId,
     available: true,
     productType: this.googleProductType || 'SUBSCRIPTION'
+  };
+};
+
+packageSchema.methods.isAppStoreOneTimeProduct = function() {
+  return this.availableOnAppStore && this.appleProductType === 'ONE_TIME_PRODUCT';
+};
+
+packageSchema.methods.isAppStoreSubscription = function() {
+  return this.availableOnAppStore &&
+    (this.appleProductType === 'SUBSCRIPTION' || !this.appleProductType);
+};
+
+packageSchema.methods.getAppStoreInfo = function() {
+  if (!this.availableOnAppStore) {
+    return null;
+  }
+
+  return {
+    productId: this.appleProductId,
+    available: true,
+    productType: this.appleProductType || 'SUBSCRIPTION'
   };
 };
 
@@ -274,12 +334,15 @@ packageSchema.methods.formatForLanguage = function(lang = 'fr') {
     })(),
     isActive: packageObj.isActive,
     createdAt: packageObj.createdAt,
-    // ===== AJOUT DES CHAMPS GOOGLE PLAY =====
+    // ===== Google Play =====
     availableOnGooglePlay: packageObj.availableOnGooglePlay || false,
     googleProductId: packageObj.googleProductId || null,
     googleProductType: packageObj.googleProductType || null,
-    googlePlanId: packageObj.googlePlanId || null
-    // ========================================
+    googlePlanId: packageObj.googlePlanId || null,
+    // ===== App Store (iOS) =====
+    availableOnAppStore: packageObj.availableOnAppStore || false,
+    appleProductId: packageObj.appleProductId || null,
+    appleProductType: packageObj.appleProductType || null,
   };
 };
 
