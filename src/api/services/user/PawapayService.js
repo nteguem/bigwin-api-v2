@@ -488,12 +488,38 @@ function normalizeActiveConf(raw) {
       prefix:      c.prefix,
       flag:        c.flag,
       currency,
-      providers: (c.providers || []).map(p => ({
-        provider:    p.provider,
-        displayName: p.displayName || p.nameDisplayedToCustomer || p.provider,
-        logo:        p.logo,
-        currency:    p.currencies?.[0]?.currency || currency
-      }))
+      providers: (c.providers || []).map(p => {
+        const cur = p.currencies?.[0];
+        const dep = cur?.operationTypes?.DEPOSIT;
+        // pinPrompt = AUTOMATIC (push USSD, le client confirme avec son PIN
+        // sur le prompt qui apparait) OU MANUAL (le client doit composer un
+        // code USSD pour recuperer sa transaction en attente — Orange CIV,
+        // Free SEN, etc.).
+        let pinInstructions = null;
+        if (dep?.pinPromptInstructions?.channels?.length) {
+          pinInstructions = {
+            channels: dep.pinPromptInstructions.channels.map(ch => ({
+              type:         ch.type,                            // USSD, SMS...
+              displayName:  ch.displayName,                     // { fr, en }
+              shortCode:    ch.variables?.shortCode || null,    // ex: '#120#'
+              instructions: ch.instructions                      // { fr: [{text}], en: [{text}] }
+            }))
+          };
+        }
+        return {
+          provider:        p.provider,
+          displayName:     p.displayName || p.nameDisplayedToCustomer || p.provider,
+          logo:            p.logo,
+          currency:        cur?.currency || currency,
+          minAmount:       dep?.minAmount || null,
+          maxAmount:       dep?.maxAmount || null,
+          status:          dep?.status || null,                 // OPERATIONAL / DELAYED / CLOSED
+          authType:        dep?.authType || null,               // PROVIDER_AUTH / ...
+          pinPrompt:       dep?.pinPrompt || null,              // AUTOMATIC / MANUAL
+          pinPromptRevivable: dep?.pinPromptRevivable ?? null,  // si MANUAL, peut on re-trigger ?
+          pinInstructions
+        };
+      })
     };
   }
   return out;
