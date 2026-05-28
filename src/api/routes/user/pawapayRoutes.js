@@ -9,9 +9,13 @@ const userAuth = require('../../middlewares/user/userAuth');
 const router = express.Router();
 
 // ---------------------------------------------
-//  Route publique — webhook pawaPay
+//  Routes publiques
 // ---------------------------------------------
+// Webhook pawaPay
 router.post('/webhook', pawapayController.webhook);
+
+// Liste des pays + operateurs (pour le selecteur mobile)
+router.get('/providers', pawapayController.getProviders);
 
 // ---------------------------------------------
 //  Routes protegees (token utilisateur requis)

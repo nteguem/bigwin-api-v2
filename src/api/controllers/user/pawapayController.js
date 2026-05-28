@@ -17,6 +17,30 @@ const App = require('../../models/common/App');
 const PawapayTransaction = require('../../models/user/PawapayTransaction');
 
 // ---------------------------------------------
+//  LISTER LES PROVIDERS (publique — pour peupler le selecteur mobile)
+//
+//  GET /providers              → liste des pays disponibles + currency par pays
+//  GET /providers?country=CM   → detail d'un pays (providers, displayName, flag,
+//                                 currency) + availableCountries pour fallback
+//
+//  Source : pawaPay GET /v2/active-conf, cache 1h en memoire.
+// ---------------------------------------------
+exports.getProviders = catchAsync(async (req, res, next) => {
+  const { country } = req.query;
+  const { currentApp } = req;
+
+  if (!currentApp) {
+    return next(new AppError('Header X-App-Id requis', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+  if (!currentApp?.payments?.pawapay?.enabled) {
+    return next(new AppError('pawaPay non actif pour cette application', 400, ErrorCodes.VALIDATION_ERROR));
+  }
+
+  const data = await pawapayService.getProvidersAsync(currentApp, country);
+  res.status(200).json({ success: true, data });
+});
+
+// ---------------------------------------------
 //  INITIER UN PAIEMENT (deposit)
 // ---------------------------------------------
 exports.initiatePayment = catchAsync(async (req, res, next) => {
@@ -202,6 +226,7 @@ exports.webhook = catchAsync(async (req, res, next) => {
 });
 
 module.exports = {
+  getProviders:    exports.getProviders,
   initiatePayment: exports.initiatePayment,
   checkStatus:     exports.checkStatus,
   webhook:         exports.webhook

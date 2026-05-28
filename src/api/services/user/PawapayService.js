@@ -42,6 +42,13 @@ const ISO2_TO_ISO3 = {
   MW: 'MWI', LS: 'LSO', MZ: 'MOZ', SL: 'SLE'
 };
 
+function iso3ToIso2(iso3) {
+  for (const [iso2, code3] of Object.entries(ISO2_TO_ISO3)) {
+    if (code3 === iso3) return iso2;
+  }
+  return null;
+}
+
 // ---------------------------------------------
 //  Mapping pays → devise par defaut
 // ---------------------------------------------
@@ -447,10 +454,97 @@ function verifyContentDigest(rawBody, contentDigestHeader) {
   return expected === computed;
 }
 
+// ---------------------------------------------
+//  LISTE DES PROVIDERS PAR PAYS (cache 1h)
+//  GET /v2/active-conf — Bearer auth
+//
+//  Renvoie un dict { [iso2]: { country, iso3, currency, prefix, displayName,
+//  flag, providers: [{ provider, displayName, logo, currency }] } }.
+//
+//  Cache 1h en memoire (singleton, partage entre tenants — l'active-conf
+//  pawaPay depend du compte e-marchand donc cache global. Quand on aura
+//  plusieurs comptes pawaPay distincts par tenant, on partitionnera par
+//  tenant + environment).
+// ---------------------------------------------
+let cachedActiveConf = null;
+let cachedActiveConfExpiry = 0;
+let cachedActiveConfKey = null;
+const ACTIVE_CONF_TTL_MS = 60 * 60 * 1000; // 1 heure
+
+function normalizeActiveConf(raw) {
+  const out = {};
+  for (const c of (raw?.countries || [])) {
+    const iso3 = c.country;
+    const iso2 = iso3ToIso2(iso3) || iso3;
+    // pawaPay liste les currencies par provider — on prend la 1ere comme
+    // currency "principale" du pays (en pratique tous les providers d'un
+    // meme pays partagent la meme devise).
+    const firstProv = c.providers?.[0];
+    const currency = firstProv?.currencies?.[0]?.currency || currencyForCountry(iso2);
+    out[iso2] = {
+      country:     iso2,
+      iso3,
+      displayName: c.displayName,
+      prefix:      c.prefix,
+      flag:        c.flag,
+      currency,
+      providers: (c.providers || []).map(p => ({
+        provider:    p.provider,
+        displayName: p.displayName || p.nameDisplayedToCustomer || p.provider,
+        logo:        p.logo,
+        currency:    p.currencies?.[0]?.currency || currency
+      }))
+    };
+  }
+  return out;
+}
+
+async function getProvidersAsync(app, countryFilter = null) {
+  const config = getConfig(app);
+  // Cle de cache : env + token (token change quand on rotate ou switch sandbox/prod)
+  const key = config.environment + ':' + (config.token || '').slice(-12);
+
+  let countries;
+  if (cachedActiveConf && cachedActiveConfExpiry > Date.now() && cachedActiveConfKey === key) {
+    countries = cachedActiveConf;
+  } else {
+    const r = await axios.get(`${config.apiUrl}/v2/active-conf?operationType=DEPOSIT`, {
+      headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
+      timeout: 15000
+    });
+    countries = normalizeActiveConf(r.data);
+    cachedActiveConf = countries;
+    cachedActiveConfKey = key;
+    cachedActiveConfExpiry = Date.now() + ACTIVE_CONF_TTL_MS;
+    console.log(`[pawaPay] active-conf rafraichi (${Object.keys(countries).length} pays, ${config.environment})`);
+  }
+
+  if (countryFilter) {
+    const cc = String(countryFilter).toUpperCase();
+    const found = countries[cc] || null;
+    return {
+      country:            found,
+      availableCountries: Object.keys(countries)
+    };
+  }
+  return {
+    countries:          Object.values(countries),
+    availableCountries: Object.keys(countries)
+  };
+}
+
+function clearProvidersCache() {
+  cachedActiveConf = null;
+  cachedActiveConfKey = null;
+  cachedActiveConfExpiry = 0;
+}
+
 module.exports = {
   getConfig,
   initiatePayment,
   checkTransactionStatus,
+  getProvidersAsync,
+  clearProvidersCache,
   mapApiStatus,
   detectCountryFromPhone,
   buildProviderCode,
