@@ -244,7 +244,8 @@ router.get('/', (req, res) => {
         afribapay: 'POST /payments/afribapay/initiate - Paiement AfribaPay',
         flutterwave: 'POST /payments/flutterwave/initiate - Paiement Flutterwave Mobile Money',
         korapay: 'POST /payments/korapay/initiate - Paiement KoraPay',
-        intouch: 'POST /payments/intouch/initiate - Paiement InTouch / TouchPay (push USSD MTN/Orange CM)'
+        intouch: 'POST /payments/intouch/initiate - Paiement InTouch / TouchPay (push USSD MTN/Orange CM)',
+        pawapay: 'POST /payments/pawapay/initiate - Paiement pawaPay (mobile money 20 pays africains)'
       }
     }
   });
