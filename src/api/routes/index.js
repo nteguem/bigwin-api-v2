@@ -137,6 +137,7 @@ const userAffiliateRoutes = require('./user/affiliateRoutes');
 const userAccessRoutes = require('./user/accessRoutes');
 const userWheelRoutes = require('./user/wheelRoutes');
 const intouchRoutes = require('./user/intouchRoutes');
+const pawapayRoutes = require('./user/pawapayRoutes');
 
 
 // ===== ROUTES DE PAIEMENT =====
@@ -148,6 +149,7 @@ router.use('/payments/flutterwave', identifyAppOptional, flutterwaveRoutes);
 router.use('/payments/korapay', korapayRoutes);
 router.use('/payments/fedapay', identifyAppOptional, fedapayRoutes);
 router.use('/payments/intouch', identifyAppOptional, intouchRoutes);
+router.use('/payments/pawapay', identifyAppOptional, pawapayRoutes);
 // ⚠️ IMPORTANT: Routes spécifiques AVANT la route générique /user
 router.use('/user/coupons', identifyApp, couponRoutes);
 router.use('/user/formations', identifyApp, userFormationRoutes);

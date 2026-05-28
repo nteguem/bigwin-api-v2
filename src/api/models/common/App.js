@@ -162,6 +162,20 @@ const appSchema = new mongoose.Schema({
         basicPassword: { type: String, trim: true, required: true },
         enabled:       { type: Boolean, default: true }
       }]
+    },
+
+    // pawaPay — collecte mobile money multi-pays (1 compte = 20 pays africains).
+    // Cf. https://docs.pawapay.io/v2/docs/welcome
+    // Auth Bearer JWT. 2 tokens stockes (sandbox+prod), on flip via `environment`.
+    // Webhook signe (RFC 9421 HTTP Signatures) — verification via webhookPublicKey.
+    pawapay: {
+      prodApiUrl:       { type: String, default: 'https://api.pawapay.io' },
+      sandboxApiUrl:    { type: String, default: 'https://api.sandbox.pawapay.io' },
+      environment:      { type: String, enum: ['sandbox', 'production'], default: 'sandbox' },
+      sandboxToken:     { type: String, trim: true },
+      prodToken:        { type: String, trim: true },
+      webhookPublicKey: { type: String, trim: true },   // PEM, optionnel (recommande)
+      enabled:          { type: Boolean, default: false }
     }
   },
 
@@ -304,6 +318,26 @@ appSchema.methods.getKorapayConfig = function() {
   };
 };
 
+// Retourne la config pawaPay active (sandbox OU production selon `environment`).
+// Resout l'apiUrl + le token correspondant. Retourne { enabled:false } si
+// master switch off ou si le token correspondant a l'env actif est vide.
+appSchema.methods.getPawapayConfig = function () {
+  const c = this.payments?.pawapay;
+  if (!c?.enabled) return { enabled: false };
+  const env = (c.environment === 'production') ? 'production' : 'sandbox';
+  const apiUrl = env === 'production'
+    ? (c.prodApiUrl    || 'https://api.pawapay.io')
+    : (c.sandboxApiUrl || 'https://api.sandbox.pawapay.io');
+  const token = env === 'production' ? c.prodToken : c.sandboxToken;
+  return {
+    enabled:          true,
+    environment:      env,
+    apiUrl,
+    token,
+    webhookPublicKey: c.webhookPublicKey || null
+  };
+};
+
 // Retourne la config InTouch pour un pays donne (ou { enabled:false } si manquant/disabled).
 // Le master switch `enabled` doit aussi etre actif. La config retournee merge
 // la racine (apiUrl) et l'entree de `configs[]` du pays demande.
@@ -358,6 +392,15 @@ appSchema.methods.toJSON = function() {
         ['loginApi', 'passwordApi', 'basicUser', 'basicPassword'].forEach(f => {
           delete cfg[f];
         });
+      });
+    }
+
+    // Cas particulier pawaPay : 2 tokens (sandbox + prod) + cle publique
+    // webhook (la cle PUBLIQUE n'est pas un secret mais on la masque par
+    // hygiene — c'est un identifiant lie au compte marchand).
+    if (app.payments?.pawapay) {
+      ['sandboxToken', 'prodToken', 'webhookPublicKey'].forEach(f => {
+        delete app.payments.pawapay[f];
       });
     }
   }
