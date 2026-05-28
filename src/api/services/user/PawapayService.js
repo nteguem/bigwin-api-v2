@@ -248,7 +248,16 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
     const lastName  = nameParts.slice(1).join(' ') || firstName;
     const email     = user.email || `user_${user._id}@bigwin.app`;
     const designation = `${packageDoc.name?.fr || packageDoc.name} - ${packageDoc.duration}j`;
-    const customerMessage = String(designation).slice(0, 22); // pawaPay limite l'USSD prompt
+    // pawaPay rejette tout caractere non-alphanumerique (incluant apostrophes,
+    // accents, tirets, virgules…) dans customerMessage. On strip les diacritiques
+    // (NFD → ASCII) puis on ne garde que [A-Za-z0-9 ], et on cap a 22 chars.
+    const customerMessage = String(designation)
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^A-Za-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 22);
 
     // 7. depositId = UUID v4 (notre cote ET cote pawaPay — meme valeur)
     const depositId = uuidv4();
