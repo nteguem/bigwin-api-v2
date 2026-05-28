@@ -174,6 +174,7 @@ function mapApiStatus(raw) {
   if (s === 'FAILED' || s === 'REJECTED')                            return 'FAILED';
   if (s === 'EXPIRED')                                                return 'EXPIRED';
   if (s === 'ACCEPTED' || s === 'PROCESSING' || s === 'SUBMITTED')   return 'INITIATED';
+  if (s === 'IN_RECONCILIATION' || s === 'ENQUEUED')                  return 'INITIATED';
   if (s === 'DUPLICATE_IGNORED')                                      return 'INITIATED';
   if (s === 'PENDING')                                                return 'PENDING';
   return null;
@@ -368,16 +369,25 @@ async function checkTransactionStatus(appId, app, depositId) {
 
     console.log(`[pawaPay] check_status pour ${depositId}:`, JSON.stringify(response.data));
 
-    // pawaPay v2 renvoie un objet (pas un tableau) avec status final.
-    const data = response.data || {};
-    transaction.providerData = data;
+    // pawaPay v2 GET /deposits/{id} renvoie un wrapper :
+    //   { data: { depositId, status: COMPLETED|FAILED|..., amount, ..., failureReason? },
+    //     status: FOUND|NOT_FOUND }
+    // → le vrai status metier est dans `data.data.status`, pas `data.status`.
+    const raw = response.data || {};
+    const inner = raw.data || raw;
+    transaction.providerData = raw;
 
-    const mapped = mapApiStatus(data.status);
+    const mapped = mapApiStatus(inner.status);
     if (mapped) transaction.status = mapped;
 
-    if (data.failureReason) {
-      transaction.failureCode    = data.failureReason.failureCode;
-      transaction.failureMessage = data.failureReason.failureMessage;
+    if (inner.providerTransactionId) {
+      // ID externe operateur — utile pour rapprochement support / litiges
+      transaction.providerData = { ...raw, _providerTransactionId: inner.providerTransactionId };
+    }
+
+    if (inner.failureReason) {
+      transaction.failureCode    = inner.failureReason.failureCode;
+      transaction.failureMessage = inner.failureReason.failureMessage;
     }
 
     await transaction.save();
