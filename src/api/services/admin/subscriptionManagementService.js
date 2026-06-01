@@ -26,6 +26,14 @@ const CURRENCY_TO_XAF = {
   EGP: 12.8,
   TZS: 0.24,
   ZAR: 33,
+  // Devises pawaPay (taux indicatifs basés sur 1 USD ~ 615 XAF, juin 2026)
+  UGX: 0.166,      // 1 USD ~ 3700 UGX
+  ZMW: 22.78,      // 1 USD ~ 27 ZMW
+  RWF: 0.424,      // 1 USD ~ 1450 RWF
+  MWK: 0.351,      // 1 USD ~ 1750 MWK
+  MZN: 9.61,       // 1 USD ~ 64 MZN
+  SLE: 27.95,      // 1 USD ~ 22 SLE
+  LSL: 33,         // Parité fixe avec ZAR (peg Lesotho)
 };
 
 /**
