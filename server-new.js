@@ -22,6 +22,7 @@ const PredictionCorrectionService = require('./src/api/services/common/predictio
 const googlePlayJobs = require('./src/jobs/googlePlaySyncJob');
 const retentionJobs = require('./src/jobs/retentionNotificationJob');
 const oneSignalTagReconciliationJob = require('./src/jobs/oneSignalTagReconciliationJob');
+const pawapayPollingJob = require('./src/jobs/pawapayPollingJob');
 
 const PORT = process.env.PORT || 4000;
 
@@ -52,6 +53,7 @@ const startServer = async () => {
       await googlePlayJobs.start();
       await retentionJobs.start();
       await oneSignalTagReconciliationJob.start();
+      pawapayPollingJob.start();
     }
 
     // Démarrer le serveur HTTP
@@ -73,6 +75,7 @@ process.on('SIGTERM', async () => {
   if (correctionService) {
     await correctionService.stop();
   }
+  pawapayPollingJob.stop();
 
   process.exit(0);
 });
@@ -83,6 +86,7 @@ process.on('SIGINT', async () => {
   if (correctionService) {
     await correctionService.stop();
   }
+  pawapayPollingJob.stop();
 
   process.exit(0);
 });
