@@ -19,6 +19,9 @@ const { v4: uuidv4 } = require('uuid');
 const PawapayTransaction = require('../../models/user/PawapayTransaction');
 const Package = require('../../models/common/Package');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'pawapay';
 
 // ---------------------------------------------
 //  Erreur personnalisee
@@ -161,11 +164,43 @@ function getConfig(app) {
 }
 
 // ---------------------------------------------
-//  Normaliser le numero (MSISDN brut sans + ni espaces)
-//  pawaPay attend uniquement des digits avec code pays.
+//  Mapping ISO-2 → prefixe ITU (inverse de PHONE_PREFIX_TO_COUNTRY)
+//  Utilise par normalizePhone pour reinjecter le code pays manquant.
 // ---------------------------------------------
-function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '');
+const COUNTRY_TO_PHONE_PREFIX = {
+  CM: '237', CI: '225', SN: '221', BJ: '229', BF: '226',
+  CD: '243', GA: '241', CG: '242', GH: '233', KE: '254',
+  RW: '250', UG: '256', TZ: '255', ZM: '260', NG: '234',
+  MW: '265', LS: '266', MZ: '258', SL: '232'
+};
+
+// ---------------------------------------------
+//  Normaliser le numero (MSISDN brut sans + ni espaces)
+//  pawaPay attend uniquement des digits avec code pays international,
+//  SANS le `+` ni le `0` initial, SANS espaces ni separateurs.
+//  Ex : '0158112461' (BJ local) → '22958112461'
+//       '+237697874621'         → '237697874621'
+//       '07223767' (SL local)   → '2327223767'
+// ---------------------------------------------
+function normalizePhone(phone, countryCode) {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Cas 1 : le numero contient deja un prefixe ITU connu → on le garde tel quel.
+  for (const prefix of Object.keys(PHONE_PREFIX_TO_COUNTRY)) {
+    if (digits.startsWith(prefix)) return digits;
+  }
+
+  // Cas 2 : le numero commence par '0' (format local national) → on strip
+  // le 0 et on prefixe avec le code pays (passe en parametre).
+  if (digits.startsWith('0')) digits = digits.slice(1);
+
+  const cc = String(countryCode || '').toUpperCase();
+  const prefix = COUNTRY_TO_PHONE_PREFIX[cc];
+  if (prefix) return `${prefix}${digits}`;
+
+  // Aucun pays connu : on renvoie les digits bruts (pawaPay rejettera).
+  return digits;
 }
 
 // ---------------------------------------------
@@ -205,7 +240,17 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
   let transaction;
   let payload;
   try {
-    console.log(`[pawaPay] Init — user=${user._id}, package=${packageId}, phone=${phoneNumber}, op=${operator}, country=${requestedCountry || 'auto'}, provider=${requestedProvider || 'auto'}`);
+    logger.info('initiate: start', {
+      service: SERVICE,
+      category: 'initiate',
+      appId,
+      userId: String(user._id),
+      packageId,
+      phoneNumber,
+      operator,
+      requestedCountry: requestedCountry || null,
+      requestedProvider: requestedProvider || null,
+    });
 
     // 1. Config (resout sandbox/prod)
     const config = getConfig(app);
@@ -244,7 +289,10 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
     }
 
     // 5. Numero normalise (MSISDN brut)
-    const recipientPhone = normalizePhone(phoneNumber);
+    //    pawaPay rejette `+`, le `0` initial et les separateurs. On strip
+    //    tout sauf les digits et on reinjecte le code pays ITU si absent
+    //    (en deduisant du pays resolu plus haut).
+    const recipientPhone = normalizePhone(phoneNumber, country);
     if (!recipientPhone) {
       throw new AppError('phoneNumber invalide', 400, ErrorCodes.VALIDATION_ERROR);
     }
@@ -291,7 +339,18 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
       environment: config.environment
     });
     await transaction.save();
-    console.log(`[pawaPay] Transaction sauvegardee: ${depositId} (${config.environment})`);
+    logger.info('initiate: transaction saved (pre-API)', {
+      service: SERVICE,
+      category: 'initiate',
+      appId,
+      depositId,
+      clientReferenceId,
+      provider,
+      countryCode: country,
+      amount,
+      currency,
+      environment: config.environment,
+    });
 
     // 9. Appel API pawaPay — POST /v2/deposits
     payload = {
@@ -318,8 +377,16 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
       timeout: 30000
     });
 
-    console.log('[pawaPay] Reponse init:', JSON.stringify(response.data));
     const data = response.data || {};
+    logger.info('initiate: API response', {
+      service: SERVICE,
+      category: 'initiate',
+      appId,
+      depositId,
+      status: data.status,
+      failureCode: data.failureReason?.failureCode || null,
+      failureMessage: data.failureReason?.failureMessage || null,
+    });
 
     // 10. Mapper le statut initial
     //     ACCEPTED → INITIATED (en attente USSD client)
@@ -335,18 +402,32 @@ async function initiatePayment(appId, app, user, packageId, phoneNumber, operato
     await transaction.save();
 
     await transaction.populate(['package', 'user']);
-    console.log(`[pawaPay] Init OK — depositId: ${depositId}, status: ${transaction.status}`);
+    logger.info('initiate: OK', {
+      service: SERVICE,
+      category: 'initiate',
+      appId,
+      depositId,
+      finalStatus: transaction.status,
+    });
 
     return { transaction };
   } catch (error) {
-    console.error('[pawaPay] Erreur init:', error.message, error.responseData || '');
+    const isAxiosError = !!error.response;
+    logger.error('initiate: failed', {
+      service: SERVICE,
+      category: 'initiate',
+      appId,
+      depositId: transaction?.depositId || null,
+      message: error.message,
+      httpStatus: error.response?.status || null,
+      apiResponse: error.response?.data || null,
+      payload: payload || null,
+    });
     if (transaction?._id) {
       await PawapayTransaction.findByIdAndDelete(transaction._id).catch(() => {});
     }
     if (error instanceof PawapayError || error instanceof AppError) throw error;
-    if (error.response) {
-      console.error('[pawaPay] Reponse erreur:', JSON.stringify(error.response.data));
-      console.error('[pawaPay] Payload envoye:', JSON.stringify(payload || 'payload hors scope'));
+    if (isAxiosError) {
       throw new PawapayError(
         error.response.data?.failureReason?.failureMessage
           || error.response.data?.message
@@ -383,7 +464,14 @@ async function checkTransactionStatus(appId, app, depositId) {
       timeout: 30000
     });
 
-    console.log(`[pawaPay] check_status pour ${depositId}:`, JSON.stringify(response.data));
+    logger.info('checkStatus: API response', {
+      service: SERVICE,
+      category: 'checkStatus',
+      appId,
+      depositId,
+      apiStatus: response.data?.status,
+      innerStatus: (response.data?.data || response.data)?.status,
+    });
 
     // pawaPay v2 GET /deposits/{id} renvoie un wrapper :
     //   { data: { depositId, status: COMPLETED|FAILED|..., amount, ..., failureReason? },
@@ -409,7 +497,15 @@ async function checkTransactionStatus(appId, app, depositId) {
     await transaction.save();
     return transaction;
   } catch (error) {
-    console.error('[pawaPay] Erreur check statut:', error.message);
+    logger.error('checkStatus: failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      appId,
+      depositId,
+      message: error.message,
+      httpStatus: error.response?.status || null,
+      apiResponse: error.response?.data || null,
+    });
     if (error instanceof PawapayError || error instanceof AppError) throw error;
     if (error.response) {
       throw new PawapayError(
@@ -542,7 +638,12 @@ async function getProvidersAsync(app, countryFilter = null) {
     cachedActiveConf = countries;
     cachedActiveConfKey = key;
     cachedActiveConfExpiry = Date.now() + ACTIVE_CONF_TTL_MS;
-    console.log(`[pawaPay] active-conf rafraichi (${Object.keys(countries).length} pays, ${config.environment})`);
+    logger.info('active-conf: refreshed', {
+      service: SERVICE,
+      category: 'active-conf',
+      environment: config.environment,
+      countries: Object.keys(countries).length,
+    });
   }
 
   if (countryFilter) {

@@ -15,6 +15,9 @@ const { AppError, ErrorCodes } = require('../../../utils/AppError');
 const catchAsync = require('../../../utils/catchAsync');
 const App = require('../../models/common/App');
 const PawapayTransaction = require('../../models/user/PawapayTransaction');
+const logger = require('../../../core/logger');
+
+const SERVICE = 'pawapay';
 
 // ---------------------------------------------
 //  LISTER LES PROVIDERS (publique — pour peupler le selecteur mobile)
@@ -122,7 +125,13 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
   try {
     subscription = await paymentMiddleware.processTransactionUpdate(appId, transaction);
   } catch (err) {
-    console.error('[pawaPay] Erreur processTransactionUpdate:', err.message);
+    req.log.error('checkStatus: processTransactionUpdate failed', {
+      service: SERVICE,
+      category: 'checkStatus',
+      depositId,
+      message: err.message,
+      stack: err.stack,
+    });
   }
 
   res.status(200).json({
@@ -162,53 +171,77 @@ exports.checkStatus = catchAsync(async (req, res, next) => {
 //  le pattern InTouch : re-verifier systematiquement via check_status.
 // ---------------------------------------------
 exports.webhook = catchAsync(async (req, res, next) => {
-  console.log('=== WEBHOOK PAWAPAY RECU ===');
-  console.log('Headers:', JSON.stringify({
-    'content-digest':   req.headers['content-digest'],
-    'signature':        req.headers['signature'],
-    'signature-input':  req.headers['signature-input']
-  }));
-  console.log('Body:', JSON.stringify(req.body));
-
-  // pawaPay envoie le depositId dans le body
   const depositId = req.body?.depositId;
+  const webhookStatus = req.body?.status;
+
+  // Log webhook recu en TOUT PREMIER — c'est ce log qui prouve que pawaPay
+  // a tape notre endpoint (visible dans Logs admin BO, categorie 'webhook').
+  req.log.info('webhook: received', {
+    service: SERVICE,
+    category: 'webhook',
+    depositId,
+    status: webhookStatus,
+    hasContentDigest: !!req.headers['content-digest'],
+    hasSignature: !!req.headers['signature'],
+    bodyKeys: Object.keys(req.body || {}),
+  });
 
   if (!depositId) {
-    console.error('[Webhook pawaPay] depositId manquant');
+    req.log.warn('webhook: depositId manquant', {
+      service: SERVICE,
+      category: 'webhook',
+      body: req.body,
+    });
     return res.status(200).json({ success: false, message: 'depositId manquant' });
   }
 
   try {
-    // 1. Trouver la transaction
     const transaction = await PawapayTransaction.findOne({ depositId });
     if (!transaction) {
-      console.error(`[Webhook pawaPay] Transaction ${depositId} non trouvee`);
+      req.log.warn('webhook: transaction not found', {
+        service: SERVICE,
+        category: 'webhook',
+        depositId,
+      });
       return res.status(200).json({ success: false, message: 'Transaction non trouvee' });
     }
 
-    // 2. Idempotency
     if (transaction.processed) {
-      console.log(`[Webhook pawaPay] ${depositId} deja traite`);
+      req.log.info('webhook: already processed (idempotency)', {
+        service: SERVICE,
+        category: 'webhook',
+        depositId,
+        appId: transaction.appId,
+      });
       return res.status(200).json({ success: true, message: 'Deja traite' });
     }
 
-    // 3. Recuperer l'app
     const currentApp = await App.findOne({ appId: transaction.appId, isActive: true }).lean();
     if (!currentApp) {
-      console.error(`[Webhook pawaPay] App ${transaction.appId} non trouvee`);
+      req.log.error('webhook: app not found', {
+        service: SERVICE,
+        category: 'webhook',
+        depositId,
+        appId: transaction.appId,
+      });
       return res.status(200).json({ success: false, message: 'App non trouvee' });
     }
 
-    // 4. Verifier le statut FINAL via check_status (defense en profondeur —
-    //    on ne fait pas confiance au body brut tant que la verification de
-    //    signature RFC 9421 n'est pas finalisee).
+    // Defense en profondeur : on ne fait pas confiance au body brut tant
+    // que la verification de signature RFC 9421 n'est pas finalisee.
     const updatedTransaction = await pawapayService.checkTransactionStatus(
       transaction.appId, currentApp, transaction.depositId
     );
 
-    console.log(`[Webhook pawaPay] Statut webhook=${req.body?.status} → check_status=${updatedTransaction.status}`);
+    req.log.info('webhook: transaction updated', {
+      service: SERVICE,
+      category: 'webhook',
+      depositId,
+      appId: transaction.appId,
+      webhookStatus,
+      finalStatus: updatedTransaction.status,
+    });
 
-    // 5. Dispatch (SUCCESS → cree subscription, FAILED → notification echec)
     if (updatedTransaction.status === 'SUCCESS' || updatedTransaction.status === 'FAILED') {
       await paymentMiddleware.processTransactionUpdate(transaction.appId, updatedTransaction);
     }
@@ -219,7 +252,13 @@ exports.webhook = catchAsync(async (req, res, next) => {
       status:  updatedTransaction.status
     });
   } catch (error) {
-    console.error('[Webhook pawaPay] Erreur:', error.message);
+    req.log.error('webhook: processing failed', {
+      service: SERVICE,
+      category: 'webhook',
+      depositId,
+      message: error.message,
+      stack: error.stack,
+    });
     // Toujours 200 pour eviter les retries infinis cote pawaPay
     return res.status(200).json({ success: false, message: error.message });
   }
