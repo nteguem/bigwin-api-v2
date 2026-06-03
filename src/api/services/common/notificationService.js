@@ -62,13 +62,14 @@ class NotificationService {
   async sendToUsers(appId, playerIds, notification) {
     try {
       const config = await this._getConfig(appId);
-      
+
       const payload = {
         app_id: config.appId,
         include_player_ids: Array.isArray(playerIds) ? playerIds : [playerIds],
         headings: notification.headings || { en: "Notification", fr: "Notification" },
         contents: notification.contents,
         data: notification.data || {},
+        small_icon: 'ic_notification',
         ...notification.options
       };
 
@@ -123,6 +124,7 @@ class NotificationService {
         headings: notification.headings || { en: 'Notification', fr: 'Notification' },
         contents: notification.contents,
         data: notification.data || {},
+        small_icon: 'ic_notification',
         ...notification.options
       };
 
@@ -155,13 +157,16 @@ class NotificationService {
   async sendToAll(appId, notification) {
     try {
       const config = await this._getConfig(appId);
-      
+
       const payload = {
         app_id: config.appId,
         included_segments: ['All'],
         headings: notification.headings || { en: "Notification", fr: "Notification" },
         contents: notification.contents,
         data: notification.data || {},
+        // Icone monochrome custom par app (W bigwin, chevre goat_tips...).
+        // Si non present cote APK -> Android fallback sur cloche generique.
+        small_icon: 'ic_notification',
         ...notification.options
       };
 
