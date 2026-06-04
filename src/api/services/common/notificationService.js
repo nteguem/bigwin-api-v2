@@ -782,17 +782,33 @@ async countAudience(appIdOrIds, { audience = 'all', countryCodes = [] } = {}) {
         isActive: true,
         playerId: { $exists: true, $nin: [null, ''] },
       });
-      perApp.push({ appId, users: userCount, devices: deviceCount });
+      // Cf. commentaire plus bas : si aucun device en DB mais des users
+      // existent (cas des tips apps), on assume que les push passent par
+      // OneSignal external_user_ids -> on estime devices = users pour ne
+      // pas bloquer le bouton du BO.
+      const devicesEstimate = deviceCount === 0 && userCount > 0
+        ? userCount
+        : deviceCount;
+      perApp.push({ appId, users: userCount, devices: devicesEstimate });
       totalUsers += userCount;
-      totalDevices += deviceCount;
+      totalDevices += devicesEstimate;
       continue;
     }
     // Sinon : resolution standard (VIP / Free / pays filtre)
     const userIds = await this._resolveAudienceUserIds(appId, { audience, countryCodes });
     const playerIds = await this._resolvePlayerIds(appId, userIds);
-    perApp.push({ appId, users: userIds.length, devices: playerIds.length });
+    // Cas tips apps (goatips/goodtips/etc.) ou la collection Device n'est
+    // PAS peuplee cote backend (les SDK Flutter font OneSignal.login sans
+    // POST device au backend). Dans ce cas, l'envoi passera par les filters
+    // OneSignal (_sendViaFilters) qui resout cote OneSignal. On retourne donc
+    // userIds.length comme estimation, sinon le BO bloque le bouton avec
+    // "0 device" alors que l'envoi marcherait.
+    const devicesEstimate = playerIds.length === 0 && userIds.length > 0
+      ? userIds.length
+      : playerIds.length;
+    perApp.push({ appId, users: userIds.length, devices: devicesEstimate });
     totalUsers += userIds.length;
-    totalDevices += playerIds.length;
+    totalDevices += devicesEstimate;
   }
   return {
     audience,
@@ -890,14 +906,38 @@ async _sendUnifiedSingleApp(appId, { notification, targeting, batchSize = 2000 }
 
   const playerIds = await this._resolvePlayerIds(appId, userIds);
   if (playerIds.length === 0) {
-    return {
-      id: null,
-      recipients: 0,
-      successful: 0,
-      failed: 0,
-      message: 'Aucun device actif (push désactivé) pour cette audience',
-      details: { audience, countryCodes, users: userIds.length, devices: 0 },
-    };
+    // Cas tips apps : Device collection vide cote backend. On bascule sur
+    // sendToExternalUserIds (OneSignal resout via les user_ids tagges cote
+    // SDK Flutter OneSignal.login). userIds Mongo -> external_user_ids.
+    logger.info(`[${appId}] sendUnified: 0 device en DB, bascule sur external_user_ids (${userIds.length} users)`);
+    const externalIds = userIds.map((id) => String(id));
+    try {
+      const response = await this.sendToExternalUserIds(appId, externalIds, {
+        ...notification,
+        data: {
+          ...(notification.data || {}),
+          targetAudience: audience,
+          ...(countryCodes.length > 0 && { targetCountries: countryCodes }),
+        },
+      });
+      return {
+        id: response.id || null,
+        recipients: response.recipients ?? userIds.length,
+        successful: response.recipients ?? userIds.length,
+        failed: 0,
+        details: { audience, countryCodes, users: userIds.length, devices: userIds.length, mode: 'external_user_ids' },
+      };
+    } catch (err) {
+      logger.error(`[${appId}] sendUnified external_user_ids erreur: ${err.message}`);
+      return {
+        id: null,
+        recipients: 0,
+        successful: 0,
+        failed: userIds.length,
+        message: err.message,
+        details: { audience, countryCodes, users: userIds.length, devices: 0 },
+      };
+    }
   }
 
   logger.info(`[${appId}] sendUnified audience=${audience} countries=${countryCodes.join(',') || 'all'} users=${userIds.length} devices=${playerIds.length}`);
