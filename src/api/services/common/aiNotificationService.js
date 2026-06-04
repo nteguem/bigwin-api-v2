@@ -191,7 +191,7 @@ FORMAT DE SORTIE (JSON STRICT, rien d'autre) :
     },
     "options": {
       "android_accent_color": "<HEX_SANS_#>",
-      "small_icon": "ic_notification",
+      "small_icon": "ic_stat_onesignal_default",
       "large_icon": "ic_launcher",
       "priority": <1-10>
     }
@@ -243,7 +243,7 @@ Réponds UNIQUEMENT avec le JSON.`;
         },
         options: {
           android_accent_color: notif.options?.android_accent_color || 'FF6B35',
-          small_icon: notif.options?.small_icon || 'ic_notification',
+          small_icon: notif.options?.small_icon || 'ic_stat_onesignal_default',
           large_icon: notif.options?.large_icon || 'ic_launcher',
           priority: notif.options?.priority || 5,
           ...notif.options,
@@ -305,7 +305,7 @@ FORMAT DE SORTIE OBLIGATOIRE (JSON strict) :
         "headings": { "en": "...", "fr": "..." },
         "contents": { "en": "...", "fr": "..." },
         "data": { "type": "...", "campaign": "...", "action": "...", "urgency": "low|medium|high" },
-        "options": { "android_accent_color": "...", "small_icon": "ic_notification", "large_icon": "ic_launcher", "priority": 1-10 }
+        "options": { "android_accent_color": "...", "small_icon": "ic_stat_onesignal_default", "large_icon": "ic_launcher", "priority": 1-10 }
       }
     }
   ]
@@ -364,7 +364,7 @@ Tu dois UNIQUEMENT répondre avec le JSON, sans texte avant ou après.`;
         },
         options: {
           android_accent_color: notification.options?.android_accent_color || 'FF6B35',
-          small_icon: notification.options?.small_icon || 'ic_notification',
+          small_icon: notification.options?.small_icon || 'ic_stat_onesignal_default',
           large_icon: notification.options?.large_icon || 'ic_launcher',
           priority: notification.options?.priority || 5,
           ...notification.options,

@@ -157,7 +157,7 @@ function buildTicketSuccessNotification(ticket, predictions) {
     },
     options: {
       android_accent_color: 'FFD700',
-      small_icon: 'ic_notification',
+      small_icon: 'ic_stat_onesignal_default',
       large_icon: 'ic_launcher',
       priority: 10,
     },
@@ -207,7 +207,7 @@ function buildPredictionSuccessNotification(prediction) {
     },
     options: {
       android_accent_color: '4CAF50',
-      small_icon: 'ic_notification',
+      small_icon: 'ic_stat_onesignal_default',
       large_icon: 'ic_launcher',
       priority: 8,
     },

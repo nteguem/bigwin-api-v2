@@ -69,7 +69,9 @@ class NotificationService {
         headings: notification.headings || { en: "Notification", fr: "Notification" },
         contents: notification.contents,
         data: notification.data || {},
-        small_icon: 'ic_notification',
+        // OneSignal Android cherche ce drawable resource exact dans
+        // android/app/src/main/res/drawable-*/. Si absent -> cloche.
+        small_icon: 'ic_stat_onesignal_default',
         ...notification.options
       };
 
@@ -124,7 +126,7 @@ class NotificationService {
         headings: notification.headings || { en: 'Notification', fr: 'Notification' },
         contents: notification.contents,
         data: notification.data || {},
-        small_icon: 'ic_notification',
+        small_icon: 'ic_stat_onesignal_default',
         ...notification.options
       };
 
@@ -164,9 +166,7 @@ class NotificationService {
         headings: notification.headings || { en: "Notification", fr: "Notification" },
         contents: notification.contents,
         data: notification.data || {},
-        // Icone monochrome custom par app (W bigwin, chevre goat_tips...).
-        // Si non present cote APK -> Android fallback sur cloche generique.
-        small_icon: 'ic_notification',
+        small_icon: 'ic_stat_onesignal_default',
         ...notification.options
       };
 

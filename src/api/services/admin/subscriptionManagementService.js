@@ -431,7 +431,7 @@ async function createAdminSubscription(appId, { userId, packageId, isGift, loyal
           },
           options: {
             android_accent_color: 'D4AF37', // doré pour la variante VIP/fidélité
-            small_icon: 'ic_notification',
+            small_icon: 'ic_stat_onesignal_default',
             large_icon: 'ic_launcher',
             priority: 9,
           },
@@ -453,7 +453,7 @@ async function createAdminSubscription(appId, { userId, packageId, isGift, loyal
           },
           options: {
             android_accent_color: '8B5CF6',
-            small_icon: 'ic_notification',
+            small_icon: 'ic_stat_onesignal_default',
             large_icon: 'ic_launcher',
             priority: 8,
           },
@@ -475,7 +475,7 @@ async function createAdminSubscription(appId, { userId, packageId, isGift, loyal
           },
           options: {
             android_accent_color: '00C853',
-            small_icon: 'ic_notification',
+            small_icon: 'ic_stat_onesignal_default',
             large_icon: 'ic_launcher',
             priority: 8,
           },

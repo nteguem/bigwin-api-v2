@@ -102,7 +102,7 @@ const welcomeJ1 = async () => {
         },
         options: {
           android_accent_color: '10B981',
-          small_icon: 'ic_notification',
+          small_icon: 'ic_stat_onesignal_default',
           priority: 7,
         },
       });
@@ -153,7 +153,7 @@ const inactivity3d = async () => {
         },
         options: {
           android_accent_color: 'F59E0B',
-          small_icon: 'ic_notification',
+          small_icon: 'ic_stat_onesignal_default',
           priority: 7,
         },
       });
@@ -208,7 +208,7 @@ const expirationJ3 = async () => {
         },
         options: {
           android_accent_color: 'F59E0B',
-          small_icon: 'ic_notification',
+          small_icon: 'ic_stat_onesignal_default',
           priority: 8,
         },
       });
@@ -260,7 +260,7 @@ const expirationJ1 = async () => {
         },
         options: {
           android_accent_color: 'EF4444',
-          small_icon: 'ic_notification',
+          small_icon: 'ic_stat_onesignal_default',
           priority: 10,
         },
       });
@@ -326,7 +326,7 @@ const winbackJ1 = async () => {
         },
         options: {
           android_accent_color: '8B5CF6',
-          small_icon: 'ic_notification',
+          small_icon: 'ic_stat_onesignal_default',
           priority: 8,
         },
       });
@@ -403,7 +403,7 @@ const churnJ7 = () => winbackAtDays(7, 'Churn J+7', {
     en: 'Come check out today\'s premium coupon. You\'ll love it 🎯',
   },
   data: { type: 'retention_churn_j7', daysAfter: 7, action: 'view_subscription' },
-  options: { android_accent_color: 'F59E0B', small_icon: 'ic_notification', priority: 7 },
+  options: { android_accent_color: 'F59E0B', small_icon: 'ic_stat_onesignal_default', priority: 7 },
 });
 
 const churnJ15 = () => winbackAtDays(15, 'Churn J+15', {
@@ -416,7 +416,7 @@ const churnJ15 = () => winbackAtDays(15, 'Churn J+15', {
     en: 'Our daily coupon just dropped. Enjoy it before the day ends!',
   },
   data: { type: 'retention_churn_j15', daysAfter: 15, action: 'view_subscription' },
-  options: { android_accent_color: 'F59E0B', small_icon: 'ic_notification', priority: 7 },
+  options: { android_accent_color: 'F59E0B', small_icon: 'ic_stat_onesignal_default', priority: 7 },
 });
 
 const churnJ30 = () => winbackAtDays(30, 'Churn J+30', {
@@ -429,7 +429,7 @@ const churnJ30 = () => winbackAtDays(30, 'Churn J+30', {
     en: 'Get your VIP access back with 30% off. Offer valid 48h only!',
   },
   data: { type: 'retention_churn_j30', daysAfter: 30, action: 'view_subscription' },
-  options: { android_accent_color: 'EC4899', small_icon: 'ic_notification', priority: 8 },
+  options: { android_accent_color: 'EC4899', small_icon: 'ic_stat_onesignal_default', priority: 8 },
 });
 
 const churnJ60 = () => winbackAtDays(60, 'Churn J+60', {
@@ -442,7 +442,7 @@ const churnJ60 = () => winbackAtDays(60, 'Churn J+60', {
     en: 'Get VIP access at -50% to celebrate your comeback. You deserve it!',
   },
   data: { type: 'retention_churn_j60', daysAfter: 60, action: 'view_subscription' },
-  options: { android_accent_color: 'EC4899', small_icon: 'ic_notification', priority: 8 },
+  options: { android_accent_color: 'EC4899', small_icon: 'ic_stat_onesignal_default', priority: 8 },
 });
 
 const churnJ90 = () => winbackAtDays(90, 'Churn J+90', {
@@ -455,7 +455,7 @@ const churnJ90 = () => winbackAtDays(90, 'Churn J+90', {
     en: 'We\'re giving you a free 24h VIP access. Come back for our best predictions!',
   },
   data: { type: 'retention_churn_j90', daysAfter: 90, action: 'view_subscription' },
-  options: { android_accent_color: 'D4AF37', small_icon: 'ic_notification', priority: 9 },
+  options: { android_accent_color: 'D4AF37', small_icon: 'ic_stat_onesignal_default', priority: 9 },
 });
 
 // ─── Cron Jobs ─────────────────────────────────────────────

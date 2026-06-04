@@ -134,7 +134,7 @@ class GooglePlayService {
         },
         options: {
           android_accent_color: "00C853",
-          small_icon: "ic_notification",
+          small_icon: "ic_stat_onesignal_default",
           large_icon: "ic_launcher",
           priority: 8
         }
@@ -202,7 +202,7 @@ class GooglePlayService {
         },
         options: {
           android_accent_color: "D32F2F",
-          small_icon: "ic_notification",
+          small_icon: "ic_stat_onesignal_default",
           large_icon: "ic_launcher",
           priority: 7
         }

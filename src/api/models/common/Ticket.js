@@ -156,7 +156,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             },
             options: {
               android_accent_color: "FFD700",
-              small_icon: "ic_notification",
+              small_icon: "ic_stat_onesignal_default",
               large_icon: "ic_launcher",
               priority: 10
             }
@@ -179,7 +179,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             },
             options: {
               android_accent_color: "FF0000",
-              small_icon: "ic_notification",
+              small_icon: "ic_stat_onesignal_default",
               large_icon: "ic_launcher"
             }
           };
@@ -201,7 +201,7 @@ TicketSchema.post('findOneAndUpdate', async function (doc) {
             },
             options: {
               android_accent_color: "FF6B35",
-              small_icon: "ic_notification",
+              small_icon: "ic_stat_onesignal_default",
               large_icon: "ic_launcher"
             }
           };
