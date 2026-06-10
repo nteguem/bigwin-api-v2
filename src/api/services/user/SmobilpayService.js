@@ -396,6 +396,17 @@ async function initiatePayment(appId, app, userId, packageId, serviceId, custome
       throw new AppError(`Service ${serviceId} non trouvé`, 404, ErrorCodes.NOT_FOUND);
     }
 
+    // RCA uniquement : l'indicatif 236 ne doit jamais partir vers Smobilpay
+    // (collectstd attend le numéro local à 8 chiffres), même si le front
+    // l'envoie sous la forme +236..., 00236... ou 236...
+    if (service.merchant && service.merchant.startsWith('RCA')) {
+      const cleaned = String(customerData.phoneNumber || '').replace(/[\s-]/g, '');
+      customerData = {
+        ...customerData,
+        phoneNumber: cleaned.replace(/^(?:\+|00)?236(?=\d{8}$)/, '')
+      };
+    }
+
     // Pré-validation du format du numéro contre le regex du service.
     // Évite que l'API Smobilpay renvoie un message technique imbuvable
     // ("does not comply to regex requirement") qu'on ne peut pas traduire.
