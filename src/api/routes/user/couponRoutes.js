@@ -41,6 +41,10 @@ const conditionalVipMiddleware = (req, res, next) => {
 // Preview VIP (accès public — données masquées pour upsell)
 router.get('/preview', couponController.getVipPreview);
 
+// Bilan des coupons (N derniers jours). Auth optionnelle : on attache l'user
+// s'il est connecté pour déterminer son statut VIP (sinon bilan VIP flouté).
+router.get('/weekly-report', userAuth.optional, couponController.getWeeklyReport);
+
 // Récupérer tous les coupons avec middleware conditionnel
 router.get('/', conditionalVipMiddleware, couponController.getCoupons);
 

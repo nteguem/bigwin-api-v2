@@ -76,6 +76,11 @@ router.use('/admin/uploads',         adminUploadRoutes);
 // Gift tiers admin — super_admin only, GLOBAL (pas scopé app)
 router.use('/admin/gift-tiers',      adminAuth.protect, authorize('super_admin'), adminGiftTierRoutes);
 
+// Config globale (feature flags transverses) — super_admin only, GLOBAL (pas scopé app).
+// Le toggle agit sur TOUTES les apps d'un coup (singleton plateforme).
+const adminGlobalConfigRoutes = require('./admin/globalConfigRoutes');
+router.use('/admin/global-config',   adminAuth.protect, authorize('super_admin'), adminGlobalConfigRoutes);
+
 // Gifts admin — super_admin only, scoped à l'app
 router.use('/admin/gifts',           identifyApp, ...ADMIN_SUPER,  adminGiftRoutes);
 

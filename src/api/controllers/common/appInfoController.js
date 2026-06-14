@@ -8,6 +8,7 @@
 
 const App = require('../../models/common/App');
 const AffiliateConfig = require('../../models/affiliate/AffiliateConfig');
+const GlobalConfig = require('../../models/common/GlobalConfig');
 const catchAsync = require('../../../utils/catchAsync');
 const { AppError, ErrorCodes } = require('../../../utils/AppError');
 
@@ -40,13 +41,15 @@ exports.getAppInfo = catchAsync(async (req, res) => {
     );
   }
 
-  const [app, affiliateConfig] = await Promise.all([
+  const [app, affiliateConfig, globalConfig] = await Promise.all([
     App.findOne({ appId, isActive: true })
       .select(PUBLIC_FIELDS.join(' '))
       .lean(),
     AffiliateConfig.findOne({ appId })
       .select('isEnabled payoutCountries')
       .lean(),
+    // Feature flags GLOBAUX (toutes apps) — ex. visibilité du bilan coupons.
+    GlobalConfig.getSingleton(),
   ]);
 
   if (!app) {
@@ -89,6 +92,14 @@ exports.getAppInfo = catchAsync(async (req, res) => {
       affiliate: {
         enabled: !!affiliateConfig?.isEnabled,
         enabledCountryCodes,
+      },
+      // Feature flags globaux exposés au mobile. weeklyReport.enabled pilote
+      // l'affichage de l'écran "Bilan des coupons" dans TOUTES les apps.
+      features: {
+        weeklyReport: {
+          enabled: !!globalConfig?.features?.weeklyReport?.enabled,
+          daysBack: globalConfig?.features?.weeklyReport?.daysBack || 5,
+        },
       },
     },
   });

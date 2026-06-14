@@ -5,6 +5,54 @@ const subscriptionService = require('../../services/user/subscriptionService');
 const DayOff = require('../../models/common/DayOff');
 const accessGateService = require('../../services/common/accessGateService');
 const UserAccessUnlock = require('../../models/common/UserAccessUnlock');
+const Ticket = require('../../models/common/Ticket');
+const Category = require('../../models/common/Category');
+const GlobalConfig = require('../../models/common/GlobalConfig');
+
+/**
+ * Agrège une liste de tickets (avec `category` peuplée) en un bilan :
+ * total global décidé + taux, et détail par catégorie. Seuls les tickets
+ * DÉCIDÉS comptent — `result ∈ {won, lost}` ; `pending` et `void` sont ignorés
+ * (les % ne bougent donc pas tant qu'une journée n'est pas tranchée).
+ */
+function aggregateReport(tickets, lang) {
+  let won = 0;
+  let total = 0; // décidés (won + lost)
+  const byCatMap = new Map();
+
+  for (const t of tickets) {
+    const cat = t.category;
+    if (!cat) continue; // ticket orphelin (catégorie supprimée) → ignoré
+    const r = t.result || 'pending';
+    if (r !== 'won' && r !== 'lost') continue; // exclut pending + void
+
+    const catId = cat._id.toString();
+    if (!byCatMap.has(catId)) {
+      byCatMap.set(catId, {
+        id: cat._id,
+        name: cat.name?.[lang] || cat.name?.fr || cat.name || '',
+        icon: cat.icon,
+        won: 0,
+        total: 0,
+      });
+    }
+    const c = byCatMap.get(catId);
+    c.total++;
+    total++;
+    if (r === 'won') { c.won++; won++; }
+  }
+
+  const byCategory = Array.from(byCatMap.values())
+    .map(c => ({ ...c, rate: c.total ? Math.round((c.won / c.total) * 100) : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.total - a.total); // meilleures catégories d'abord
+
+  return {
+    won,
+    total,
+    rate: total ? Math.round((won / total) * 100) : 0,
+    byCategory,
+  };
+}
 
 /**
  * Formate une prédiction d'un ticket pour l'API coupons. Si `maskEvent`, on
@@ -666,6 +714,127 @@ class CouponController {
 
     } catch (error) {
       console.error('Erreur lors de la récupération de l\'historique des tickets:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur interne du serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+
+  /**
+   * Bilan des coupons sur les N derniers jours (taux de réussite).
+   *
+   * Règles métier :
+   *  - Toggle GLOBAL : si features.weeklyReport.enabled = false ⇒ { enabled:false }.
+   *  - Bilan FREE : toujours réel (catégories isVip=false), visible par tous.
+   *  - Bilan VIP :
+   *      • utilisateur abonné  ⇒ bilan VIP réel (catégories isVip=true)
+   *      • non-abonné / anonyme ⇒ FLOUTÉ : aucun chiffre, juste les noms de
+   *        catégories pour donner envie + CTA d'abonnement.
+   *  - Seuls les tickets DÉCIDÉS comptent (won/lost) ; pending + void exclus.
+   *
+   * GET /user/coupons/weekly-report?lang=fr
+   * Auth : optionnelle (req.user présent si connecté → détermine le statut VIP).
+   */
+  async getWeeklyReport(req, res) {
+    try {
+      const appId = req.appId;
+      const { lang = 'fr' } = req.query;
+
+      // 1) Respecter le kill-switch global (toutes apps).
+      const globalConfig = await GlobalConfig.getSingleton();
+      const wr = globalConfig?.features?.weeklyReport;
+      if (!wr?.enabled) {
+        return res.status(200).json({
+          success: true,
+          message: 'Bilan désactivé',
+          data: { enabled: false }
+        });
+      }
+
+      const daysBack = wr.daysBack || 5;
+
+      // 2) Fenêtre : les `daysBack` derniers jours PLEINS (aujourd'hui exclu, car
+      //    la journée en cours n'est pas encore tranchée).
+      const start = new Date();
+      start.setDate(start.getDate() - daysBack);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(0, 0, 0, 0);
+
+      // 3) Catégories accessibles depuis cette app (même logique que TicketService).
+      const accessibleCategories = await Category.find({
+        $or: [{ appIds: appId }, { appId: 'shared' }],
+        isActive: true
+      }).select('_id');
+      const categoryIds = accessibleCategories.map(c => c._id);
+
+      // 4) Tickets visibles décidables sur la fenêtre (catégorie peuplée).
+      const tickets = await Ticket.find({
+        category: { $in: categoryIds },
+        isVisible: true,
+        date: { $gte: start, $lt: end }
+      }).populate('category').lean();
+
+      // 5) Séparer free / VIP (skip les tickets dont la catégorie a été supprimée).
+      const freeTickets = tickets.filter(t => t.category && !t.category.isVip);
+      const vipTickets = tickets.filter(t => t.category && t.category.isVip);
+
+      // 6) Bilan FREE — toujours réel.
+      const free = aggregateReport(freeTickets, lang);
+
+      // 7) Statut VIP de l'utilisateur (anonyme ⇒ non-VIP).
+      let isSubscriber = false;
+      if (req.user) {
+        try {
+          isSubscriber = await subscriptionService.hasAnyVipAccess(appId, req.user._id);
+        } catch (_) { isSubscriber = false; }
+      }
+
+      // 8) Bilan VIP — réel si abonné, sinon flouté (noms de catégories seulement).
+      let vip;
+      if (isSubscriber) {
+        vip = { locked: false, ...aggregateReport(vipTickets, lang) };
+      } else {
+        // Liste dédupliquée des catégories VIP de la période, SANS aucun chiffre.
+        const seen = new Set();
+        const teaserCategories = [];
+        for (const t of vipTickets) {
+          const id = t.category._id.toString();
+          if (seen.has(id)) continue;
+          seen.add(id);
+          teaserCategories.push({
+            id: t.category._id,
+            name: t.category.name?.[lang] || t.category.name?.fr || t.category.name || '',
+            icon: t.category.icon
+          });
+        }
+        vip = {
+          locked: true,
+          requiresAuth: !req.user,
+          cta: 'subscribe',
+          categories: teaserCategories
+        };
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Bilan récupéré avec succès',
+        data: {
+          enabled: true,
+          period: {
+            daysBack,
+            from: start.toISOString().split('T')[0],
+            to: end.toISOString().split('T')[0] // borne exclue (= aujourd'hui)
+          },
+          free,
+          vip
+        }
+      });
+
+    } catch (error) {
+      console.error('Erreur lors de la récupération du bilan:', error);
       return res.status(500).json({
         success: false,
         message: 'Erreur interne du serveur',
