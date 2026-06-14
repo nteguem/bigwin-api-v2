@@ -49,7 +49,9 @@ exports.getAppInfo = catchAsync(async (req, res) => {
       .select('isEnabled payoutCountries')
       .lean(),
     // Feature flags GLOBAUX (toutes apps) — ex. visibilité du bilan coupons.
-    GlobalConfig.getSingleton(),
+    // LECTURE SEULE : pas de getSingleton() ici (endpoint public très sollicité),
+    // on évite toute écriture sur le chemin chaud. Absent ⇒ valeurs par défaut.
+    GlobalConfig.findOne({ _singleton: 'global' }).lean(),
   ]);
 
   if (!app) {

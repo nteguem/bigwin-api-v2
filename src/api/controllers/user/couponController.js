@@ -742,8 +742,9 @@ class CouponController {
       const appId = req.appId;
       const { lang = 'fr' } = req.query;
 
-      // 1) Respecter le kill-switch global (toutes apps).
-      const globalConfig = await GlobalConfig.getSingleton();
+      // 1) Respecter le kill-switch global (toutes apps). LECTURE SEULE : pas
+      //    de getSingleton() (pas d'écriture sur le chemin user). Absent ⇒ off.
+      const globalConfig = await GlobalConfig.findOne({ _singleton: 'global' }).lean();
       const wr = globalConfig?.features?.weeklyReport;
       if (!wr?.enabled) {
         return res.status(200).json({
