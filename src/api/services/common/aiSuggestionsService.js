@@ -1,7 +1,8 @@
 const axios = require('axios');
 
-const API_HOST = 'api-football-v1.p.rapidapi.com';
-const BASE_URL = `https://${API_HOST}/v3`;
+// Migré de RapidAPI vers API-Sports (accès direct) le 2026-07-17
+const API_HOST = 'v3.football.api-sports.io';
+const BASE_URL = `https://${API_HOST}`;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const QUOTA_BLOCK_THRESHOLD = 5;
 
@@ -30,8 +31,7 @@ async function rapidGet(endpoint, params) {
   const response = await axios.get(`${BASE_URL}${endpoint}`, {
     params,
     headers: {
-      'x-rapidapi-key': process.env.RAPID_API_KEY,
-      'x-rapidapi-host': API_HOST
+      'x-apisports-key': process.env.API_SPORTS_KEY
     },
     timeout: 15000
   });
@@ -57,12 +57,11 @@ exports.getQuota = () => ({
 });
 
 exports.refreshQuota = async () => {
-  if (!process.env.RAPID_API_KEY) return exports.getQuota();
+  if (!process.env.API_SPORTS_KEY) return exports.getQuota();
   try {
     const response = await axios.get(`${BASE_URL}/status`, {
       headers: {
-        'x-rapidapi-key': process.env.RAPID_API_KEY,
-        'x-rapidapi-host': API_HOST
+        'x-apisports-key': process.env.API_SPORTS_KEY
       },
       timeout: 10000
     });
@@ -253,8 +252,8 @@ exports.getSuggestionsForFixture = async (fixtureId) => {
     err.statusCode = 400;
     throw err;
   }
-  if (!process.env.RAPID_API_KEY) {
-    const err = new Error('RAPID_API_KEY non configurée');
+  if (!process.env.API_SPORTS_KEY) {
+    const err = new Error('API_SPORTS_KEY non configurée');
     err.statusCode = 500;
     throw err;
   }

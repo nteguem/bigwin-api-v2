@@ -24,9 +24,10 @@ const sportsConfig = {
     name: 'Football',
     icon: '⚽',
     sportId: 'football',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-football-v1.p.rapidapi.com/v3',
-    host: 'api-football-v1.p.rapidapi.com'
+    // Migré de RapidAPI vers API-Sports (accès direct) le 2026-07-17
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v3.football.api-sports.io',
+    host: 'v3.football.api-sports.io'
   },
   basketball: {
     name: 'Basketball',
