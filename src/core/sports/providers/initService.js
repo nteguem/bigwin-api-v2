@@ -33,49 +33,49 @@ const sportsConfig = {
     name: 'Basketball',
     icon: '🏀',
     sportId: 'basketball',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-basketball.p.rapidapi.com',
-    host: 'api-basketball.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.basketball.api-sports.io',
+    host: 'v1.basketball.api-sports.io'
   },
   rugby: {
     name: 'Rugby',
     icon: '🏉',
     sportId: 'rugby',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-rugby.p.rapidapi.com',
-    host: 'api-rugby.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.rugby.api-sports.io',
+    host: 'v1.rugby.api-sports.io'
   },
   handball: {
     name: 'Handball',
     icon: '🤾',
     sportId: 'handball',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-handball.p.rapidapi.com',
-    host: 'api-handball.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.handball.api-sports.io',
+    host: 'v1.handball.api-sports.io'
   },
   volleyball: {
     name: 'Volleyball',
     icon: '🏐',
     sportId: 'volleyball',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-volleyball.p.rapidapi.com',
-    host: 'api-volleyball.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.volleyball.api-sports.io',
+    host: 'v1.volleyball.api-sports.io'
   },
   baseball: {
     name: 'Baseball',
     icon: '⚾',
     sportId: 'baseball',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-baseball.p.rapidapi.com',
-    host: 'api-baseball.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.baseball.api-sports.io',
+    host: 'v1.baseball.api-sports.io'
   },
   hockey: {
     name: 'Hockey',
     icon: '🏒',
     sportId: 'hockey',
-    apiKey: process.env.RAPID_API_KEY,
-    baseUrl: 'https://api-hockey.p.rapidapi.com',
-    host: 'api-hockey.p.rapidapi.com'
+    apiKey: process.env.API_SPORTS_KEY,
+    baseUrl: 'https://v1.hockey.api-sports.io',
+    host: 'v1.hockey.api-sports.io'
   },
   tennis: {
     name: 'Tennis',
