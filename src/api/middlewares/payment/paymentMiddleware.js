@@ -7,6 +7,7 @@ const affiliateService = require('../../services/affiliate/affiliateService');
 const App = require('../../models/common/App');
 const User = require('../../models/user/User');
 const Device = require('../../models/common/Device');
+const Subscription = require('../../models/common/Subscription');
 const logger = require('../../../core/logger');
 
 const SERVICE = 'paymentMiddleware';
@@ -132,6 +133,30 @@ async function handleSuccessfulTransaction(appId, transaction) {
       ...ctx,
       subscriptionId: String(subscription._id),
     });
+
+    // Règle business : les paiements CinetPay sont marqués `isGift: true`
+    // en interne pour être exclus des stats de ventes/revenus (les 3 pipelines
+    // stats — subscriptionManagementService, acquisitionStatsService,
+    // geoAnalyticsService — filtrent tous par `isGift: { $ne: true }`).
+    //
+    // Côté utilisateur RIEN NE CHANGE : la sub a déjà été créée avec
+    // `isGift: false` (défaut), donc le post-save hook a déjà envoyé le mail
+    // "Forfait activé" classique avec les vraies dates et le vrai montant.
+    // `updateOne` ci-dessous ne re-déclenche pas le post-save hook Mongoose,
+    // donc pas de double mail. Idempotent : re-run inoffensif.
+    const pspName = transaction.constructor.modelName
+      .replace(/Transaction$/, '')
+      .toLowerCase();
+    if (pspName === 'cinetpay') {
+      await Subscription.updateOne(
+        { _id: subscription._id },
+        { $set: { isGift: true } }
+      );
+      logger.info('cinetpay subscription flagged isGift=true (excluded from sales stats)', {
+        ...ctx,
+        subscriptionId: String(subscription._id),
+      });
+    }
 
     // Création automatique de la Commission affilié si le filleul a un
     // Referral éligible (status='signed_up'). Silencieux, pas bloquant.
