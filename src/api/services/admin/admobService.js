@@ -9,7 +9,9 @@ const ADMOB_CONFIG = {
   clientId: process.env.ADMOB_CLIENT_ID,
   clientSecret: process.env.ADMOB_CLIENT_SECRET,
   refreshToken: process.env.ADMOB_REFRESH_TOKEN,
-  publisherId: process.env.ADMOB_PUBLISHER_ID || 'pub-1782439846938659',
+  // Compte AdMob courant. Pas de repli en dur : un mauvais publisherId
+  // interroge silencieusement le mauvais compte et remonte des revenus a zero.
+  publisherId: process.env.ADMOB_PUBLISHER_ID,
 };
 
 // OAuth2 client singleton
@@ -44,6 +46,14 @@ function formatDateForApi(date) {
  * Appeler l'API AdMob Network Report
  */
 async function fetchNetworkReport(startDate, endDate, dimensions = [], metrics = []) {
+  // Sans ces variables l'appel part sur accounts/undefined, l'erreur est avalee
+  // par les .catch() appelants et le dashboard affiche 0 EUR sans explication.
+  const manquantes = ['ADMOB_CLIENT_ID', 'ADMOB_CLIENT_SECRET', 'ADMOB_REFRESH_TOKEN', 'ADMOB_PUBLISHER_ID']
+    .filter((k) => !process.env[k]);
+  if (manquantes.length) {
+    throw new Error(`Configuration AdMob incomplete, variables manquantes : ${manquantes.join(', ')}`);
+  }
+
   const auth = getOAuth2Client();
   const admob = google.admob({ version: 'v1', auth });
 

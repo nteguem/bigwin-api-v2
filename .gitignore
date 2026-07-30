@@ -11,6 +11,8 @@ config/google-service-account.json
 .env.development.local
 .env.test.local
 .env.production.local
+# Sauvegardes de .env : contiennent des secrets en clair
+.env.backup*
 
 # Logs
 logs/
